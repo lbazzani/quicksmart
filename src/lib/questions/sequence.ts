@@ -15,6 +15,7 @@
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { COLOR_NAMES } from '../colors';
 import { normRot, placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -71,8 +72,6 @@ const W: Record<ShapeName, Word> = {
   dot: { n: 'punto', p: 'punti', un: 'un', f: false },
 };
 
-/** nomi dei colori della palette (vedi PALETTE in components/visuals.tsx) */
-const COLOR_NAMES = ['ciano', 'rosa', 'viola', 'giallo', 'verde', 'corallo', 'azzurro', 'arancione'];
 /** coppie di colori troppo simili per essere usate insieme in un ciclo */
 const CLOSE: number[][] = [
   [0, 6],

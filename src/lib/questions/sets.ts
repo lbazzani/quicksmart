@@ -40,6 +40,7 @@
 
 import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
+import { COLOR_NAMES } from '../colors';
 import { placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -131,7 +132,7 @@ const PLURAL: Record<ShapeName, string> = {
   dot: 'pallini',
 };
 
-const COLOR_NAME = ['ciano', 'rosa', 'viola', 'giallo', 'verde', 'corallo', 'azzurro', 'arancione'];
+const COLOR_NAME = [...COLOR_NAMES];
 
 const FILL_PLURAL: Record<Fill, string> = {
   solid: 'figure piene',

@@ -4,7 +4,7 @@
 // Uso: npx tsx tools/measure-space.ts [campioni=4000]
 
 import { mulberry32 } from '../src/lib/rng';
-import { GENERATORS, QUESTION_TYPES } from '../src/lib/questions';
+import { ALL_QUESTION_TYPES, GENERATORS } from '../src/lib/questions';
 import { hashQuestion } from '../src/lib/questions/qutils';
 import type { Difficulty, Question } from '../src/lib/types';
 
@@ -57,7 +57,7 @@ function chao1(counts: Map<string, number>): number {
 }
 
 const rows: Row[] = [];
-for (const qtype of QUESTION_TYPES) {
+for (const qtype of ALL_QUESTION_TYPES) {
   for (const d of [1, 2, 3] as Difficulty[]) {
     const rng = mulberry32(999 + d * 31 + qtype.length);
     const hashes = new Map<string, number>();

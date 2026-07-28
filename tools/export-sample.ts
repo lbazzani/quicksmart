@@ -5,7 +5,7 @@
 
 import { mkdirSync, writeFileSync } from 'fs';
 import { mulberry32 } from '../src/lib/rng';
-import { GENERATORS, QUESTION_TYPES } from '../src/lib/questions';
+import { ALL_QUESTION_TYPES, GENERATORS } from '../src/lib/questions';
 import type { Difficulty, QuestionType } from '../src/lib/types';
 
 const dir = process.argv[2];
@@ -14,7 +14,7 @@ const only = process.argv[4]?.split(',').filter(Boolean) as QuestionType[] | und
 if (!dir) throw new Error('serve la directory di output');
 mkdirSync(dir, { recursive: true });
 
-const types = only?.length ? only : QUESTION_TYPES;
+const types = only?.length ? only : ALL_QUESTION_TYPES;
 const solutions: Record<number, { correctIndex: number; explanation: string; qtype: string; difficulty: number }> = {};
 let id = 1;
 

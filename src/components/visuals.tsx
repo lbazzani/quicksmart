@@ -157,9 +157,13 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   } else if (n === 1 && cell.layout !== 'row' && cell.layout !== 'grid') {
     content = <Shape spec={cell.shapes[0]} />;
   } else if (cell.layout === 'row') {
-    const s = 100 / n;
+    // le forme in fila non scendono sotto il 45% della cella: con 3 elementi
+    // dividere per n le rendeva illeggibili sui telefoni
+    const s = Math.max(100 / n, 45);
+    const total = s * n;
+    const ox = (100 - total) / 2;
     content = cell.shapes.map((sp, i) => (
-      <g key={i} transform={`translate(${i * s} ${(100 - s) / 2}) scale(${s / 100})`}>
+      <g key={i} transform={`translate(${ox + i * s} ${(100 - s) / 2}) scale(${s / 100})`}>
         <Shape spec={sp} />
       </g>
     ));
@@ -216,7 +220,7 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
 export function Domino({ tile, size = 62 }: { tile: DominoTile; size?: number }) {
   if (tile.unknown) {
     return (
-      <svg viewBox="0 0 100 52" width={size * 1.9} height={size}>
+      <svg viewBox="0 0 100 52" width={size * 1.9} height={size} className="shrink-0">
         <rect x={2} y={2} width={96} height={48} rx={8} fill="rgba(255,255,255,0.04)" stroke="#64748b" strokeWidth={2.5} strokeDasharray="7 6" />
         <text x={50} y={38} textAnchor="middle" fontSize={30} fontWeight={800} fill="#94a3b8">?</text>
       </svg>
@@ -545,7 +549,7 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
     case 'clock':
       return <Clock clock={choice.clock} size={76} />;
     case 'domino':
-      return <Domino tile={choice.tile} size={44} />;
+      return <Domino tile={choice.tile} size={40} />;
     case 'text': {
       // le risposte testuali possono essere parole lunghe ("pentagono") o
       // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo

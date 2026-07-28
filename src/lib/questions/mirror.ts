@@ -30,6 +30,7 @@
 // rotazione non si trasforma mai in un indizio da 18°.
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import { COLOR_NAMES } from '../colors';
 import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
 import { normRot, placeChoices, retry } from './qutils';
 
@@ -264,7 +265,7 @@ const SHAPE_IT: Record<ShapeName, string> = {
 };
 
 /** nomi di colore invariabili, così vanno bene con maschile e femminile */
-const COLOR_IT = ['ciano', 'rosa', 'viola', 'ambra', 'verde', 'corallo', 'blu', 'arancione'];
+const COLOR_IT = [...COLOR_NAMES];
 
 /**
  * Famiglie di colore: ciano e blu, rosa e corallo, ambra e arancione sono coppie

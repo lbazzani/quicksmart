@@ -43,7 +43,23 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
   pattern: genPattern,
 };
 
-export const QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];
+/**
+ * Tipi in quarantena: generano domande corrette ma la loro RESA non è ancora
+ * all'altezza, e un audit alla cieca ha mostrato che si può ragionare bene e
+ * sbagliare comunque. Restano nel codice e nei test, ma il gioco non li pesca
+ * finché la resa non è sistemata (vedi QUESTIONS_PLAN.md).
+ *
+ * - fold: la regola "un buco sulla piega non si sdoppia" non è mai detta prima
+ *   di rispondere, e il pannello "1ª piega" disegna la piega sbagliata;
+ * - symmetry: l'asse di simmetria è disegnato negli esempi ma non nelle opzioni.
+ */
+export const QUARANTINED: QuestionType[] = ['fold', 'symmetry'];
+
+/** tutti i tipi esistenti, inclusi quelli in quarantena (per test e audit) */
+export const ALL_QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];
+
+/** i tipi che il gioco pesca davvero */
+export const QUESTION_TYPES = ALL_QUESTION_TYPES.filter((t) => !QUARANTINED.includes(t));
 
 /**
  * Genera l'archivio: `perTypePerDifficulty` domande per ciascun tipo e

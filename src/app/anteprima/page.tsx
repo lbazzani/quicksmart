@@ -5,7 +5,7 @@
 
 import { notFound } from 'next/navigation';
 import { mulberry32 } from '@/lib/rng';
-import { GENERATORS, QUESTION_TYPES } from '@/lib/questions';
+import { ALL_QUESTION_TYPES, GENERATORS } from '@/lib/questions';
 import type { Difficulty, Question } from '@/lib/types';
 import { T } from '@/lib/i18n';
 import { PreviewCard } from './PreviewCard';
@@ -21,7 +21,7 @@ export default async function Anteprima({
   const sp = await searchParams;
   const seed = parseInt(sp.seed ?? '1', 10);
   const difficulty = (parseInt(sp.d ?? '2', 10) || 2) as Difficulty;
-  const types = sp.type ? QUESTION_TYPES.filter((t) => t === sp.type) : QUESTION_TYPES;
+  const types = sp.type ? ALL_QUESTION_TYPES.filter((t) => t === sp.type) : ALL_QUESTION_TYPES;
 
   const items: { q: Question; correct: number }[] = [];
   for (const qtype of types) {
