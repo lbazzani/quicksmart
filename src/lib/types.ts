@@ -107,7 +107,15 @@ export type QuestionType =
   | 'clock'
   | 'balance'
   | 'analogy'
-  | 'arithgrid';
+  | 'arithgrid'
+  | 'fold'
+  | 'paths'
+  | 'sets'
+  | 'mirror'
+  | 'domino'
+  | 'symmetry'
+  | 'weights'
+  | 'pattern';
 
 export interface Question {
   id?: number;

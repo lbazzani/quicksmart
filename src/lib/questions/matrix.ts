@@ -1,14 +1,19 @@
 // Generatore "matrix": matrice logica 3×3 in stile Raven, ultima cella incognita.
-// Difficoltà 1: un solo attributo varia (rotazione per colonna, conteggio per
-// colonna o ciclo di colori a quadrato latino). 2: due attributi indipendenti
-// (uno legato alla riga, uno alla colonna). 3: regole sottili (conteggio =
-// somma della riga, presenza/assenza in XOR, rotazione diagonale con
-// distrattore quasi identico). I distrattori violano UNA regola in modo
-// plausibile (attributo della riga/colonna sbagliata, un passo indietro,
+// Difficoltà 1: un solo attributo varia — rotazione per colonna, conteggio per
+// colonna, quadrato latino di colori, quadrato latino di FORME, dimensione
+// crescente/decrescente lungo una direzione, quadrato latino di RIEMPIMENTI,
+// riempimento legato a una sola direzione, conteggio con passo e direzione
+// variabili. 2: due attributi indipendenti (uno legato alla riga, uno alla
+// colonna), oppure due cicli di lunghezza 3 che scorrono in versi opposti,
+// oppure rotazione che cresce lungo le righe e cala lungo le colonne. 3: regole
+// sottili (conteggio = somma della riga, conteggio = differenza della riga,
+// presenza/assenza in XOR, rotazione diagonale con distrattore quasi identico,
+// tre attributi con tre regole diverse). I distrattori violano UNA regola in
+// modo plausibile (attributo della riga/colonna sbagliata, un passo indietro,
 // conteggio ±1), mai a caso.
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
-import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
 import { normRot, placeChoices, retry } from './qutils';
 
 const ROTATABLE: ShapeName[] = ['triangle', 'arrow', 'moon'];
@@ -35,13 +40,41 @@ const IT: Record<ShapeName, string> = {
 const FILL_IT: Record<string, string> = { solid: 'pieno', outline: 'solo contorno', half: 'colorato a metà' };
 
 type Fill = 'solid' | 'outline' | 'half';
+const FILLS: Fill[] = ['solid', 'outline', 'half'];
+
+/**
+ * Terne di conteggi ammesse (tutte fra 1 e 6, così le figure restano contabili
+ * a colpo d'occhio): passo +1/-1 e passo +2/-2, in salita e in discesa.
+ */
+const COUNT_TRIPLES: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 2, 3],
+  [2, 3, 4],
+  [3, 4, 5],
+  [4, 5, 6],
+  [1, 3, 5],
+  [2, 4, 6],
+  [3, 2, 1],
+  [4, 3, 2],
+  [5, 4, 3],
+  [6, 5, 4],
+  [5, 3, 1],
+  [6, 4, 2],
+];
 
 /** cella con n copie identiche di una forma */
-function mono(shape: ShapeName, color: number, opts: { rot?: number; fill?: Fill; count?: number } = {}): CellSpec {
+function mono(
+  shape: ShapeName,
+  color: number,
+  opts: { rot?: number; fill?: Fill; count?: number; size?: number; arrange?: 'grid' | 'row' } = {}
+): CellSpec {
   const spec: ShapeSpec = { shape, color, fillMode: opts.fill ?? 'solid' };
   if (opts.rot) spec.rot = opts.rot;
+  if (opts.size !== undefined) spec.size = opts.size;
   const n = opts.count ?? 1;
-  return { shapes: Array.from({ length: n }, () => ({ ...spec })), layout: n > 1 ? 'grid' : 'auto' };
+  return {
+    shapes: Array.from({ length: n }, () => ({ ...spec })),
+    layout: n > 1 ? opts.arrange ?? 'grid' : 'auto',
+  };
 }
 
 /** matrice 3×3 da una funzione cella; l'ultima cella diventa l'incognita */
@@ -66,7 +99,7 @@ interface Built {
 // ---------------------------------------------------------------------------
 
 function buildD1(rng: Rng): Built {
-  const kind = randInt(rng, 0, 2);
+  const kind = randInt(rng, 0, 7);
 
   if (kind === 0) {
     // rotazione lungo le colonne (righe tutte uguali)
@@ -99,16 +132,109 @@ function buildD1(rng: Rng): Built {
     };
   }
 
-  // ciclo di colori: quadrato latino, colore(r,c) = colors[(r+c) % 3]
+  if (kind === 2) {
+    // ciclo di colori: quadrato latino, colore(r,c) = colors[(r+c) % 3]
+    const shape = pick(rng, PLAIN);
+    const colors = pickN(rng, COLORS, 3);
+    const at = (r: number, c: number) => mono(shape, colors[(r + c) % 3]);
+    return {
+      rows: grid(at),
+      correct: at(2, 2), // colors[1]
+      dA: mono(shape, colors[0]), // colore della cella accanto (colonna sbagliata)
+      dB: mono(shape, colors[2]), // colore dell'altra cella della riga
+      explanation: `Regola unica: i tre colori scalano di una posizione a ogni riga, così in ogni riga e in ogni colonna ciascun colore compare una sola volta. Nella cella mancante va l'unico colore che ancora manca nell'ultima riga.`,
+    };
+  }
+
+  if (kind === 3) {
+    // quadrato latino di FORME: le tre forme scorrono di un posto a ogni riga
+    const shapes = pickN(rng, POOL, 3);
+    const color = randInt(rng, 0, 7);
+    const shift = chance(rng, 0.5) ? 1 : 2; // verso di scorrimento
+    const idx = (r: number, c: number) => (r + shift * c) % 3;
+    const at = (r: number, c: number) => mono(shapes[idx(r, c)], color);
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: at(2, 1), // la forma della cella accanto (colonna sbagliata)
+      dB: at(2, 0), // la forma dell'altra cella della riga
+      explanation: `Regola unica: le tre forme scorrono di un posto a ogni riga, così in ogni riga e in ogni colonna ciascuna forma compare una sola volta. Nell'ultima riga ci sono già ${IT[shapes[idx(2, 0)]]} e ${IT[shapes[idx(2, 1)]]}: manca ${IT[shapes[idx(2, 2)]]}. Le altre due opzioni ripetono una forma già presente nella riga.`,
+    };
+  }
+
+  if (kind === 4) {
+    // dimensione crescente (o calante) lungo una sola direzione
+    const shape = pick(rng, POOL);
+    const color = randInt(rng, 0, 7);
+    const grow = chance(rng, 0.5);
+    const byRow = chance(rng, 0.5); // true: cambia scendendo, false: cambia verso destra
+    const sz = (k: number) => +(grow ? 0.34 + 0.2 * k : 0.94 - 0.2 * k).toFixed(2);
+    const at = (r: number, c: number) => mono(shape, color, { size: sz(byRow ? r : c) });
+    const dir = byRow ? 'scendendo di una riga' : 'passando da una colonna alla successiva';
+    const uguali = byRow ? 'le celle di una stessa riga sono tutte uguali' : 'tutte le righe sono uguali';
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: mono(shape, color, { size: sz(1) }), // la dimensione del gradino precedente
+      dB: mono(shape, color, { size: sz(3) }), // un gradino di troppo
+      explanation: `Regola unica: cambia solo la dimensione. ${dir[0].toUpperCase() + dir.slice(1)} la figura ${grow ? 'cresce' : 'si rimpicciolisce'} sempre dello stesso passo, mentre ${uguali}. Nella cella mancante va ${IT[shape]} al terzo gradino: un passo ${grow ? 'più grande' : 'più piccolo'} ${byRow ? 'della cella sopra' : 'della cella accanto'}. Un'opzione ripete il gradino precedente, l'altra ne fa uno di troppo.`,
+    };
+  }
+
+  if (kind === 5) {
+    // quadrato latino di RIEMPIMENTI (pieno / contorno / metà)
+    const shape = pick(rng, POOL);
+    const color = randInt(rng, 0, 7);
+    const fills = shuffle(rng, [...FILLS]);
+    const shift = chance(rng, 0.5) ? 1 : 2;
+    const idx = (r: number, c: number) => (r + shift * c) % 3;
+    const at = (r: number, c: number) => mono(shape, color, { fill: fills[idx(r, c)] });
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: at(2, 1), // riempimento della cella accanto
+      dB: at(2, 0), // riempimento dell'altra cella della riga
+      explanation: `Regola unica: forma e colore non cambiano mai, cambia solo il riempimento. Nella prima riga l'ordine è ${FILL_IT[fills[idx(0, 0)]]} → ${FILL_IT[fills[idx(0, 1)]]} → ${FILL_IT[fills[idx(0, 2)]]}, e a ogni riga lo stesso giro scorre di un posto. Così in ogni riga e in ogni colonna ciascun riempimento compare una sola volta: nell'ultima riga manca "${FILL_IT[fills[idx(2, 2)]]}".`,
+    };
+  }
+
+  if (kind === 6) {
+    // riempimento legato a una sola direzione (righe identiche o colonne identiche)
+    const shape = pick(rng, POOL);
+    const color = randInt(rng, 0, 7);
+    const fills = shuffle(rng, [...FILLS]);
+    const byRow = chance(rng, 0.5);
+    const at = (r: number, c: number) => mono(shape, color, { fill: fills[byRow ? r : c] });
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: mono(shape, color, { fill: fills[1] }), // riempimento della riga/colonna di mezzo
+      dB: mono(shape, color, { fill: fills[0] }), // riempimento della prima riga/colonna
+      explanation: byRow
+        ? `Regola unica: il riempimento dipende solo dalla riga (le tre celle di una stessa riga sono identiche): prima riga ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza riga (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una riga sbagliata.`
+        : `Regola unica: il riempimento dipende solo dalla colonna (le tre righe sono identiche): prima colonna ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza colonna (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una colonna sbagliata.`,
+    };
+  }
+
+  // conteggio con passo e direzione variabili (in salita o in discesa, di 1 o di 2)
   const shape = pick(rng, PLAIN);
-  const colors = pickN(rng, COLORS, 3);
-  const at = (r: number, c: number) => mono(shape, colors[(r + c) % 3]);
+  const color = randInt(rng, 0, 7);
+  const triple = pick(rng, COUNT_TRIPLES);
+  const byRow = chance(rng, 0.5); // true: il conteggio cambia scendendo
+  const arrange: 'grid' | 'row' = Math.max(...triple) <= 3 && chance(rng, 0.5) ? 'row' : 'grid';
+  const at = (r: number, c: number) => mono(shape, color, { count: triple[byRow ? r : c], arrange });
+  const step = triple[1] - triple[0];
+  // distrattore B: un passo di troppo; se sfora, un errore di conto di uno
+  const dBn = [triple[2] + step, triple[2] + 1, triple[2] - 1, triple[0]].find(
+    (n) => n >= 1 && n <= 6 && n !== triple[2] && n !== triple[1]
+  );
+  if (dBn === undefined) throw new Error('conteggio senza distrattore valido');
   return {
     rows: grid(at),
-    correct: at(2, 2), // colors[1]
-    dA: mono(shape, colors[0]), // colore della cella accanto (colonna sbagliata)
-    dB: mono(shape, colors[2]), // colore dell'altra cella della riga
-    explanation: `Regola unica: i tre colori scalano di una posizione a ogni riga, così in ogni riga e in ogni colonna ciascun colore compare una sola volta. Nella cella mancante va l'unico colore che ancora manca nell'ultima riga.`,
+    correct: at(2, 2),
+    dA: mono(shape, color, { count: triple[1], arrange }), // il conteggio del passo precedente
+    dB: mono(shape, color, { count: dBn, arrange }),
+    explanation: `Regola unica: ${byRow ? 'scendendo di una riga' : 'passando da una colonna alla successiva'} il numero di figure ${step > 0 ? 'cresce' : 'cala'} di ${Math.abs(step)} (${triple.join(', ')}), mentre ${byRow ? 'le celle di una stessa riga sono tutte uguali' : 'tutte le righe sono uguali'}. Nella cella mancante servono ${triple[2]} figure.`,
   };
 }
 
@@ -117,7 +243,7 @@ function buildD1(rng: Rng): Built {
 // ---------------------------------------------------------------------------
 
 function buildD2(rng: Rng): Built {
-  const kind = randInt(rng, 0, 4);
+  const kind = randInt(rng, 0, 6);
 
   if (kind === 0) {
     // forma costante per riga + rotazione per colonna
@@ -180,17 +306,55 @@ function buildD2(rng: Rng): Built {
     };
   }
 
-  // riempimento per riga + colore per colonna
-  const shape = pick(rng, POOL);
-  const fills = shuffle(rng, ['solid', 'outline', 'half'] as Fill[]);
-  const cols = pickN(rng, COLORS, 3);
-  const at = (r: number, c: number) => mono(shape, cols[c], { fill: fills[r] });
+  if (kind === 4) {
+    // riempimento per riga + colore per colonna
+    const shape = pick(rng, POOL);
+    const fills = shuffle(rng, ['solid', 'outline', 'half'] as Fill[]);
+    const cols = pickN(rng, COLORS, 3);
+    const at = (r: number, c: number) => mono(shape, cols[c], { fill: fills[r] });
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: at(1, 2), // riempimento della riga sbagliata
+      dB: at(2, 1), // colore della colonna sbagliata
+      explanation: `Due regole insieme: ogni riga ha il suo riempimento (${FILL_IT[fills[0]]}, ${FILL_IT[fills[1]]}, ${FILL_IT[fills[2]]}) e ogni colonna il suo colore. La cella mancante unisce il riempimento della terza riga (${FILL_IT[fills[2]]}) e il colore della terza colonna.`,
+    };
+  }
+
+  if (kind === 5) {
+    // due cicli di lunghezza 3 che scorrono in versi OPPOSTI: le forme scalano
+    // in un verso, i colori nell'altro (due quadrati latini sovrapposti)
+    const shapes = pickN(rng, POOL, 3);
+    const cols = pickN(rng, COLORS, 3);
+    const shapeFirst = chance(rng, 0.5);
+    const si = (r: number, c: number) => (r + (shapeFirst ? 1 : 2) * c) % 3;
+    const ci = (r: number, c: number) => (r + (shapeFirst ? 2 : 1) * c) % 3;
+    const at = (r: number, c: number) => mono(shapes[si(r, c)], cols[ci(r, c)]);
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      // forma giusta ma colore preso dalla cella accanto (ciclo dei colori sbagliato)
+      dA: mono(shapes[si(2, 2)], cols[ci(2, 1)]),
+      // colore giusto ma forma presa dalla riga sopra (ciclo delle forme sbagliato)
+      dB: mono(shapes[si(1, 2)], cols[ci(2, 2)]),
+      explanation: `Due regole insieme, e i due cicli girano in versi opposti: le forme scalano di un posto in una direzione, i colori nell'altra. Il risultato è che in ogni riga e in ogni colonna compaiono tutte e tre le forme e tutti e tre i colori, una volta sola. Nella cella mancante servono la forma che manca nell'ultima riga (${IT[shapes[si(2, 2)]]}) e il colore che manca nell'ultima riga. Le due opzioni sbagliate ne azzeccano solo uno dei due.`,
+    };
+  }
+
+  // rotazione che cresce verso destra e cala scendendo (regola "a specchio")
+  // + un colore per riga
+  const shape = pick(rng, ROTATABLE);
+  const rowColors = pickN(rng, COLORS, 3);
+  const step = pick(rng, [45, 90, 135]);
+  const start = pick(rng, [0, 45, 90]);
+  const rot = (r: number, c: number) => normRot(start + (c - r) * step);
+  const at = (r: number, c: number) => mono(shape, rowColors[r], { rot: rot(r, c) });
   return {
     rows: grid(at),
     correct: at(2, 2),
-    dA: at(1, 2), // riempimento della riga sbagliata
-    dB: at(2, 1), // colore della colonna sbagliata
-    explanation: `Due regole insieme: ogni riga ha il suo riempimento (${FILL_IT[fills[0]]}, ${FILL_IT[fills[1]]}, ${FILL_IT[fills[2]]}) e ogni colonna il suo colore. La cella mancante unisce il riempimento della terza riga (${FILL_IT[fills[2]]}) e il colore della terza colonna.`,
+    dA: mono(shape, rowColors[2], { rot: rot(2, 1) }), // colore giusto, rotazione un passo indietro
+    dB: mono(shape, rowColors[1], { rot: rot(2, 2) }), // rotazione giusta, colore della riga sbagliata
+    explanation: `Due regole insieme: ogni riga ha il suo colore, e la rotazione cresce di ${step}° andando verso destra ma cala di ${step}° scendendo di una riga. Nella cella mancante ${IT[shape]} torna quindi alla rotazione di ${normRot(start)}° (la stessa della cella in alto a sinistra e di quella centrale) con il colore della terza riga. Un'opzione è indietro di un passo, l'altra ha il colore della riga sbagliata.`,
   };
 }
 
@@ -199,7 +363,7 @@ function buildD2(rng: Rng): Built {
 // ---------------------------------------------------------------------------
 
 function buildD3(rng: Rng): Built {
-  const kind = randInt(rng, 0, 2);
+  const kind = randInt(rng, 0, 4);
 
   if (kind === 0) {
     // conteggio = somma della riga: terza cella = prime due sommate
@@ -264,20 +428,76 @@ function buildD3(rng: Rng): Built {
     };
   }
 
-  // rotazione diagonale: la rotazione cresce sia lungo le righe sia lungo le
-  // colonne (rot = (riga + colonna) × passo) + colore per riga; il distrattore
-  // principale è quasi identico (un passo indietro)
-  const shape = pick(rng, ROTATABLE);
-  const rowColors = pickN(rng, COLORS, 3);
-  const step = pick(rng, [45, 90]);
-  const start = pick(rng, [0, 45]);
-  const at = (r: number, c: number) => mono(shape, rowColors[r], { rot: normRot(start + (r + c) * step) });
+  if (kind === 2) {
+    // rotazione diagonale: la rotazione cresce sia lungo le righe sia lungo le
+    // colonne (rot = (riga + colonna) × passo) + colore per riga; il distrattore
+    // principale è quasi identico (un passo indietro)
+    const shape = pick(rng, ROTATABLE);
+    const rowColors = pickN(rng, COLORS, 3);
+    const step = pick(rng, [45, 90]);
+    const start = pick(rng, [0, 45]);
+    const at = (r: number, c: number) => mono(shape, rowColors[r], { rot: normRot(start + (r + c) * step) });
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: mono(shape, rowColors[2], { rot: normRot(start + 3 * step) }), // un passo indietro: quasi identico
+      dB: mono(shape, rowColors[1], { rot: normRot(start + 4 * step) }), // colore della riga sbagliata
+      explanation: `Il trucco: la rotazione aumenta di ${step}° sia spostandosi a destra sia scendendo di una riga (regola diagonale), e ogni riga ha il suo colore. Nella cella mancante ${IT[shape]} ruota di ${normRot(start + 4 * step)}° con il colore della terza riga. Attenzione all'opzione quasi uguale: è indietro di un passo.`,
+    };
+  }
+
+  if (kind === 3) {
+    // conteggio = DIFFERENZA della riga: terza cella = prima meno seconda
+    const shape = pick(rng, PLAIN);
+    const rowColors = pickN(rng, COLORS, 3);
+    // prime due righe: differenza ≥ 1; ultima riga: differenza ≥ 2 (così il
+    // distrattore "uno in meno" resta una cella disegnabile, con almeno 1 figura)
+    const mkPair = (minDiff: number): readonly [number, number] => {
+      const a = randInt(rng, 2 + minDiff, 6);
+      return [a, randInt(rng, 1, a - minDiff)] as const;
+    };
+    const pairs = [mkPair(1), mkPair(1), mkPair(2)];
+    const diffs = pairs.map(([a, b]) => a - b);
+    if (pairs.every(([a, b]) => a === pairs[0][0] && b === pairs[0][1])) throw new Error('righe identiche');
+    // guardia anti-ambiguità 1: la progressione della terza colonna non deve
+    // "prevedere" un distrattore (differenza ± 1 o somma)
+    const predicted = 2 * diffs[1] - diffs[0];
+    const [a3, b3] = pairs[2];
+    const sum3 = a3 + b3;
+    if (predicted === diffs[2] - 1 || predicted === diffs[2] + 1 || predicted === sum3)
+      throw new Error('configurazione ambigua');
+    // guardia anti-ambiguità 2: se nelle righe visibili "a − b" coincide sempre
+    // con "a ÷ b", anche la divisione spiegherebbe la matrice
+    const alsoDiv = ([a, b]: readonly [number, number]) => b > 1 && a % b === 0 && a / b === a - b;
+    if (alsoDiv(pairs[0]) && alsoDiv(pairs[1]) && !alsoDiv(pairs[2])) throw new Error('regola alternativa: divisione');
+    const at = (r: number, c: number) =>
+      mono(shape, rowColors[r], { count: c === 2 ? diffs[r] : pairs[r][c] });
+    // distrattore principale: chi somma invece di sottrarre (se la cella resta
+    // leggibile), altrimenti un errore di conto di uno
+    const dBn = sum3 <= 6 ? sum3 : diffs[2] + 1;
+    return {
+      rows: grid(at),
+      correct: at(2, 2),
+      dA: mono(shape, rowColors[2], { count: diffs[2] - 1 }), // errore di conto: -1
+      dB: mono(shape, rowColors[2], { count: dBn }),
+      explanation: `Il trucco: in ogni riga il numero di figure della terza cella è la DIFFERENZA fra le prime due (la prima meno la seconda). Nell'ultima riga ${a3} − ${b3} = ${diffs[2]}, quindi servono ${diffs[2]} figure. ${sum3 <= 6 ? `Attenzione all'opzione con ${sum3} figure: è la somma, non la differenza.` : `Le altre opzioni sbagliano il conto di uno.`}`,
+    };
+  }
+
+  // tre attributi, tre regole diverse: la forma dipende dalla riga, il colore
+  // dalla colonna, il riempimento scorre in diagonale (quadrato latino)
+  const shapes = pickN(rng, POOL, 3);
+  const cols = pickN(rng, COLORS, 3);
+  const fills = shuffle(rng, [...FILLS]);
+  const shift = chance(rng, 0.5) ? 1 : 2;
+  const fi = (r: number, c: number) => (r + shift * c) % 3;
+  const at = (r: number, c: number) => mono(shapes[r], cols[c], { fill: fills[fi(r, c)] });
   return {
     rows: grid(at),
     correct: at(2, 2),
-    dA: mono(shape, rowColors[2], { rot: normRot(start + 3 * step) }), // un passo indietro: quasi identico
-    dB: mono(shape, rowColors[1], { rot: normRot(start + 4 * step) }), // colore della riga sbagliata
-    explanation: `Il trucco: la rotazione aumenta di ${step}° sia spostandosi a destra sia scendendo di una riga (regola diagonale), e ogni riga ha il suo colore. Nella cella mancante ${IT[shape]} ruota di ${normRot(start + 4 * step)}° con il colore della terza riga. Attenzione all'opzione quasi uguale: è indietro di un passo.`,
+    dA: mono(shapes[2], cols[2], { fill: fills[fi(2, 1)] }), // riempimento della cella accanto
+    dB: mono(shapes[1], cols[2], { fill: fills[fi(2, 2)] }), // forma della riga sbagliata
+    explanation: `Il trucco: qui lavorano tre regole diverse insieme. La forma dipende dalla riga, il colore dipende dalla colonna e il riempimento scorre in diagonale, comparendo una volta sola per riga e per colonna. La cella mancante prende quindi la forma della terza riga (${IT[shapes[2]]}), il colore della terza colonna e l'unico riempimento che manca nell'ultima riga (${FILL_IT[fills[fi(2, 2)]]}). Ogni opzione sbagliata ne azzecca due su tre.`,
   };
 }
 

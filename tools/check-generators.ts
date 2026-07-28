@@ -18,7 +18,7 @@ const N = 40;
 const only = process.argv[2];
 const types = only
   ? [only]
-  : ['sequence', 'matrix', 'oddone', 'numseries', 'rotation', 'dice', 'clock', 'balance', 'analogy', 'arithgrid'];
+  : ['sequence', 'matrix', 'oddone', 'numseries', 'rotation', 'dice', 'clock', 'balance', 'analogy', 'arithgrid', 'fold', 'paths', 'sets', 'mirror', 'domino', 'symmetry', 'weights', 'pattern'];
 
 let failures = 0;
 

@@ -48,6 +48,14 @@ export function freshSeed(): number {
  */
 export class LiveQuestions {
   private rng: Rng;
+  /**
+   * Generatore separato, seminato con entropia vera, per la sola posizione
+   * delle risposte. Tenerlo scollegato da quello delle domande è ciò che rende
+   * la posizione davvero imprevedibile: se usasse lo stesso stato, due domande
+   * identiche verrebbero rimescolate allo stesso modo e chi le riconosce
+   * avrebbe un piccolo vantaggio.
+   */
+  private shuffleRng: Rng;
   private recentSkeletons: string[] = [];
   private types: QuestionType[];
   /** tipi già usati in questo giro, per alternarli */
@@ -55,6 +63,7 @@ export class LiveQuestions {
 
   constructor(seed: number = freshSeed(), source: QuestionSource = {}) {
     this.rng = mulberry32(seed);
+    this.shuffleRng = mulberry32(freshSeed());
     this.types = source.types?.length ? source.types : [...QUESTION_TYPES];
   }
 
@@ -78,7 +87,7 @@ export class LiveQuestions {
       } catch {
         continue; // generatore in difficoltà con questi parametri: cambia tipo
       }
-      q = reshuffleChoices(q, this.rng);
+      q = reshuffleChoices(q, this.shuffleRng);
       const skel = skeletonOf(q);
       if (!this.recentSkeletons.includes(skel)) {
         this.remember(skel);
@@ -91,7 +100,7 @@ export class LiveQuestions {
       return fallback;
     }
     // ultimissima risorsa: una sequenza, che non fallisce mai
-    return reshuffleChoices(GENERATORS.sequence(this.rng, difficulty), this.rng);
+    return reshuffleChoices(GENERATORS.sequence(this.rng, difficulty), this.shuffleRng);
   }
 
   private remember(skel: string) {

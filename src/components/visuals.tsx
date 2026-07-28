@@ -446,8 +446,17 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
       return <Cell cell={choice.cell} size={72} />;
     case 'clock':
       return <Clock clock={choice.clock} size={76} />;
-    case 'text':
-      return <span className="font-display px-1 text-2xl font-extrabold">{choice.text}</span>;
+    case 'text': {
+      // le risposte testuali possono essere parole lunghe ("pentagono") o
+      // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo
+      const n = choice.text.length;
+      const size = n <= 4 ? 'text-2xl' : n <= 7 ? 'text-xl' : n <= 11 ? 'text-base' : 'text-sm';
+      return (
+        <span className={`font-display w-full break-words px-0.5 text-center font-extrabold leading-tight ${size}`}>
+          {choice.text}
+        </span>
+      );
+    }
     default:
       return null;
   }

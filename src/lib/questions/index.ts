@@ -13,6 +13,14 @@ import { genClock } from './clock';
 import { genBalance } from './balance';
 import { genAnalogy } from './analogy';
 import { genArithgrid } from './arithgrid';
+import { genFold } from './fold';
+import { genPaths } from './paths';
+import { genSets } from './sets';
+import { genMirror } from './mirror';
+import { genDomino } from './domino';
+import { genSymmetry } from './symmetry';
+import { genWeights } from './weights';
+import { genPattern } from './pattern';
 
 export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Question> = {
   sequence: genSequence,
@@ -25,6 +33,14 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
   balance: genBalance,
   analogy: genAnalogy,
   arithgrid: genArithgrid,
+  fold: genFold,
+  paths: genPaths,
+  sets: genSets,
+  mirror: genMirror,
+  domino: genDomino,
+  symmetry: genSymmetry,
+  weights: genWeights,
+  pattern: genPattern,
 };
 
 export const QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];
