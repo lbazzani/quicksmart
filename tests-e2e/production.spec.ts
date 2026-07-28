@@ -153,6 +153,44 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
   console.log('SofAI al podio:', s.sofia?.ai ? `[AI] ${s.sofia.text}` : `[canned] ${s.sofia?.text}`);
 });
 
+test('sito pubblico: si entra col QR anche a partita già avviata', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const host = await phone(browser);
+  const late = await phone(browser);
+
+  // il capitano crea la partita e la avvia SUBITO, prima che arrivino gli altri
+  await host.goto(`${SITE}/new`);
+  await host.getByPlaceholder('Es. I Fulmini').fill('Ritardatari');
+  await host.getByPlaceholder('Es. Sofia').fill('Papà');
+  await host.getByRole('button', { name: /Crea la partita/ }).click();
+  await host.waitForURL(/\/g\/[A-Z]{5}/);
+  const code = host.url().split('/').pop()!;
+
+  // l'URL del QR è quello pubblico, non un indirizzo di rete locale
+  const joinUrl: string = (await (await fetch(`${SITE}/api/game/${code}`)).json()).joinUrl;
+  expect(joinUrl).toBe(`${SITE}/join?code=${code}`);
+
+  await host.getByRole('button', { name: /Via alla partita/ }).click();
+  await waitState(code, (x) => x.status === 'playing');
+
+  // Sofia arriva DOPO il via, seguendo il QR
+  await late.goto(joinUrl);
+  await expect(late.locator('input').first()).toHaveValue(code); // codice già compilato
+  await late.getByPlaceholder('Es. Sofia').fill('Sofia');
+  await late.getByRole('button', { name: /^Entra$/ }).click();
+  await late.waitForURL(new RegExp(`/g/${code}`), { timeout: 20_000 });
+
+  const s = await waitState(code, (x) => x.players.some((p) => p.nickname === 'Sofia'));
+  expect(s.players).toHaveLength(2);
+  await late.waitForTimeout(1200);
+  await late.screenshot({ path: `${SHOTS}/08-entrata-in-corsa.png` });
+
+  // gioca dal round successivo, non da quello a metà
+  const nextRound = await waitState(late.url() && code, (x) => x.roundIndex > s.roundIndex && x.phase === 'buzz', 90_000);
+  expect(nextRound.current!.lockedOut).not.toContain(s.players.find((p) => p.nickname === 'Sofia')!.id);
+  await expect(late.getByRole('button', { name: 'PRENOTATI!' })).toBeVisible({ timeout: 20_000 });
+});
+
 test('sito pubblico: allenamento in solitaria', async ({ browser }) => {
   test.setTimeout(240_000);
   const p = await phone(browser);

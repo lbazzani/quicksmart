@@ -52,6 +52,8 @@ export interface RoomPlayer {
   connections: number;
   lastDelta: number;
   stats: PlayerStats;
+  /** round in cui è entrato a partita in corso (-1 se era già in lobby) */
+  joinedAtRound: number;
 }
 
 interface CurrentRound {
@@ -229,6 +231,7 @@ export class GameEngine {
       connections: 0,
       lastDelta: 0,
       stats: newStats(),
+      joinedAtRound: -1,
     });
     this.rooms.set(code, room);
     this.sofia(room, { kind: 'welcome', nickname });
@@ -250,11 +253,13 @@ export class GameEngine {
     avatar: string
   ): Promise<
     | { ok: true; playerId: string; token: string }
-    | { ok: false; error: 'not_found' | 'started' | 'nickname_taken' | 'room_full' }
+    | { ok: false; error: 'not_found' | 'ended' | 'nickname_taken' | 'room_full' }
   > {
     const room = this.getRoom(code);
     if (!room) return { ok: false, error: 'not_found' };
-    if (room.status !== 'lobby') return { ok: false, error: 'started' };
+    // si può entrare anche a partita iniziata (in famiglia c'è sempre chi
+    // arriva in ritardo): si parte dal round successivo, con zero punti
+    if (room.status === 'ended') return { ok: false, error: 'ended' };
     if (room.players.size >= MAX_PLAYERS_PER_ROOM) return { ok: false, error: 'room_full' };
     const clean = sanitizeNickname(nickname);
     if (!clean) return { ok: false, error: 'nickname_taken' };
@@ -273,9 +278,9 @@ export class GameEngine {
     } finally {
       room.pendingNicknames.delete(key);
     }
-    // la partita può essere partita durante l'INSERT: in tal caso il giocatore
-    // resta a DB ma non entra nella stanza
-    if (room.status !== 'lobby') return { ok: false, error: 'started' };
+    // la partita può essere finita durante l'INSERT (il tipo si è ristretto
+    // sopra, ma lo stato è cambiato davvero durante l'await)
+    if ((room.status as GameStatus) === 'ended') return { ok: false, error: 'ended' };
     room.players.set(playerId, {
       id: playerId,
       nickname: clean,
@@ -287,7 +292,11 @@ export class GameEngine {
       connections: 0,
       lastDelta: 0,
       stats: newStats(),
+      joinedAtRound: room.status === 'playing' ? room.roundIndex : -1,
     });
+    // chi arriva a round iniziato guarda questo e gioca dal successivo: ha
+    // visto la domanda a metà, non sarebbe una gara alla pari
+    if (room.status === 'playing' && room.current) room.current.lockedOut.add(playerId);
     room.lastActivity = Date.now();
     this.sofia(room, { kind: 'join', nickname: clean });
     this.bump(room);
@@ -617,6 +626,7 @@ export class GameEngine {
         connected: p.connections > 0,
         lastDelta: p.lastDelta,
         stats: p.stats,
+        joinedAtRound: p.joinedAtRound,
       }))
       .sort((a, b) => b.score - a.score);
     return {
@@ -648,6 +658,7 @@ export class GameEngine {
             answerDeadline: cur.answerDeadline,
             buzzerId: cur.buzzerId,
             lockedOut: [...cur.lockedOut],
+            errors: cur.errors,
             ...(revealing
               ? {
                   revealUntil: cur.revealUntil,

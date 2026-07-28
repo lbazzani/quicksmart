@@ -262,7 +262,7 @@ function Play({
   identity: Identity;
   offset: number;
 }) {
-  const cur = snap.current!;
+  const cur = snap.current;
   const [tooLate, setTooLate] = useState(false);
   const [buzzing, setBuzzing] = useState(false);
   const [chosen, setChosen] = useState<number | null>(null);
@@ -275,7 +275,9 @@ function Play({
   const iAmBuzzer = cur?.buzzerId === me.id;
   const lockedMe = cur?.lockedOut.includes(me.id) ?? false;
   const buzzer = snap.players.find((p) => p.id === cur?.buzzerId);
-  const reopened = (cur?.lockedOut.length ?? 0) > 0;
+  // riaperta solo dopo un errore: chi è appena entrato è in lockedOut ma non
+  // ha fatto sbagliare nessuno
+  const reopened = (cur?.errors ?? 0) > 0;
 
   async function doBuzz() {
     if (buzzing || lockedMe) return;
@@ -421,7 +423,11 @@ function Play({
               )}
             </AnimatePresence>
             {lockedMe ? (
-              <p className="py-6 text-center font-bold text-slate-400">🚫 {T.game.lockedOut}</p>
+              me.joinedAtRound === snap.roundIndex ? (
+                <p className="py-6 text-center font-bold text-cyan-300">👋 {T.game.joinedLate}</p>
+              ) : (
+                <p className="py-6 text-center font-bold text-slate-400">🚫 {T.game.lockedOut}</p>
+              )
             ) : (
               <motion.button
                 initial={{ scale: 0.7, opacity: 0 }}

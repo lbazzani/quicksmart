@@ -86,6 +86,17 @@ async function testTeam() {
   s = await waitFor(code, (x) => x.phase === 'buzz');
   check(s.current !== null && s.current.value === 100, 'round 1 in fase buzz, valore 100 (facile)');
 
+  // RITARDATARIO: entra a partita già iniziata (caso tipico in famiglia)
+  const late = await post<Cred & { error?: string }>(`/api/game/${code}/join`, { nickname: 'Nonna', avatar: '🐢' });
+  check(!late.error && !!late.playerId, 'si può entrare a partita già iniziata');
+  s = await snap(code);
+  const nonna = s.players.find((p) => p.nickname === 'Nonna');
+  check(!!nonna && nonna.score === 0, 'il ritardatario parte da zero punti');
+  check(s.current!.lockedOut.includes(late.playerId), 'il ritardatario non gioca il round già in corso');
+  check(nonna!.joinedAtRound === s.roundIndex, 'il round di ingresso è segnalato alla UI');
+  const lateBuzz = await post<{ ok: boolean; error?: string }>(`/api/game/${code}/buzz`, late);
+  check(!lateBuzz.ok && lateBuzz.error === 'locked_out', 'il ritardatario non può prenotarsi nel round in corso');
+
   // ROUND 1: gara di buzz concorrente — deve vincere esattamente uno
   const racers = [host, p2, p3];
   const results = await Promise.all(racers.map((c) => post<{ ok: boolean; error?: string }>(`/api/game/${code}/buzz`, c)));
@@ -145,6 +156,10 @@ async function testTeam() {
   // fine partita automatica dopo 3 round
   s = await waitFor(code, (x) => x.status === 'ended', 15_000);
   check(s.status === 'ended', 'partita terminata automaticamente');
+
+  // a partita finita non si entra più
+  const lateEnded = await post<{ error?: string }>(`/api/game/${code}/join`, { nickname: 'Tardi', avatar: '🐢' });
+  check(lateEnded.error === 'ended', 'join rifiutato a partita finita, con messaggio dedicato');
 
   const db = await pool.query(
     `SELECT p.nickname, p.score FROM players p JOIN games g ON g.id = p.game_id WHERE g.code = $1 ORDER BY p.score DESC`,

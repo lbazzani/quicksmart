@@ -30,9 +30,11 @@ function JoinForm() {
             ? T.join.notFound
             : res.error === 'nickname_taken'
               ? T.join.nicknameTaken
-              : res.error === 'started'
-                ? T.join.gameStarted
-                : T.errors.generic
+              : res.error === 'ended'
+                ? T.join.gameEnded
+                : res.error === 'room_full'
+                  ? T.join.roomFull
+                  : T.errors.generic
         );
         setBusy(false);
         return;

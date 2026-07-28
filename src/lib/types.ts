@@ -175,6 +175,8 @@ export interface PlayerPublic {
   /** variazione punti nell'ultimo round (per l'animazione) */
   lastDelta: number;
   stats: PlayerStats;
+  /** round in cui è entrato a partita in corso (-1 se era già in lobby) */
+  joinedAtRound: number;
 }
 
 export type SofiaMood = 'happy' | 'wow' | 'teasing' | 'thinking' | 'sad';
@@ -215,6 +217,8 @@ export interface GameSnapshot {
     answerDeadline?: number;
     buzzerId?: string;
     lockedOut: string[];
+    /** risposte sbagliate finora in questo round (>0 = domanda riaperta) */
+    errors: number;
     /** presenti solo in fase reveal */
     revealUntil?: number;
     correctIndex?: number;
