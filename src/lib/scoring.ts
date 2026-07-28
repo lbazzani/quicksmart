@@ -37,14 +37,30 @@ export function streakMultiplier(streak: number): number {
  * @param remainingFrac frazione di tempo di risposta rimanente (0..1) → bonus fino a +50%
  * @param newStreak streak DOPO questa risposta (inclusa)
  */
-export function correctPoints(value: number, remainingFrac: number, newStreak: number): number {
+export function correctPoints(
+  value: number,
+  remainingFrac: number,
+  newStreak: number,
+  twin = false
+): number {
   const frac = Math.min(1, Math.max(0, remainingFrac));
-  return Math.round(value * (1 + 0.5 * frac) * streakMultiplier(newStreak));
+  return Math.round(value * (1 + 0.5 * frac) * streakMultiplier(newStreak) * (twin ? TWIN_BONUS : 1));
 }
 
+/**
+ * Bonus attenzione sui round "gemello": chi non si fa ingannare da una domanda
+ * che sembra già vista prende il 25% in più.
+ */
+export const TWIN_BONUS = 1.25;
+
+/**
+ * Malus sui round "gemello": rispondere a memoria costa il doppio.
+ */
+export const TWIN_MALUS = 2;
+
 /** penalità per risposta sbagliata: −50% del valore corrente */
-export function wrongPenalty(value: number): number {
-  return -Math.round(value * 0.5);
+export function wrongPenalty(value: number, twin = false): number {
+  return -Math.round(value * 0.5 * (twin ? TWIN_MALUS : 1));
 }
 
 /** penalità per chi si prenota e non risponde: −60% del valore corrente */

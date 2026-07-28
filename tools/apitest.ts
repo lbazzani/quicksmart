@@ -45,16 +45,27 @@ async function waitFor(code: string, pred: (s: GameSnapshot) => boolean, timeout
   }
 }
 
-/** trova la risposta corretta della domanda corrente leggendo il DB */
+/**
+ * Risposta corretta del round in corso. Le domande sono generate al volo e non
+ * stanno nel database, quindi la chiediamo all'oracolo di test (attivo solo con
+ * QS_TEST_MODE=1, in produzione risponde 404).
+ */
 async function correctIndexOf(s: GameSnapshot): Promise<number> {
-  const cur = s.current!;
-  const { rows } = await pool.query(
-    `SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb AND choices = $3::jsonb`,
-    [cur.prompt, JSON.stringify(cur.payload), JSON.stringify(cur.choices)]
-  );
-  if (rows.length !== 1) throw new Error(`domanda non trovata nel DB (match=${rows.length})`);
-  return rows[0].correct_index as number;
+  void s;
+  const res = await fetch(`${BASE}/api/game/${currentCode}/solution`);
+  if (!res.ok) {
+    throw new Error(
+      res.status === 404
+        ? 'oracolo non disponibile: avvia il server con QS_TEST_MODE=1'
+        : `oracolo: HTTP ${res.status}`
+    );
+  }
+  const { correctIndex } = (await res.json()) as { correctIndex: number };
+  return correctIndex;
 }
+
+/** codice della partita su cui stiamo lavorando (per l'oracolo) */
+let currentCode = '';
 
 interface Cred { playerId: string; token: string; code?: string }
 
@@ -70,6 +81,7 @@ async function testTeam() {
     answerSec: 5,
   });
   const code = host.code;
+  currentCode = code;
   check(!!code && code.length === 5, `partita creata con codice ${code}`);
 
   const p2 = await post<Cred>(`/api/game/${code}/join`, { nickname: 'Luca', avatar: '🐼' });
@@ -186,6 +198,7 @@ async function testSolo() {
     answerSec: 5,
   });
   const code = solo.code;
+  currentCode = code;
   check(!!code, `partita solo creata (${code})`);
   await post(`/api/game/${code}/start`, solo);
 

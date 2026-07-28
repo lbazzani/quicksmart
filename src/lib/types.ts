@@ -148,6 +148,9 @@ export interface GameSettings {
 export type GameStatus = 'lobby' | 'playing' | 'ended';
 export type Phase = 'idle' | 'countdown' | 'buzz' | 'answer' | 'reveal';
 
+/** round speciali: 'twin' = gemella (trappola per chi va a memoria), 'lampo' = tempo dimezzato e punti doppi */
+export type SpecialRound = 'none' | 'twin' | 'lampo';
+
 export type RoundOutcome =
   | 'correct'   // qualcuno ha indovinato
   | 'exhausted' // tutti hanno sbagliato
@@ -219,6 +222,7 @@ export interface GameSnapshot {
     lockedOut: string[];
     /** risposte sbagliate finora in questo round (>0 = domanda riaperta) */
     errors: number;
+    special: SpecialRound;
     /** presenti solo in fase reveal */
     revealUntil?: number;
     correctIndex?: number;

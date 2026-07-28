@@ -1,13 +1,8 @@
 // E2E: una partita vera con 3 browser (telefoni simulati) + modalità solo.
-// Il server deve girare su BASE (default :3005). L'oracolo della risposta
-// corretta viene dal DB (le API non la espongono mai prima del reveal).
+// Il server deve girare su BASE (default :3005) con QS_TEST_MODE=1, che abilita
+// l'oracolo delle risposte: le API non le espongono mai prima del reveal.
 
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import { Pool } from 'pg';
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL ?? 'postgres://costola:costola@localhost:5433/quicksmart',
-});
 
 const BASE = process.env.BASE ?? 'http://localhost:3005';
 const SHOTS = 'e2e-shots';
@@ -36,34 +31,27 @@ async function waitState(code: string, pred: (s: Snap) => boolean, timeoutMs = 4
 }
 
 /**
- * Oracolo: la risposta corretta non è mai negli snapshot prima del reveal, la
- * leggiamo dal DB. Le opzioni escono solo in fase answer, quindi la ricerca usa
- * prompt+payload (e affina con le choices quando disponibili).
+ * Oracolo: la risposta corretta non compare mai negli snapshot prima del
+ * reveal. Le domande sono generate al volo, quindi non stanno nel database:
+ * la chiediamo alla route di test (server avviato con QS_TEST_MODE=1).
  */
 async function correctIndex(code: string): Promise<number> {
-  const cur = (await snap(code)).current!;
-  const hasChoices = Array.isArray(cur.choices) && (cur.choices as unknown[]).length === 3;
-  const { rows } = hasChoices
-    ? await pool.query(
-        `SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb AND choices = $3::jsonb`,
-        [cur.prompt, JSON.stringify(cur.payload), JSON.stringify(cur.choices)]
-      )
-    : await pool.query(`SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb`, [
-        cur.prompt,
-        JSON.stringify(cur.payload),
-      ]);
-  if (rows.length !== 1) throw new Error(`oracolo: domanda non trovata (match=${rows.length})`);
-  return rows[0].correct_index as number;
+  const res = await fetch(`${BASE}/api/game/${code}/solution`);
+  if (!res.ok) {
+    throw new Error(
+      res.status === 404
+        ? 'oracolo non disponibile: avvia il server con QS_TEST_MODE=1'
+        : `oracolo: HTTP ${res.status}`
+    );
+  }
+  const { correctIndex: ci } = (await res.json()) as { correctIndex: number };
+  return ci;
 }
 
 async function newPlayer(browser: Browser): Promise<Page> {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   return ctx.newPage();
 }
-
-test.afterAll(async () => {
-  await pool.end();
-});
 
 test('partita a squadre con 3 giocatori', async ({ browser }) => {
   const anna = await newPlayer(browser);

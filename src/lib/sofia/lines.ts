@@ -6,6 +6,8 @@ import type { SofiaMood } from '../types';
 export type SofiaLineKind =
   | 'welcome'
   | 'join'
+  | 'twin'
+  | 'lampo'
   | 'correct'
   | 'correctFast'
   | 'correctStreak'
@@ -19,6 +21,8 @@ export type SofiaLineKind =
 export const MOODS: Record<SofiaLineKind, SofiaMood> = {
   welcome: 'happy',
   join: 'happy',
+  twin: 'teasing',
+  lampo: 'wow',
   correct: 'happy',
   correctFast: 'wow',
   correctStreak: 'wow',
@@ -41,6 +45,17 @@ export const LINES: Record<SofiaLineKind, string[]> = {
     '{name} è in squadra! Occhio, ha la faccia di chi le sa tutte.',
     'Ciao {name}! Il pulsante rosso non morde, promesso.',
     '{name} si unisce! Più siamo, più è bello vincere. Da soli, ovvio.',
+  ],
+  twin: [
+    'Questa mi sa che l’avete già vista… o forse no? 😏 Guardate BENE!',
+    'Attenzione: sembra una vecchia conoscenza, ma io ho cambiato qualcosa…',
+    'Déjà vu? Occhio, chi va a memoria stavolta ci casca! 👀',
+    'Vi sembra familiare? Controllate ogni dettaglio, ve lo consiglio io.',
+  ],
+  lampo: [
+    'ROUND LAMPO! ⚡ Metà tempo, punti DOPPI. Coraggio!',
+    'Lampo! Chi esita è perduto: doppio punteggio in palio! ⚡',
+    'Sveglia! Round lampo: tempo dimezzato, punti raddoppiati!',
   ],
   correct: [
     'Grande {name}! Risposta giusta, cervello acceso! 💡',

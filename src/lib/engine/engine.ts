@@ -17,6 +17,7 @@ import type {
   Question,
   RoundOutcome,
   SofiaComment,
+  SpecialRound,
 } from '../types';
 import {
   NOBODY_PENALTY,
@@ -30,6 +31,9 @@ import {
 } from '../scoring';
 import { dbAddPlayer, dbCreateGame, dbLoadQuestions, dbSavePlayer, dbSaveRound, dbSetGameStatus } from './store';
 import { sofiaOnEvent, type SofiaEventCtx } from '../sofia/sofia';
+import { LiveQuestions, freshSeed, reshuffleChoices } from '../questions/live';
+import { TwinPool } from '../questions/twin';
+import { mulberry32, type Rng } from '../rng';
 
 const COUNTDOWN_MS = 3000;
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // sweep partite morte dopo 2h
@@ -65,6 +69,7 @@ interface CurrentRound {
   buzzDeadline?: number;
   answerDeadline?: number;
   buzzerId?: string;
+  special: SpecialRound;
   answerStartAt?: number;
   answeredIndex?: number;
   outcome?: RoundOutcome;
@@ -88,6 +93,14 @@ export interface Room {
   questions: Question[];
   /** id delle domande già usate: le partite aperte ricaricano il pool senza ripetere */
   usedQuestionIds: Set<number>;
+  /** fabbrica di domande della partita (seme casuale, strutture recenti evitate) */
+  live: LiveQuestions;
+  /** domande già mostrate, per costruire le gemelle */
+  twins: TwinPool;
+  /** rng della partita per le scelte di regia (round speciali, gemelle) */
+  rng: Rng;
+  /** round in cui è già stata usata una gemella, per non abusarne */
+  lastTwinRound: number;
   current: CurrentRound | null;
   sofia: SofiaComment | null;
   sofiaSeq: number;
@@ -192,6 +205,7 @@ export class GameEngine {
     };
     const nickname = sanitizeNickname(opts.nickname);
     if (!nickname) throw new Error('nickname_required');
+    const seed = freshSeed(); // ogni partita pesca da un punto diverso dello spazio
     const code = this.makeCode();
     const gameId = await dbCreateGame(code, opts.name, opts.mode, settings);
     const token = randomBytes(16).toString('hex');
@@ -209,6 +223,10 @@ export class GameEngine {
       pendingNicknames: new Set(),
       questions: [],
       usedQuestionIds: new Set(),
+      live: new LiveQuestions(seed),
+      twins: new TwinPool(),
+      rng: mulberry32(seed ^ 0x5eed),
+      lastTwinRound: -99,
       current: null,
       sofia: null,
       sofiaSeq: 0,
@@ -304,23 +322,36 @@ export class GameEngine {
   }
 
   /**
-   * Carica un blocco di domande a partire dal round `fromRound`, senza ripetere
-   * quelle già viste nella partita. Restituisce quante ne ha aggiunte.
+   * Prepara un blocco di domande a partire dal round `fromRound`.
+   *
+   * Le domande si generano al volo (spazio: decine di milioni di combinazioni,
+   * opzioni rimescolate a ogni presentazione), così non c'è nulla da imparare a
+   * memoria. Se la generazione fallisce del tutto si ripiega sull'archivio in
+   * Postgres, che resta come rete di sicurezza.
    */
   private async loadPool(room: Room, fromRound = 0, size?: number): Promise<number> {
     const total = room.settings.roundsTotal;
     const poolSize = size ?? total ?? OPEN_GAME_BLOCK;
-    const counts: Record<Difficulty, number> = { 1: 0, 2: 0, 3: 0 };
-    for (let i = 0; i < poolSize; i++) counts[difficultyForRound(fromRound + i, total)]++;
-    const byDiff = await dbLoadQuestions(counts, [...room.usedQuestionIds]);
     const added: Question[] = [];
     for (let i = 0; i < poolSize; i++) {
-      const want = difficultyForRound(fromRound + i, total);
-      // se una difficoltà si esaurisce, ripiega sulle altre
-      const q = byDiff[want].pop() ?? byDiff[2].pop() ?? byDiff[1].pop() ?? byDiff[3].pop();
-      if (!q) break;
-      if (q.id !== undefined) room.usedQuestionIds.add(q.id);
-      added.push(q);
+      try {
+        added.push(room.live.next(difficultyForRound(fromRound + i, total)));
+      } catch (e) {
+        console.error('generazione domanda fallita:', e);
+        break;
+      }
+    }
+    if (added.length === 0) {
+      const counts: Record<Difficulty, number> = { 1: 0, 2: 0, 3: 0 };
+      for (let i = 0; i < poolSize; i++) counts[difficultyForRound(fromRound + i, total)]++;
+      const byDiff = await dbLoadQuestions(counts, [...room.usedQuestionIds]);
+      for (let i = 0; i < poolSize; i++) {
+        const want = difficultyForRound(fromRound + i, total);
+        const q = byDiff[want].pop() ?? byDiff[2].pop() ?? byDiff[1].pop() ?? byDiff[3].pop();
+        if (!q) break;
+        if (q.id !== undefined) room.usedQuestionIds.add(q.id);
+        added.push(reshuffleChoices(q));
+      }
     }
     room.questions.push(...added);
     return added.length;
@@ -369,6 +400,30 @@ export class GameEngine {
     room.emitter.emit('update');
   }
 
+  /**
+   * Decide se questo round è speciale.
+   * - `twin`: ripropone la gemella di una domanda già vista (stessa struttura,
+   *   risposta diversa) — la trappola per chi gioca a memoria;
+   * - `lampo`: metà tempo per rispondere, punti raddoppiati.
+   * Mai due round speciali di fila, e mai prima del quarto round.
+   */
+  private pickSpecial(room: Room, index: number): { kind: SpecialRound; question?: Question } {
+    if (room.mode === 'solo' && index < 2) return { kind: 'none' };
+    if (index < 3 || index - room.lastTwinRound < 3) return { kind: 'none' };
+    if (room.rng() < 0.35) {
+      const made = room.twins.makeTwin(room.rng);
+      if (made) {
+        room.lastTwinRound = index;
+        return { kind: 'twin', question: made.twin };
+      }
+    }
+    if (room.rng() < 0.2) {
+      room.lastTwinRound = index; // vale come "round speciale già speso"
+      return { kind: 'lampo' };
+    }
+    return { kind: 'none' };
+  }
+
   private startRound(room: Room, index: number) {
     if (room.status !== 'playing') return; // partita terminata nel frattempo
     if (index >= room.questions.length) {
@@ -377,18 +432,31 @@ export class GameEngine {
     }
     room.epoch++;
     room.roundIndex = index;
-    const q = room.questions[index];
+    const special = this.pickSpecial(room, index);
+    const q = special.question ?? room.questions[index];
+    room.twins.add(q);
     for (const p of room.players.values()) p.lastDelta = 0;
     room.current = {
       q,
-      value: baseValue(q.difficulty),
+      value: baseValue(q.difficulty) * (special.kind === 'lampo' ? 2 : 1),
       errors: 0,
       lockedOut: new Set(),
+      special: special.kind,
       countdownEndsAt: Date.now() + COUNTDOWN_MS,
     };
     room.phase = 'countdown';
-    this.schedule(room, COUNTDOWN_MS, () => this.enterBuzz(room, room.settings.buzzWindowMs));
+    // i round speciali vanno annunciati; quelli normali non hanno nulla da dire
+    if (special.kind !== 'none') this.sofia(room, { kind: 'special', special: special.kind });
+    this.schedule(room, COUNTDOWN_MS, () =>
+      this.enterBuzz(room, room.settings.buzzWindowMs)
+    );
     this.bump(room);
+  }
+
+  /** tempo per rispondere in questo round (dimezzato nei round Lampo) */
+  private answerMsFor(room: Room): number {
+    const base = room.settings.answerMs;
+    return room.current?.special === 'lampo' ? Math.max(2500, Math.round(base / 2)) : base;
   }
 
   private enterBuzz(room: Room, windowMs: number) {
@@ -413,9 +481,9 @@ export class GameEngine {
     room.phase = 'answer';
     cur.buzzerId = playerId;
     cur.answerStartAt = Date.now();
-    cur.answerDeadline = Date.now() + room.settings.answerMs;
+    cur.answerDeadline = Date.now() + this.answerMsFor(room);
     p.stats.buzzWins++;
-    this.schedule(room, room.settings.answerMs, () => this.onAnswerTimeout(room));
+    this.schedule(room, this.answerMsFor(room), () => this.onAnswerTimeout(room));
     this.bump(room);
     return { ok: true };
   }
@@ -436,11 +504,11 @@ export class GameEngine {
     p.stats.answerCount++;
 
     if (choiceIndex === cur.q.correctIndex) {
-      const remainingFrac = 1 - elapsed / room.settings.answerMs;
+      const remainingFrac = 1 - elapsed / this.answerMsFor(room);
       p.streak++;
       p.stats.correct++;
       p.stats.bestStreak = Math.max(p.stats.bestStreak, p.streak);
-      const delta = correctPoints(cur.value, remainingFrac, p.streak);
+      const delta = correctPoints(cur.value, remainingFrac, p.streak, cur.special === 'twin');
       p.score += delta;
       p.lastDelta += delta;
       cur.winnerId = playerId;
@@ -449,7 +517,7 @@ export class GameEngine {
     } else {
       p.streak = 0;
       p.stats.wrong++;
-      const delta = wrongPenalty(cur.value);
+      const delta = wrongPenalty(cur.value, cur.special === 'twin');
       p.score += delta;
       p.lastDelta += delta;
       this.afterMiss(room, playerId);
@@ -659,6 +727,7 @@ export class GameEngine {
             buzzerId: cur.buzzerId,
             lockedOut: [...cur.lockedOut],
             errors: cur.errors,
+            special: cur.special,
             ...(revealing
               ? {
                   revealUntil: cur.revealUntil,

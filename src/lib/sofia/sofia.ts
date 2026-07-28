@@ -23,6 +23,7 @@ import { LINES, MOODS, fillLine, type SofiaLineKind } from './lines';
 export type SofiaEventCtx =
   | { kind: 'welcome'; nickname: string }
   | { kind: 'join'; nickname: string }
+  | { kind: 'special'; special: 'none' | 'twin' | 'lampo' }
   | {
       kind: 'reveal';
       outcome: RoundOutcome;
@@ -56,6 +57,8 @@ function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; 
       return { kind: 'welcome', name: ctx.nickname };
     case 'join':
       return { kind: 'join', name: ctx.nickname };
+    case 'special':
+      return { kind: ctx.special === 'twin' ? 'twin' : 'lampo' };
     case 'podium':
       return { kind: 'podium', name: ctx.standings[0]?.nickname };
     case 'reveal': {

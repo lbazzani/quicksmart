@@ -361,6 +361,24 @@ function Play({
           animate={{ opacity: 1, y: 0 }}
           className="card flex flex-col items-center gap-3 px-3 py-4"
         >
+          {cur.special === 'twin' && (
+            <motion.span
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="rounded-full bg-fuchsia-500/20 px-3 py-1 text-xs font-extrabold text-fuchsia-300 ring-1 ring-fuchsia-400/50"
+            >
+              👯 {T.game.twinRound}
+            </motion.span>
+          )}
+          {cur.special === 'lampo' && (
+            <motion.span
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="rounded-full bg-amber-400/20 px-3 py-1 text-xs font-extrabold text-amber-300 ring-1 ring-amber-300/50"
+            >
+              ⚡ {T.game.lampoRound}
+            </motion.span>
+          )}
           <p className="text-center font-display text-lg font-bold leading-tight">{cur.prompt}</p>
           <QuestionView payload={cur.payload} />
           {reopened && snap.phase === 'buzz' && (
