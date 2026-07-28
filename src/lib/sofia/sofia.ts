@@ -31,6 +31,7 @@ interface SofiaRoom {
   sofia: { text: string; mood: SofiaMood; roundIndex: number; ai: boolean; seq: number } | null;
   sofiaSeq: number;
   sofiaBusy: boolean;
+  sofiaPending?: { ctx: SofiaEventCtx; seq: number };
   roundIndex: number;
 }
 
@@ -149,14 +150,29 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
   room.sofia = { text: canned, mood: MOODS[kind], roundIndex: room.roundIndex, ai: false, seq };
   onUpdate();
 
-  if (!AI_ENABLED() || room.sofiaBusy) return;
+  if (!AI_ENABLED()) return;
   const prompt = aiPrompt(ctx);
   if (!prompt) return;
+  if (room.sofiaBusy) {
+    // una chiamata AI alla volta: tieni da parte SOLO l'evento più recente
+    // (il podio non va mai perso: è l'ultimo commento della partita)
+    room.sofiaPending = { ctx, seq };
+    return;
+  }
+  await runAi(room, ctx, seq, prompt, onUpdate);
+}
+
+async function runAi(
+  room: SofiaRoom,
+  ctx: SofiaEventCtx,
+  seq: number,
+  prompt: string,
+  onUpdate: () => void
+): Promise<void> {
   room.sofiaBusy = true;
   try {
     const text = await askClaude(prompt);
     // sostituisce solo se nel frattempo non è uscita una battuta più recente
-    // (il podio resta valido comunque: è l'ultimo commento della partita)
     if (room.sofia && (room.sofia.seq === seq || ctx.kind === 'podium')) {
       room.sofia = { text, mood: room.sofia.mood, roundIndex: room.sofia.roundIndex, ai: true, seq: ++room.sofiaSeq };
       onUpdate();
@@ -165,5 +181,11 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
     // l'AI non ha risposto in tempo: resta la battuta pre-scritta
   } finally {
     room.sofiaBusy = false;
+    const pending = room.sofiaPending;
+    room.sofiaPending = undefined;
+    if (pending) {
+      const nextPrompt = aiPrompt(pending.ctx);
+      if (nextPrompt) await runAi(room, pending.ctx, pending.seq, nextPrompt, onUpdate);
+    }
   }
 }

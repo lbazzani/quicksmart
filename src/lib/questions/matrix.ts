@@ -235,7 +235,15 @@ function buildD3(rng: Rng): Built {
       [1, 0, 1],
       [1, 1, 0],
     ];
-    const rowsPres = Array.from({ length: 3 }, () => pickN(rng, TRIPLES, 2)); // [presenze di X, presenze di Y]
+    // ogni riga usa una coppia DIVERSA di tripli: righe mai identiche e almeno
+    // una riga visibile contiene [1,1,0] (celle sovrapposte), che distingue la
+    // regola XOR dalla semplice unione (altrimenti l'item sarebbe ambiguo)
+    const pairings = shuffle(rng, [
+      [TRIPLES[0], TRIPLES[1]],
+      [TRIPLES[0], TRIPLES[2]],
+      [TRIPLES[1], TRIPLES[2]],
+    ]);
+    const rowsPres = pairings.map((p) => shuffle(rng, [...p])); // [presenze di X, presenze di Y]
     const cellOf = (hasX: boolean, hasY: boolean): CellSpec => ({
       shapes: [...(hasX ? [{ ...X }] : []), ...(hasY ? [{ ...Y }] : [])],
       layout: 'row',

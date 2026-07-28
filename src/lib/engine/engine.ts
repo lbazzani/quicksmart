@@ -80,6 +80,7 @@ export interface Room {
   sofia: SofiaComment | null;
   sofiaSeq: number;
   sofiaBusy: boolean;
+  sofiaPending?: { ctx: SofiaEventCtx; seq: number };
   version: number;
   epoch: number; // invalida i timer di fasi superate
   timer: NodeJS.Timeout | null;
@@ -132,6 +133,8 @@ export class GameEngine {
   }
 
   joinUrl(code: string): string | undefined {
+    // in produzione PUBLIC_URL è il dominio del sito; in LAN usiamo l'IP locale
+    if (process.env.PUBLIC_URL) return `${process.env.PUBLIC_URL.replace(/\/$/, '')}/join?code=${code}`;
     const ip = lanIp();
     const port = process.env.PORT ?? '3000';
     return ip ? `http://${ip}:${port}/join?code=${code}` : undefined;
