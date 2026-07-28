@@ -104,6 +104,7 @@ const it = {
   errors: {
     generic: 'Ops, qualcosa è andato storto. Riprova!',
     reconnecting: 'Riconnessione…',
+    noQuestions: 'Nessuna domanda disponibile: l’archivio è vuoto.',
   },
 };
 

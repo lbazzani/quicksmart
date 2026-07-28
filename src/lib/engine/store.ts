@@ -86,15 +86,19 @@ function rowToQuestion(r: QuestionRow): Question {
   };
 }
 
-/** Estrae domande casuali per difficoltà (senza ripetizioni nella partita). */
-export async function dbLoadQuestions(counts: Record<Difficulty, number>): Promise<Record<Difficulty, Question[]>> {
+/** Estrae domande casuali per difficoltà, escludendo quelle già usate. */
+export async function dbLoadQuestions(
+  counts: Record<Difficulty, number>,
+  excludeIds: number[] = []
+): Promise<Record<Difficulty, Question[]>> {
   const out: Record<Difficulty, Question[]> = { 1: [], 2: [], 3: [] };
   for (const d of [1, 2, 3] as Difficulty[]) {
     if (counts[d] <= 0) continue;
     const { rows } = await query<QuestionRow>(
       `SELECT id, qtype, difficulty, prompt, payload, choices, correct_index, explanation
-       FROM questions WHERE difficulty = $1 ORDER BY random() LIMIT $2`,
-      [d, counts[d]]
+       FROM questions WHERE difficulty = $1 AND NOT (id = ANY($3::int[]))
+       ORDER BY random() LIMIT $2`,
+      [d, counts[d], excludeIds]
     );
     out[d] = rows.map(rowToQuestion);
   }

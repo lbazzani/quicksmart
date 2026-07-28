@@ -25,6 +25,27 @@ export function setMuted(m: boolean) {
   localStorage.setItem('qs:muted', m ? '1' : '0');
 }
 
+/**
+ * Va chiamata DENTRO il gestore di un tocco: iOS crea e riattiva l'AudioContext
+ * solo durante un gesto dell'utente, altrimenti resta muto per tutta la partita.
+ */
+export function unlockAudio() {
+  const a = ac();
+  if (!a) return;
+  if (a.state === 'suspended') a.resume().catch(() => {});
+  // un suono impercettibile "apre" davvero l'output su Safari
+  try {
+    const osc = a.createOscillator();
+    const g = a.createGain();
+    g.gain.value = 0.0001;
+    osc.connect(g).connect(a.destination);
+    osc.start();
+    osc.stop(a.currentTime + 0.02);
+  } catch {
+    // se non parte, pazienza: l'audio è un extra
+  }
+}
+
 function tone(freq: number, at: number, dur: number, type: OscillatorType = 'sine', gain = 0.12) {
   const a = ac();
   if (!a || isMuted()) return;

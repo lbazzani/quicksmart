@@ -33,6 +33,12 @@ import { sofiaOnEvent, type SofiaEventCtx } from '../sofia/sofia';
 
 const COUNTDOWN_MS = 3000;
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // sweep partite morte dopo 2h
+/** quante domande carica alla volta una partita "aperta" (senza numero di round) */
+const OPEN_GAME_BLOCK = 30;
+/** tetto di stanze attive: evita che qualcuno riempia la memoria creando partite */
+const MAX_ROOMS = 300;
+/** tetto di giocatori per stanza */
+const MAX_PLAYERS_PER_ROOM = 24;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUWXYZ';
 
 export interface RoomPlayer {
@@ -75,7 +81,11 @@ export interface Room {
   phase: Phase;
   roundIndex: number;
   players: Map<string, RoomPlayer>;
+  /** nickname in corso di inserimento (guardia sincrona contro join concorrenti) */
+  pendingNicknames: Set<string>;
   questions: Question[];
+  /** id delle domande già usate: le partite aperte ricaricano il pool senza ripetere */
+  usedQuestionIds: Set<number>;
   current: CurrentRound | null;
   sofia: SofiaComment | null;
   sofiaSeq: number;
@@ -86,6 +96,20 @@ export interface Room {
   timer: NodeJS.Timeout | null;
   emitter: EventEmitter;
   lastActivity: number;
+}
+
+/**
+ * Ripulisce un nickname che arriva da internet: solo lettere, numeri, spazi e
+ * pochi segni. Niente newline o caratteri di controllo — il nome viene mostrato
+ * a tutti e passa vicino a sistemi che interpretano testo.
+ */
+export function sanitizeNickname(raw: string): string {
+  return [...raw.normalize('NFC')]
+    .filter((ch) => /[\p{L}\p{N} '._-]/u.test(ch))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 20);
 }
 
 function newStats(): PlayerStats {
@@ -125,10 +149,16 @@ export class GameEngine {
   private sweep() {
     const now = Date.now();
     for (const [code, room] of this.rooms) {
-      if (now - room.lastActivity > ROOM_TTL_MS) {
-        if (room.timer) clearTimeout(room.timer);
-        this.rooms.delete(code);
+      if (now - room.lastActivity <= ROOM_TTL_MS) continue;
+      // non buttare fuori chi è ancora connesso: rimanda lo sweep
+      const connected = [...room.players.values()].some((p) => p.connections > 0);
+      if (connected) {
+        room.lastActivity = now;
+        continue;
       }
+      if (room.timer) clearTimeout(room.timer);
+      room.emitter.emit('closed');
+      this.rooms.delete(code);
     }
   }
 
@@ -150,6 +180,7 @@ export class GameEngine {
     answerMs: number;
   }): Promise<{ code: string; playerId: string; token: string }> {
     this.sweep();
+    if (this.rooms.size >= MAX_ROOMS) throw new Error('too_many_rooms');
     const settings: GameSettings = {
       mode: opts.mode,
       roundsTotal: opts.roundsTotal,
@@ -157,10 +188,12 @@ export class GameEngine {
       answerMs: opts.answerMs,
       revealMs: 6000,
     };
+    const nickname = sanitizeNickname(opts.nickname);
+    if (!nickname) throw new Error('nickname_required');
     const code = this.makeCode();
     const gameId = await dbCreateGame(code, opts.name, opts.mode, settings);
     const token = randomBytes(16).toString('hex');
-    const playerId = await dbAddPlayer(gameId, opts.nickname, opts.avatar, token, true);
+    const playerId = await dbAddPlayer(gameId, nickname, opts.avatar, token, true);
     const room: Room = {
       code,
       gameId,
@@ -171,7 +204,9 @@ export class GameEngine {
       phase: 'idle',
       roundIndex: -1,
       players: new Map(),
+      pendingNicknames: new Set(),
       questions: [],
+      usedQuestionIds: new Set(),
       current: null,
       sofia: null,
       sofiaSeq: 0,
@@ -185,7 +220,7 @@ export class GameEngine {
     room.emitter.setMaxListeners(50);
     room.players.set(playerId, {
       id: playerId,
-      nickname: opts.nickname,
+      nickname,
       avatar: opts.avatar,
       token,
       isHost: true,
@@ -196,7 +231,7 @@ export class GameEngine {
       stats: newStats(),
     });
     this.rooms.set(code, room);
-    this.sofia(room, { kind: 'welcome', nickname: opts.nickname });
+    this.sofia(room, { kind: 'welcome', nickname });
     return { code, playerId, token };
   }
 
@@ -213,16 +248,34 @@ export class GameEngine {
     code: string,
     nickname: string,
     avatar: string
-  ): Promise<{ ok: true; playerId: string; token: string } | { ok: false; error: 'not_found' | 'started' | 'nickname_taken' }> {
+  ): Promise<
+    | { ok: true; playerId: string; token: string }
+    | { ok: false; error: 'not_found' | 'started' | 'nickname_taken' | 'room_full' }
+  > {
     const room = this.getRoom(code);
     if (!room) return { ok: false, error: 'not_found' };
     if (room.status !== 'lobby') return { ok: false, error: 'started' };
-    const clean = nickname.trim().slice(0, 20);
+    if (room.players.size >= MAX_PLAYERS_PER_ROOM) return { ok: false, error: 'room_full' };
+    const clean = sanitizeNickname(nickname);
+    if (!clean) return { ok: false, error: 'nickname_taken' };
+    const key = clean.toLowerCase();
     for (const p of room.players.values()) {
-      if (p.nickname.toLowerCase() === clean.toLowerCase()) return { ok: false, error: 'nickname_taken' };
+      if (p.nickname.toLowerCase() === key) return { ok: false, error: 'nickname_taken' };
     }
+    // prenota il nome PRIMA dell'await: due join simultanei con lo stesso
+    // nickname (o un join mentre parte la partita) non devono passare entrambi
+    if (room.pendingNicknames.has(key)) return { ok: false, error: 'nickname_taken' };
+    room.pendingNicknames.add(key);
     const token = randomBytes(16).toString('hex');
-    const playerId = await dbAddPlayer(room.gameId, clean, avatar, token, false);
+    let playerId: string;
+    try {
+      playerId = await dbAddPlayer(room.gameId, clean, avatar, token, false);
+    } finally {
+      room.pendingNicknames.delete(key);
+    }
+    // la partita può essere partita durante l'INSERT: in tal caso il giocatore
+    // resta a DB ma non entra nella stanza
+    if (room.status !== 'lobby') return { ok: false, error: 'started' };
     room.players.set(playerId, {
       id: playerId,
       nickname: clean,
@@ -241,22 +294,27 @@ export class GameEngine {
     return { ok: true, playerId, token };
   }
 
-  /** carica il pool di domande per la partita */
-  private async loadPool(room: Room): Promise<void> {
+  /**
+   * Carica un blocco di domande a partire dal round `fromRound`, senza ripetere
+   * quelle già viste nella partita. Restituisce quante ne ha aggiunte.
+   */
+  private async loadPool(room: Room, fromRound = 0, size?: number): Promise<number> {
     const total = room.settings.roundsTotal;
-    const poolSize = total ?? 60;
+    const poolSize = size ?? total ?? OPEN_GAME_BLOCK;
     const counts: Record<Difficulty, number> = { 1: 0, 2: 0, 3: 0 };
-    for (let i = 0; i < poolSize; i++) counts[difficultyForRound(i, total)]++;
-    const byDiff = await dbLoadQuestions(counts);
-    const pool: Question[] = [];
+    for (let i = 0; i < poolSize; i++) counts[difficultyForRound(fromRound + i, total)]++;
+    const byDiff = await dbLoadQuestions(counts, [...room.usedQuestionIds]);
+    const added: Question[] = [];
     for (let i = 0; i < poolSize; i++) {
-      const want = difficultyForRound(i, total);
+      const want = difficultyForRound(fromRound + i, total);
       // se una difficoltà si esaurisce, ripiega sulle altre
       const q = byDiff[want].pop() ?? byDiff[2].pop() ?? byDiff[1].pop() ?? byDiff[3].pop();
       if (!q) break;
-      pool.push(q);
+      if (q.id !== undefined) room.usedQuestionIds.add(q.id);
+      added.push(q);
     }
-    room.questions = pool;
+    room.questions.push(...added);
+    return added.length;
   }
 
   async start(code: string, playerId: string, token: string): Promise<{ ok: boolean; error?: string }> {
@@ -265,9 +323,24 @@ export class GameEngine {
     const p = this.auth(room, playerId, token);
     if (!p?.isHost) return { ok: false, error: 'not_host' };
     if (room.status !== 'lobby') return { ok: false, error: 'already_started' };
-    await this.loadPool(room);
-    if (room.questions.length === 0) return { ok: false, error: 'no_questions' };
+    // guardia sincrona: un secondo POST (doppio tap) non deve ricaricare il pool
     room.status = 'playing';
+    try {
+      await this.loadPool(room);
+    } catch (e) {
+      room.status = 'lobby';
+      console.error('loadPool fallito:', e);
+      return { ok: false, error: 'db_error' };
+    }
+    if (room.questions.length === 0) {
+      room.status = 'lobby';
+      return { ok: false, error: 'no_questions' };
+    }
+    // se l'archivio non basta per tutti i round richiesti, la partita dura
+    // quanto le domande disponibili (e la UI mostra il totale reale)
+    if (room.settings.roundsTotal && room.questions.length < room.settings.roundsTotal) {
+      room.settings.roundsTotal = room.questions.length;
+    }
     dbSetGameStatus(room.gameId, 'playing').catch(console.error);
     this.startRound(room, 0);
     return { ok: true };
@@ -288,6 +361,7 @@ export class GameEngine {
   }
 
   private startRound(room: Room, index: number) {
+    if (room.status !== 'playing') return; // partita terminata nel frattempo
     if (index >= room.questions.length) {
       this.finish(room);
       return;
@@ -412,10 +486,10 @@ export class GameEngine {
     room.epoch++;
     if (room.mode === 'solo') {
       for (const p of room.players.values()) {
+        // la streak si azzera solo sbagliando, non se non ti prenoti
         const delta = soloTimeoutPenalty(cur.q.difficulty);
         p.score += delta;
         p.lastDelta += delta;
-        p.streak = 0;
       }
       this.reveal(room, 'timeout');
     } else {
@@ -466,9 +540,24 @@ export class GameEngine {
     this.schedule(room, room.settings.revealMs, () => {
       const total = room.settings.roundsTotal;
       if (total && room.roundIndex + 1 >= total) this.finish(room);
-      else this.startRound(room, room.roundIndex + 1);
+      else this.nextRound(room);
     });
     this.bump(room);
+  }
+
+  /**
+   * Passa al round successivo. Nelle partite aperte, se il pool è agli sgoccioli
+   * ne carica un altro blocco (senza ripetere le domande già viste).
+   */
+  private nextRound(room: Room) {
+    const next = room.roundIndex + 1;
+    if (!room.settings.roundsTotal && next >= room.questions.length - 2) {
+      this.loadPool(room, room.questions.length)
+        .catch((e) => console.error('ricarica pool fallita:', e))
+        .finally(() => this.startRound(room, next));
+      return;
+    }
+    this.startRound(room, next);
   }
 
   async end(code: string, playerId: string, token: string): Promise<{ ok: boolean; error?: string }> {
@@ -547,9 +636,12 @@ export class GameEngine {
         ? {
             qtype: cur.q.qtype,
             difficulty: cur.q.difficulty,
-            prompt: cur.q.prompt,
-            payload: cur.q.payload,
-            choices: cur.q.choices,
+            // durante il countdown la domanda non è ancora visibile a nessuno, e
+            // le opzioni escono solo quando si può rispondere: chi guarda lo
+            // stream grezzo non ha vantaggio su chi guarda lo schermo
+            prompt: room.phase === 'countdown' ? '' : cur.q.prompt,
+            payload: room.phase === 'countdown' ? { kind: 'cells', rows: [] } : cur.q.payload,
+            choices: room.phase === 'answer' || revealing ? cur.q.choices : [],
             value: cur.value,
             countdownEndsAt: cur.countdownEndsAt,
             buzzDeadline: cur.buzzDeadline,

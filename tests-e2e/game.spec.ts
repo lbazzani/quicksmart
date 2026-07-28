@@ -35,13 +35,24 @@ async function waitState(code: string, pred: (s: Snap) => boolean, timeoutMs = 4
   }
 }
 
+/**
+ * Oracolo: la risposta corretta non è mai negli snapshot prima del reveal, la
+ * leggiamo dal DB. Le opzioni escono solo in fase answer, quindi la ricerca usa
+ * prompt+payload (e affina con le choices quando disponibili).
+ */
 async function correctIndex(code: string): Promise<number> {
-  const s = await snap(code);
-  const { rows } = await pool.query(
-    `SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb AND choices = $3::jsonb`,
-    [s.current!.prompt, JSON.stringify(s.current!.payload), JSON.stringify(s.current!.choices)]
-  );
-  if (rows.length !== 1) throw new Error('oracolo: domanda non trovata');
+  const cur = (await snap(code)).current!;
+  const hasChoices = Array.isArray(cur.choices) && (cur.choices as unknown[]).length === 3;
+  const { rows } = hasChoices
+    ? await pool.query(
+        `SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb AND choices = $3::jsonb`,
+        [cur.prompt, JSON.stringify(cur.payload), JSON.stringify(cur.choices)]
+      )
+    : await pool.query(`SELECT correct_index FROM questions WHERE prompt = $1 AND payload = $2::jsonb`, [
+        cur.prompt,
+        JSON.stringify(cur.payload),
+      ]);
+  if (rows.length !== 1) throw new Error(`oracolo: domanda non trovata (match=${rows.length})`);
   return rows[0].correct_index as number;
 }
 

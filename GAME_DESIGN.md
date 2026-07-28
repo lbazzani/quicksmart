@@ -23,7 +23,7 @@ Quiz visuale stile test del QI, in tempo reale, mobile-first. Una squadra, un co
 | Evento | Punti |
 |---|---|
 | Base domanda | facile **100** · media **200** · difficile **300** |
-| Bonus velocità risposta | fino a **+50%** del base, proporzionale al tempo rimanente |
+| Bonus velocità risposta | fino a **+50%** del valore in palio, proporzionale al tempo rimanente |
 | Risposta sbagliata | **−50%** del valore corrente della domanda |
 | Prenotato senza rispondere | **−60%** del valore corrente |
 | Nessuno si prenota | **−25** a tutti |
@@ -31,7 +31,7 @@ Quiz visuale stile test del QI, in tempo reale, mobile-first. Una squadra, un co
 
 **Streak 🔥** — risposte corrette consecutive: ×1.25 da 3, ×1.5 da 5, ×2 da 8. Si azzera sbagliando (non se non buzzi).
 
-**Solo** — timer di decisione (default 15s): scade senza buzz → **−40%** del base. Il buzz ferma il timer → 5s per rispondere. Stesso scoring per giusto/sbagliato.
+**Solo** — timer di decisione (default 15s): scade senza buzz → **−40%** del base (la streak resta: non hai sbagliato, hai solo passato). Il buzz ferma il timer → 5s per rispondere. Stesso scoring per giusto/sbagliato.
 
 Il punteggio può andare sotto zero: rischiare ha un costo reale.
 
@@ -39,7 +39,7 @@ Il punteggio può andare sotto zero: rischiare ha un costo reale.
 
 Alla creazione l'host sceglie:
 - **Numero di round** (5 / 10 / 15 / 20) → fine automatica, oppure
-- **Partita aperta** → l'host termina quando vuole con "Termina partita".
+- **Partita aperta** → l'host termina quando vuole con "Termina partita" (il pool di domande si ricarica da solo, senza ripetizioni).
 
 Podio finale animato (🥇🥈🥉) + statistiche: accuratezza, velocità media di risposta, streak massima, buzz vinti.
 

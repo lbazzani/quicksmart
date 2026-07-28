@@ -27,13 +27,19 @@ export function loadIdentity(code: string): Identity | null {
 export async function api<T = { ok: boolean; error?: string }>(
   path: string,
   body: Record<string, unknown>
-): Promise<T & { error?: string }> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return (await res.json()) as T & { error?: string };
+): Promise<T & { ok?: boolean; error?: string }> {
+  // non lancia mai: chi chiama guarda `error` e non resta bloccato su un
+  // flag "sto inviando" se il telefono perde la rete per un istante
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as T & { ok?: boolean; error?: string };
+  } catch {
+    return { ok: false, error: 'network' } as T & { ok?: boolean; error?: string };
+  }
 }
 
 /** Connessione SSE con riconnessione automatica + offset orologio server. */
@@ -60,6 +66,11 @@ export function useGame(code: string, playerId: string | null) {
           const s = JSON.parse(ev.data) as GameSnapshot;
           setSnap(s);
           setOffset(s.serverNow - Date.now());
+          // a partita finita il podio resta sullo schermo: niente riconnessioni
+          if (s.status === 'ended') {
+            stopped = true;
+            es.close();
+          }
         } catch {
           // frame malformato: ignora
         }
@@ -67,22 +78,21 @@ export function useGame(code: string, playerId: string | null) {
       es.onerror = () => {
         setConnected(false);
         es.close();
-        // se la partita non esiste (server riavviato / codice errato) il
-        // reconnect fallirà sempre: dopo qualche tentativo segnala not found
-        if (!stopped) {
-          retryTimer = setTimeout(async () => {
-            try {
-              const head = await fetch(`/api/game/${code}/stream`, { method: 'HEAD' });
-              if (head.status === 404) {
-                setNotFound(true);
-                return;
-              }
-            } catch {
-              // rete assente: continua a riprovare
+        if (stopped) return;
+        retryTimer = setTimeout(async () => {
+          // la partita può non esistere più (server riavviato o codice errato):
+          // lo chiediamo alla route snapshot, non allo stream
+          try {
+            const probe = await fetch(`/api/game/${code}`, { cache: 'no-store' });
+            if (probe.status === 404) {
+              setNotFound(true);
+              return;
             }
-            connect();
-          }, 1500);
-        }
+          } catch {
+            // rete assente: continua a riprovare
+          }
+          connect();
+        }, 1500);
       };
     };
 

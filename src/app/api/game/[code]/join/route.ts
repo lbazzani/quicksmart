@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEngine } from '@/lib/engine/engine';
+import { clientIp, rateLimit, tooMany } from '@/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ code: string }> }) {
+  if (!rateLimit(`join:${clientIp(req)}`, 30, 60_000)) return tooMany();
+
   const { code } = await ctx.params;
   let body: { nickname?: string; avatar?: string };
   try {
@@ -15,10 +18,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ code: stri
   const avatar = (body.avatar ?? '🐼').slice(0, 8);
   if (!nickname) return NextResponse.json({ error: 'nickname_required' }, { status: 400 });
 
-  const res = await getEngine().join(code, nickname, avatar);
-  if (!res.ok) {
-    const status = res.error === 'not_found' ? 404 : 409;
-    return NextResponse.json({ error: res.error }, { status });
+  try {
+    const res = await getEngine().join(code, nickname, avatar);
+    if (!res.ok) {
+      const status = res.error === 'not_found' ? 404 : 409;
+      return NextResponse.json({ error: res.error }, { status });
+    }
+    return NextResponse.json({ code: code.toUpperCase(), playerId: res.playerId, token: res.token });
+  } catch (e) {
+    console.error('join:', e);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
-  return NextResponse.json({ code: code.toUpperCase(), playerId: res.playerId, token: res.token });
 }

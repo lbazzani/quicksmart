@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEngine } from '@/lib/engine/engine';
+import { clientIp, rateLimit, tooMany } from '@/lib/ratelimit';
 import type { GameMode } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,9 @@ interface CreateBody {
 }
 
 export async function POST(req: NextRequest) {
+  // creare partite è l'operazione più costosa: 10 al minuto per IP bastano
+  if (!rateLimit(`create:${clientIp(req)}`, 10, 60_000)) return tooMany();
+
   let body: CreateBody;
   try {
     body = await req.json();
@@ -29,18 +33,26 @@ export async function POST(req: NextRequest) {
 
   const roundsTotal =
     body.roundsTotal == null ? null : Math.max(1, Math.min(30, Math.round(body.roundsTotal)));
-  const buzzWindowSec = Math.max(5, Math.min(90, body.buzzWindowSec ?? (mode === 'solo' ? 15 : 25)));
-  const answerSec = Math.max(3, Math.min(30, body.answerSec ?? 5));
+  const buzzWindowSec = Math.max(5, Math.min(90, Math.round(body.buzzWindowSec ?? (mode === 'solo' ? 15 : 25))));
+  const answerSec = Math.max(3, Math.min(30, Math.round(body.answerSec ?? 5)));
 
-  const engine = getEngine();
-  const { code, playerId, token } = await engine.createGame({
-    name,
-    mode,
-    nickname,
-    avatar,
-    roundsTotal,
-    buzzWindowMs: buzzWindowSec * 1000,
-    answerMs: answerSec * 1000,
-  });
-  return NextResponse.json({ code, playerId, token });
+  try {
+    const engine = getEngine();
+    const { code, playerId, token } = await engine.createGame({
+      name,
+      mode,
+      nickname,
+      avatar,
+      roundsTotal,
+      buzzWindowMs: buzzWindowSec * 1000,
+      answerMs: answerSec * 1000,
+    });
+    return NextResponse.json({ code, playerId, token });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'error';
+    if (msg === 'too_many_rooms') return NextResponse.json({ error: 'too_many_rooms' }, { status: 503 });
+    if (msg === 'nickname_required') return NextResponse.json({ error: 'nickname_required' }, { status: 400 });
+    console.error('createGame:', e);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+  }
 }

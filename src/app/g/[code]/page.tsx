@@ -14,7 +14,7 @@ import { QuestionView, ChoiceView } from '@/components/visuals';
 import { TimerRing } from '@/components/TimerRing';
 import { SofaiBubble } from '@/components/SofaiBubble';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
-import { isMuted, setMuted, sfx } from '@/lib/sounds';
+import { isMuted, setMuted, sfx, unlockAudio } from '@/lib/sounds';
 
 const CHOICE_LABELS = ['A', 'B', 'C'];
 
@@ -81,7 +81,8 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
     }
   }, [snap, identity.playerId]);
 
-  if (notFound) {
+  // se abbiamo già ricevuto il podio, lo teniamo anche se il server riparte
+  if (notFound && snap?.status !== 'ended') {
     return (
       <Center>
         <SofaiAvatar mood="sad" size={90} />
@@ -104,8 +105,10 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
           {snap.status === 'playing' && me?.isHost && snap.mode === 'team' && <EndButton code={code} identity={identity} />}
           <button
             onClick={() => {
-              setMuted(!muted);
-              setMutedState(!muted);
+              const next = !muted;
+              setMuted(next);
+              setMutedState(next);
+              if (!next) unlockAudio(); // deve avvenire dentro il tocco (iOS)
             }}
             className="btn-ghost px-2.5 py-1.5 text-base"
             aria-label="audio"
@@ -151,6 +154,7 @@ function EndButton({ code, identity }: { code: string; identity: Identity }) {
 function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPublic; code: string; identity: Identity }) {
   const [copied, setCopied] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
 
   async function copy() {
     try {
@@ -179,7 +183,7 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
         <div className="mx-auto flex flex-col items-center gap-1.5">
           <span className="text-xs font-bold text-slate-400">{T.lobby.scanQr}</span>
           <img
-            src={`/api/qr?data=${encodeURIComponent(snap.joinUrl)}`}
+            src={`/api/qr?code=${code}`}
             alt="QR"
             width={150}
             height={150}
@@ -214,17 +218,25 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
       <div className="mt-auto flex flex-col gap-3 pb-2">
         <SofaiBubble comment={snap.sofia} />
         {me?.isHost ? (
-          <button
-            disabled={starting}
-            onClick={async () => {
-              setStarting(true);
-              const r = await api(`/api/game/${code}/start`, { playerId: identity.playerId, token: identity.token });
-              if (!r.ok) setStarting(false);
-            }}
-            className="btn-primary py-4 font-display text-2xl"
-          >
-            🚀 {T.lobby.startBtn}
-          </button>
+          <>
+            {startError && <p className="text-center text-sm font-bold text-rose-400">{startError}</p>}
+            <button
+              disabled={starting}
+              onClick={async () => {
+                setStarting(true);
+                setStartError('');
+                unlockAudio();
+                const r = await api(`/api/game/${code}/start`, { playerId: identity.playerId, token: identity.token });
+                if (!r.ok) {
+                  setStarting(false);
+                  setStartError(r.error === 'no_questions' ? T.errors.noQuestions : T.errors.generic);
+                }
+              }}
+              className="btn-primary py-4 font-display text-2xl"
+            >
+              🚀 {T.lobby.startBtn}
+            </button>
+          </>
         ) : (
           <p className="animate-pulse text-center text-sm text-slate-400">{T.lobby.waiting}</p>
         )}
@@ -268,6 +280,7 @@ function Play({
   async function doBuzz() {
     if (buzzing || lockedMe) return;
     setBuzzing(true);
+    unlockAudio(); // primo tocco della partita: abilita l'audio su iOS
     const r = await api(`/api/game/${code}/buzz`, { playerId: identity.playerId, token: identity.token });
     if (!r.ok) {
       setBuzzing(false);
@@ -281,7 +294,13 @@ function Play({
   async function doAnswer(i: number) {
     if (chosen !== null) return;
     setChosen(i);
-    await api(`/api/game/${code}/answer`, { playerId: identity.playerId, token: identity.token, choiceIndex: i });
+    const r = await api(`/api/game/${code}/answer`, {
+      playerId: identity.playerId,
+      token: identity.token,
+      choiceIndex: i,
+    });
+    // se l'invio non è arrivato (rete ballerina) si può ritoccare finché c'è tempo
+    if (!r.ok) setChosen(null);
   }
 
   if (!cur) return null;
