@@ -1,5 +1,7 @@
 # QuickSmart ⚡
 
+**Online su [quicksmart.it](https://quicksmart.it)**
+
 Quiz visuale stile test del QI, in tempo reale, mobile-first. Crea una squadra, condividi il codice (o il QR), prenotati per primo e rispondi in 5 secondi. Con **SofAI**, la mascotte che commenta la partita (battute generate da Claude).
 
 Regole complete e architettura: [GAME_DESIGN.md](GAME_DESIGN.md).
@@ -32,11 +34,28 @@ Per giocare dal telefono: apri l'app dall'IP LAN del computer (la lobby mostra i
 ## Test
 
 ```bash
-npx vitest run tests/                 # unit: scoring, rampa difficoltà
+npx vitest run tests/                 # unit: scoring, rampa difficoltà, sanificazione, rate limit
 npx tsx tools/check-generators.ts     # contratto dei 10 generatori
-BASE=http://localhost:3005 npx tsx tools/apitest.ts   # integrazione API (server attivo)
-npx playwright test                   # E2E: partita 3 giocatori + solo (server attivo)
+BASE=http://localhost:3005 npx tsx tools/apitest.ts        # integrazione API (server attivo)
+BASE=http://localhost:3005 npx tsx tools/injectiontest.ts  # sicurezza: prompt injection via nickname
+npx playwright test tests-e2e/game.spec.ts        # E2E locale: 3 giocatori + solo
+npx playwright test tests-e2e/production.spec.ts  # E2E sul sito pubblico
 ```
+
+## Deploy (server sparktech2)
+
+App `systemd` come utente `quicksmart` sulla porta 3010, dietro nginx con certificato Let's Encrypt; Postgres nel container Docker `local_pgdb`, database e ruolo dedicati. File in [deploy/](deploy/).
+
+```bash
+sudo -u quicksmart bash -c 'cd ~/app && git pull && npm install && npm run build'
+sudo systemctl restart quicksmart
+```
+
+Variabili in `/home/quicksmart/app/.env.production.local`: `DATABASE_URL`, `SOFIA_AI=1`, `PUBLIC_URL=https://quicksmart.it`.
+
+### Nota di sicurezza su SofAI
+
+I nickname arrivano da internet e non devono mai raggiungere un agente con strumenti. Nel prompt i giocatori diventano alias (`Giocatore1`), rimappati sui nomi veri solo dopo la risposta; il CLI viene lanciato senza tool, senza MCP, senza settings utente, con directory di lavoro isolata e ambiente minimo (nessun segreto del processo). Copertura in `tools/injectiontest.ts`.
 
 ## Struttura
 

@@ -502,7 +502,7 @@ function ScoreStrip({
   showDeltas: boolean;
 }) {
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-1">
+    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {players.map((p, rank) => (
         <div
           key={p.id}
@@ -515,8 +515,8 @@ function ScoreStrip({
           }`}
         >
           <span>{rank === 0 && p.score > 0 ? '👑' : ''}{p.avatar}</span>
-          <span className="max-w-20 truncate font-bold">{p.nickname}</span>
-          <span className="font-display font-extrabold text-slate-200">{p.score}</span>
+          <span className="max-w-16 truncate font-bold">{p.nickname}</span>
+          <span className="font-display shrink-0 font-extrabold text-slate-200">{p.score}</span>
           {p.streak >= 3 && <span className="text-xs">🔥{p.streak}</span>}
           {showDeltas && p.lastDelta !== 0 && (
             <span className={`popscore font-display text-xs font-extrabold ${p.lastDelta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
