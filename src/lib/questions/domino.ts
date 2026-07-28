@@ -1,17 +1,35 @@
 // Generatore "domino": una fila di tessere del domino che segue una regola.
-// Ogni tessera è scritta «sinistra|destra» con numeri da 0 a 6, come nel domino
-// vero. Nelle regole con salti grandi la fila "gira in tondo": dopo il 6 si
-// riparte da 0 (modulo 7) — quando succede il prompt lo dichiara, così la regola
-// resta sempre deducibile da ciò che si vede.
+// Le tessere sono disegnate davvero, con i pallini, come quelle di casa (payload
+// 'dominoes'); anche le tre risposte sono tessere vere (choice 'domino'). I
+// valori vanno da 0 a 6 come nel domino vero e la metà "0" è la metà vuota.
+//
+// CONVENZIONE UNICA, valida ovunque: le tessere sono coppie ORDINATE, cioè
+// «sinistra|destra». 4|5 e 5|4 sono due tessere diverse. Da qui discendono due
+// regole ferree, applicate dal guscio a ogni domanda:
+//   1. fra le TRE risposte non compaiono mai due tessere che sono l'una il
+//      capovolgimento dell'altra (quindi la capovolta della risposta corretta
+//      non è mai un distrattore): il bambino non deve mai decidere se 5|4 e 4|5
+//      sono la stessa tessera o no;
+//   2. quando la regola prevede che la tessera si giri, l'explanation lo dice a
+//      chiare lettere ("una tessera girata è una tessera diversa").
+//
+// Nelle regole con salti grandi la fila "gira in tondo": dopo il 6 si riparte da
+// 0 (modulo 7) — quando succede il prompt lo dichiara, così la regola resta
+// sempre deducibile da ciò che si vede.
 //
 // d1: una sola regola sulle metà — somma costante, stesso passo su entrambe,
-//     una metà ferma, tessere doppie.
+//     una metà ferma, tessere doppie, tessere che si incastrano.
 // d2: due regole insieme (passi diversi sulle due metà, ribaltamenti, passi
 //     alternati, una metà che rimbalza) o una regola sottile (salto grande che
 //     gira in tondo).
-// d3: la tessera dipende dalla precedente in modo composto (somma/differenza
-//     delle metà), oppure dalle DUE precedenti (Fibonacci mod 7), oppure i salti
-//     accelerano, oppure due regole si alternano, oppure due file si intrecciano.
+// d3: la tessera si ricava dalla PRECEDENTE (o dalle DUE precedenti) con una
+//     sola aritmetica per tutte e due le metà — o sempre modulo 7, o sempre
+//     differenza in valore assoluto, mai le due mescolate. Il prompt annuncia
+//     da dove nasce ogni tessera e le tessere di riferimento sono evidenziate:
+//     a d3 il lavoro deve stare nel calcolo, non nell'indovinare dove guardare.
+//     (Le vecchie famiglie "salti crescenti" e "due file intrecciate" sono state
+//     tolte: la prima chiedeva di scoprire una legge quadratica, la seconda
+//     richiedeva 7 tessere che a schermo vanno a capo e si leggono male.)
 //
 // L'incognita non è sempre l'ultima: a volte manca una tessera in mezzo alla fila
 // o la prima.
@@ -28,12 +46,9 @@
 // tessera diversa da quella voluta, la domanda viene scartata e rigenerata: la
 // risposta corretta è così l'unica difendibile.
 
-import type { Difficulty, Question } from '../types';
+import type { Difficulty, DominoTile, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
 import { placeChoices, retry } from './qutils';
-
-// 'domino' entra in QuestionType quando il tipo viene registrato: fino ad allora
-// il cast tiene compilabile il file senza toccare types.ts.
 
 /** una tessera: [metà sinistra, metà destra], valori 0..6 */
 type Tile = [number, number];
@@ -45,7 +60,13 @@ const INV = [0, 1, 4, 5, 2, 3, 6];
 const m7 = (x: number) => ((x % M) + M) % M;
 const fmt = (t: Tile) => `${t[0]}|${t[1]}`;
 const eq = (a: Tile, b: Tile) => a[0] === b[0] && a[1] === b[1];
+/** stessa coppia di numeri, ma girata: 4|5 contro 5|4 */
+const turned = (a: Tile, b: Tile) => a[0] === b[1] && a[1] === b[0];
 const inRange = (t: Tile) => t.every((v) => Number.isInteger(v) && v >= 0 && v <= 6);
+
+/** frase da aggiungere quando la regola gira le tessere: la convenzione va detta */
+const TURN_NOTE =
+  ' In questo gioco conta anche da che parte stanno i numeri: una tessera girata è una tessera diversa.';
 
 /** "cresce di 2" / "cala di 1" / "resta ferma" */
 function stepWord(k: number): string {
@@ -74,7 +95,17 @@ interface Built {
   explanation: string;
   /** la regola gira in tondo dopo il 6: va dichiarato nel prompt */
   mod?: boolean;
+  /**
+   * Da dove nasce ogni tessera, annunciato nel prompt quando la regola lega una
+   * tessera a quelle prima di lei (altrimenti il bambino non sa dove guardare).
+   */
+  hint?: string;
+  /** tessere di riferimento della regola: evidenziate nel disegno */
+  refs?: number[];
 }
+
+const HINT_PREV = 'ogni tessera nasce da quella prima di lei';
+const HINT_PREV2 = 'ogni tessera nasce dalle DUE tessere prima di lei';
 
 // ---------------------------------------------------------------------------
 // Anti-ambiguità: quali tessere sarebbero difendibili con una regola semplice?
@@ -229,7 +260,9 @@ function startInRange(rng: Rng, n: number, k: number): number {
 function buildD1(rng: Rng): Built {
   // le famiglie con poche file possibili pesano meno, così la fila non si ripete
   const kind = pick(rng, [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 5]);
-  const n = kind === 1 || kind === 5 ? pick(rng, [5, 5, 6]) : pick(rng, [5, 5, 6, 6, 7]);
+  // 5 o 6 tessere: di più non ci stanno sullo schermo di un telefono senza
+  // rimpicciolire i pallini oltre il leggibile
+  const n = pick(rng, [5, 5, 5, 6]);
   const hidden = chooseHidden(rng, n, 0.34, 0.16);
 
   if (kind === 0) {
@@ -245,11 +278,11 @@ function buildD1(rng: Rng): Built {
       tiles,
       hidden,
       distractors: shuffle(rng, [
-        [cb, ca], // metà scambiate
         [ca + dir, cb - dir], // un passo di troppo
         [ca, cb + dir], // muove la destra dalla parte sbagliata (somma sballata)
         [ca - dir, cb - dir], // muove tutte e due dalla stessa parte
         [ca + dir, cb], // muove solo la metà di sinistra
+        [ca + 2 * dir, cb - 2 * dir], // due passi in avanti
       ] as Tile[]),
       explanation:
         `In ogni tessera la somma delle due metà è sempre ${s}: a ogni passo la metà di sinistra ` +
@@ -272,8 +305,8 @@ function buildD1(rng: Rng): Built {
         [ca, cb - k], // ha mosso solo la metà di sinistra
         [ca - k, cb], // ha mosso solo la metà di destra
         [ca + k, cb + k], // un passo di troppo
-        [cb, ca], // metà scambiate
         [ca + k, cb - k], // le due metà vanno in direzioni opposte
+        [ca + 2 * k, cb + 2 * k], // due passi in avanti
       ] as Tile[]),
       explanation:
         `Tutte e due le metà ${k > 0 ? 'crescono' : 'calano'} di 1 a ogni passo: la sinistra fa ` +
@@ -295,11 +328,11 @@ function buildD1(rng: Rng): Built {
       tiles,
       hidden,
       distractors: shuffle(rng, [
-        [cb, ca], // metà scambiate
         movingRight ? [ca + k, cb] : [ca, cb + k], // ha mosso la metà sbagliata
         movingRight ? [ca, cb + k] : [ca + k, cb], // un passo di troppo
         [ca + k, cb + k], // ha mosso tutte e due le metà
         movingRight ? [ca, cb + 2 * k] : [ca + 2 * k, cb], // due passi in avanti
+        movingRight ? [ca, cb - 2 * k] : [ca - 2 * k, cb], // un passo indietro
       ] as Tile[]),
       explanation:
         `La metà di ${movingRight ? 'sinistra' : 'destra'} resta sempre ${fixed}: si muove solo ` +
@@ -320,11 +353,11 @@ function buildD1(rng: Rng): Built {
       tiles,
       hidden,
       distractors: shuffle(rng, [
-        [cb, ca], // metà scambiate: così però la tessera non si incastra
         [ca + k, cb + k], // un passo di troppo
         [ca, cb + k], // fa avanzare solo la metà di destra
         [ca - k, cb], // ripete la metà di sinistra della tessera precedente
         [ca + k, cb], // fa avanzare solo la metà di sinistra
+        [ca, cb + 2 * k], // due passi sulla metà di destra
       ] as Tile[]),
       explanation:
         `Le tessere si incastrano come nel domino vero: ogni tessera comincia con il numero con cui ` +
@@ -343,10 +376,10 @@ function buildD1(rng: Rng): Built {
     hidden,
     distractors: shuffle(rng, [
       [ca, ca + k], // ha mosso una metà sola
-      [ca + k, ca], // idem, dall'altra parte
       [ca + k, ca + k], // un passo di troppo
       [ca - k, ca + k], // le due metà si allontanano
       [ca + 2 * k, ca + 2 * k], // due passi in avanti
+      [ca + k, ca - k], // le due metà si allontanano dall'altra parte
     ] as Tile[]),
     explanation:
       `Sono tutte tessere doppie (le due metà uguali) e il numero ${k > 0 ? 'cresce' : 'cala'} ` +
@@ -361,7 +394,7 @@ function buildD2(rng: Rng): Built {
 
   if (kind === 0) {
     // passi diversi sulle due metà
-    const n = pick(rng, [5, 5, 6]);
+    const n = pick(rng, [5, 6, 6]);
     const hidden = chooseHidden(rng, n, 0.22, 0.12);
     const p = pick(rng, [-2, -1, 1, 2, 3]);
     let q = pick(rng, [-2, -1, 1, 2, 3]);
@@ -387,7 +420,7 @@ function buildD2(rng: Rng): Built {
         [ca, ref[1]], // ha mosso solo la metà di sinistra
         [ref[0], cb], // ha mosso solo la metà di destra
         [m7(ca + p), m7(cb + q)], // un passo di troppo
-        [cb, ca], // metà scambiate
+        [m7(ca - p), m7(cb - q)], // un passo indietro
       ] as Tile[]),
       explanation:
         `Le due metà seguono due regole diverse: la metà di sinistra ${stepWord(p)} a ogni passo ` +
@@ -398,7 +431,7 @@ function buildD2(rng: Rng): Built {
 
   if (kind === 1) {
     // ribalta e aggiungi: t(i+1) = (destra, sinistra + k)
-    const n = pick(rng, [5, 6]);
+    const n = pick(rng, [5, 6, 6]);
     const k = pick(rng, [1, 2, -1]);
     const tiles: Tile[] = [[randInt(rng, 0, 6), randInt(rng, 0, 6)]];
     let wrapped = false;
@@ -409,26 +442,29 @@ function buildD2(rng: Rng): Built {
     }
     const hidden = chance(rng, 0.2) ? randInt(rng, 2, n - 2) : n - 1;
     const prev = tiles[hidden - 1];
-    const [ca, cb] = tiles[hidden];
     return {
       tiles,
       hidden,
       mod: wrapped,
+      hint: HINT_PREV,
+      refs: [hidden - 1],
       distractors: shuffle(rng, [
-        [prev[1], prev[0]], // ribalta e basta, dimentica il ±k
+        [prev[1], prev[0]], // gira e basta, dimentica il ±k
         [m7(prev[1] + k), prev[0]], // aggiunge alla metà sbagliata
-        [m7(prev[0] + k), prev[1]], // aggiunge ma non ribalta
-        [cb, ca], // metà scambiate
+        [m7(prev[1] + k), m7(prev[0] + k)], // aggiunge a tutte e due le metà
+        [prev[0], m7(prev[1] + k)], // aggiunge senza girare
       ] as Tile[]),
       explanation:
-        `Ogni tessera si ottiene ribaltando la precedente (le due metà si scambiano di posto) e ` +
+        `Ogni tessera si ottiene girando la precedente (le due metà si scambiano di posto) e ` +
         `poi ${k > 0 ? `aggiungendo ${k}` : 'togliendo 1'} alla metà che finisce a destra: ` +
-        `${chainWithHole(tiles, hidden)}.` + (wrapped ? ' Dopo il 6 si riparte da 0.' : ''),
+        `${chainWithHole(tiles, hidden)}.` +
+        (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
+        TURN_NOTE,
     };
   }
 
   if (kind === 2) {
-    // si ribalta a ogni passo e, a passi alterni, entrambe le metà crescono di 1
+    // si gira a ogni passo e, a passi alterni, entrambe le metà crescono di 1
     const n = 6;
     const a = randInt(rng, 0, 6);
     let b = randInt(rng, 0, 6);
@@ -448,16 +484,20 @@ function buildD2(rng: Rng): Built {
       tiles,
       hidden,
       mod: wrapped,
+      hint: HINT_PREV,
+      refs: [hidden - 1],
       distractors: shuffle(rng, [
-        [prev[1], prev[0]], // ribalta senza aggiungere 1
-        [cb, ca], // aggiunge 1 ma dimentica di ribaltare
+        [prev[1], prev[0]], // gira senza aggiungere 1
         [m7(ca + 1), m7(cb + 1)], // aggiunge 1 due volte
         [ca, m7(cb + 1)], // aggiunge 1 a una metà sola
+        [m7(ca + 1), cb], // aggiunge 1 all'altra metà sola
+        [m7(prev[0] + 1), m7(prev[1] + 1)], // aggiunge 1 senza girare
       ] as Tile[]),
       explanation:
-        `A ogni passo la tessera si ribalta; nei passi pari (il 2°, il 4°, …) oltre a ribaltarsi ` +
+        `A ogni passo la tessera si gira; nei passi pari (il 2°, il 4°, …) oltre a girarsi ` +
         `guadagna anche +1 su tutte e due le metà: ${chainWithHole(tiles, hidden)}.` +
-        (wrapped ? ' Dopo il 6 si riparte da 0.' : ''),
+        (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
+        TURN_NOTE,
     };
   }
 
@@ -495,8 +535,8 @@ function buildD2(rng: Rng): Built {
       distractors: shuffle(rng, [
         altLeft ? [m7(prev[0] + other), cb] : [ca, m7(prev[1] + other)], // usa il salto sbagliato dell'alternanza
         altLeft ? [ca, prev[1]] : [prev[0], cb], // dimentica la metà con passo fisso
-        [cb, ca], // metà scambiate
         altLeft ? [m7(ca + used), m7(cb + r)] : [m7(ca + r), m7(cb + used)], // un passo di troppo
+        altLeft ? [prev[0], cb] : [ca, prev[1]], // dimentica la metà che alterna
       ] as Tile[]),
       explanation:
         `La metà di ${altLeft ? 'sinistra' : 'destra'} alterna due salti, +${p} e ${q > 0 ? `+${q}` : q} ` +
@@ -508,7 +548,7 @@ function buildD2(rng: Rng): Built {
 
   if (kind === 4) {
     // una metà rimbalza fra due valori, l'altra avanza
-    const n = pick(rng, [5, 6]);
+    const n = pick(rng, [5, 6, 6]);
     const hidden = chooseHidden(rng, n, 0.2, 0);
     const k = pick(rng, [-2, -1, 1, 2]);
     const bounceLeft = chance(rng, 0.5);
@@ -536,8 +576,8 @@ function buildD2(rng: Rng): Built {
       distractors: shuffle(rng, [
         bounceLeft ? [prev[0], cb] : [ca, prev[1]], // dimentica il rimbalzo
         bounceLeft ? [ca, prev[1]] : [prev[0], cb], // dimentica l'avanzamento
-        [cb, ca], // metà scambiate
         bounceLeft ? [ca, m7(cb + k)] : [m7(ca + k), cb], // un passo di troppo
+        bounceLeft ? [ca, m7(cb - k)] : [m7(ca - k), cb], // un passo indietro
       ] as Tile[]),
       explanation:
         `La metà di ${bounceLeft ? 'sinistra' : 'destra'} rimbalza fra ${x} e ${y}, una volta ciascuno; ` +
@@ -548,7 +588,7 @@ function buildD2(rng: Rng): Built {
   }
 
   // salto grande uguale su tutte e due le metà: la fila gira in tondo
-  const n = pick(rng, [5, 6]);
+  const n = pick(rng, [5, 6, 6]);
   const hidden = chooseHidden(rng, n, 0.2, 0);
   const k = pick(rng, [3, 4, 5]);
   const a0 = randInt(rng, 0, 6);
@@ -570,8 +610,8 @@ function buildD2(rng: Rng): Built {
       [m7(prev[0] + k), prev[1]], // muove una metà sola
       [prev[0], m7(prev[1] + k)], // muove l'altra metà sola
       [m7(ca + k), m7(cb + k)], // un passo di troppo
-      [cb, ca], // metà scambiate
       [m7(ca - 1), m7(cb - 1)], // sbaglia il giro in tondo di 1
+      [m7(ca + 1), m7(cb + 1)], // sbaglia il giro in tondo dall'altra parte
     ] as Tile[]),
     explanation:
       `Tutte e due le metà fanno lo stesso salto di ${k} a ogni passo, ma la fila gira in tondo: ` +
@@ -580,15 +620,18 @@ function buildD2(rng: Rng): Built {
   };
 }
 
-// --- difficoltà 3: regole composte, ricorsive o intrecciate ------------------
+// --- difficoltà 3: ogni tessera nasce dalle tessere prima di lei -------------
+// Regola d'oro di questo livello: UNA sola aritmetica per tutte e due le metà
+// (o sempre modulo 7, o sempre differenza in valore assoluto) e il prompt dice
+// sempre da dove nasce la tessera, con le tessere di riferimento evidenziate.
 
 function buildD3(rng: Rng): Built {
-  const kind = randInt(rng, 0, 6);
+  const kind = randInt(rng, 0, 5);
 
   if (kind === 0) {
-    // Fibonacci mod 7 su tutte e due le metà
-    const n = pick(rng, [6, 6, 7]);
-    const hidden = chance(rng, 0.18) ? randInt(rng, 3, n - 2) : n - 1;
+    // somma delle DUE precedenti su tutte e due le metà (Fibonacci mod 7)
+    const n = pick(rng, [5, 6, 6]);
+    const hidden = chance(rng, 0.28) ? randInt(rng, 3, n - 2) : n - 1;
     const tiles: Tile[] = [
       [randInt(rng, 0, 6), randInt(rng, 0, 6)],
       [randInt(rng, 1, 6), randInt(rng, 1, 6)],
@@ -596,59 +639,74 @@ function buildD3(rng: Rng): Built {
     for (let i = 2; i < n; i++) {
       tiles.push([m7(tiles[i - 1][0] + tiles[i - 2][0]), m7(tiles[i - 1][1] + tiles[i - 2][1])]);
     }
-    const [p1, p2] = [tiles[hidden - 1], tiles[hidden - 2]];
+    const p1 = tiles[hidden - 1];
+    const p2 = tiles[hidden - 2];
     const [ca, cb] = tiles[hidden];
     return {
       tiles,
       hidden,
       mod: true,
+      hint: HINT_PREV2,
+      refs: [hidden - 2, hidden - 1],
       distractors: shuffle(rng, [
         [Math.abs(p1[0] - p2[0]), Math.abs(p1[1] - p2[1])], // differenza invece di somma
-        [m7(p1[0] + p1[1]), m7(p2[0] + p2[1])], // somma le metà sbagliate
+        [ca, p1[1]], // dimentica la regola sulla metà di destra
+        [p1[0], cb], // dimentica la regola sulla metà di sinistra
         [m7(ca + p1[0]), m7(cb + p1[1])], // un passo di troppo
-        [cb, ca], // metà scambiate
+        [m7(p1[0] + p1[1]), m7(p2[0] + p2[1])], // somma le metà sbagliate
       ] as Tile[]),
       explanation:
-        `Ogni metà è la somma delle DUE precedenti (come Fibonacci) e dopo il 6 si riparte da 0. ` +
-        `Sinistra: ${halfList(tiles, 0)}; destra: ${halfList(tiles, 1)}. Al posto del ? va ` +
-        `${p2[0]} + ${p1[0]} = ${p2[0] + p1[0]}${p2[0] + p1[0] > 6 ? ` → ${ca}` : ''} a sinistra e ` +
-        `${p2[1]} + ${p1[1]} = ${p2[1] + p1[1]}${p2[1] + p1[1] > 6 ? ` → ${cb}` : ''} a destra.`,
+        `Ogni metà è la somma delle DUE tessere prima di lei: sinistra con sinistra, destra con ` +
+        `destra, e se il conto supera il 6 si tolgono 7. Sinistra: ${halfList(tiles, 0)}; destra: ` +
+        `${halfList(tiles, 1)}. Al posto del ? va ${p2[0]} + ${p1[0]} = ${p2[0] + p1[0]}` +
+        `${p2[0] + p1[0] > 6 ? ` → ${ca}` : ''} a sinistra e ${p2[1]} + ${p1[1]} = ${p2[1] + p1[1]}` +
+        `${p2[1] + p1[1] > 6 ? ` → ${cb}` : ''} a destra.`,
     };
   }
 
   if (kind === 1) {
-    // t(i+1) = (somma delle due metà mod 7, differenza)
+    // differenza fra le DUE precedenti su tutte e due le metà: niente modulo,
+    // solo "il più grande meno il più piccolo"
     const n = pick(rng, [5, 6, 6]);
-    const hidden = chance(rng, 0.2) ? randInt(rng, 2, n - 2) : n - 1;
-    const tiles: Tile[] = [[randInt(rng, 0, 6), randInt(rng, 0, 6)]];
-    for (let i = 1; i < n; i++) {
-      const [a, b] = tiles[i - 1];
-      tiles.push([m7(a + b), Math.abs(a - b)]);
+    const hidden = chance(rng, 0.28) ? randInt(rng, 3, n - 2) : n - 1;
+    const tiles: Tile[] = [
+      [randInt(rng, 0, 6), randInt(rng, 0, 6)],
+      [randInt(rng, 0, 6), randInt(rng, 0, 6)],
+    ];
+    for (let i = 2; i < n; i++) {
+      tiles.push([
+        Math.abs(tiles[i - 1][0] - tiles[i - 2][0]),
+        Math.abs(tiles[i - 1][1] - tiles[i - 2][1]),
+      ]);
     }
-    const prev = tiles[hidden - 1];
+    const p1 = tiles[hidden - 1];
+    const p2 = tiles[hidden - 2];
     const [ca, cb] = tiles[hidden];
     return {
       tiles,
       hidden,
-      mod: true,
+      hint: HINT_PREV2,
+      refs: [hidden - 2, hidden - 1],
       distractors: shuffle(rng, [
-        [cb, ca], // somma e differenza al posto sbagliato
-        [ca, m7(prev[0] + prev[1])], // mette la somma da tutte e due le parti
-        [Math.abs(prev[0] - prev[1]), Math.abs(prev[0] - prev[1])], // solo differenze
-        [m7(ca + cb), Math.abs(ca - cb)], // un passo di troppo
+        [m7(p1[0] + p2[0]), m7(p1[1] + p2[1])], // somma invece di differenza
+        [ca, p1[1]], // dimentica la regola sulla metà di destra
+        [p1[0], cb], // dimentica la regola sulla metà di sinistra
+        [Math.abs(ca - p1[0]), Math.abs(cb - p1[1])], // un passo di troppo
+        [Math.abs(p1[0] - p2[1]), Math.abs(p1[1] - p2[0])], // incrocia le metà
       ] as Tile[]),
       explanation:
-        `Ogni tessera nasce da quella prima di lei: a sinistra la SOMMA delle sue due metà ` +
-        `(se supera il 6 si toglie 7), a destra la loro DIFFERENZA. Da ${fmt(prev)}: ` +
-        `${prev[0]} + ${prev[1]} = ${prev[0] + prev[1]}${prev[0] + prev[1] > 6 ? ` → ${ca}` : ''} e ` +
-        `${Math.max(prev[0], prev[1])} − ${Math.min(prev[0], prev[1])} = ${cb}.`,
+        `Ogni metà è la differenza fra le DUE tessere prima di lei (il numero più grande meno il ` +
+        `più piccolo): sinistra con sinistra, destra con destra. Sinistra: ${halfList(tiles, 0)}; ` +
+        `destra: ${halfList(tiles, 1)}. Al posto del ? va ` +
+        `${Math.max(p1[0], p2[0])} − ${Math.min(p1[0], p2[0])} = ${ca} a sinistra e ` +
+        `${Math.max(p1[1], p2[1])} − ${Math.min(p1[1], p2[1])} = ${cb} a destra.`,
     };
   }
 
   if (kind === 2) {
-    // t(i+1) = (destra, somma delle due metà mod 7)
+    // la metà di destra scivola a sinistra, la nuova destra è la somma delle due
     const n = pick(rng, [5, 6, 6]);
-    const hidden = chance(rng, 0.2) ? randInt(rng, 2, n - 2) : n - 1;
+    const hidden = chance(rng, 0.28) ? randInt(rng, 2, n - 2) : n - 1;
     const tiles: Tile[] = [[randInt(rng, 0, 6), randInt(rng, 0, 6)]];
     for (let i = 1; i < n; i++) {
       const [a, b] = tiles[i - 1];
@@ -660,24 +718,26 @@ function buildD3(rng: Rng): Built {
       tiles,
       hidden,
       mod: true,
+      hint: HINT_PREV,
+      refs: [hidden - 1],
       distractors: shuffle(rng, [
-        [cb, ca], // metà scambiate
         [prev[0], cb], // tiene la metà sbagliata a sinistra
+        [ca, Math.abs(prev[0] - prev[1])], // differenza invece di somma
         [ca, m7(prev[0] + prev[1] + 1)], // sbaglia il giro in tondo
         [cb, m7(ca + cb)], // un passo di troppo
       ] as Tile[]),
       explanation:
         `La metà di destra scivola a sinistra, e la nuova metà di destra è la somma delle due metà ` +
-        `precedenti (dopo il 6 si riparte da 0): ${chainWithHole(tiles, hidden)}. Da ${fmt(prev)}: ` +
-        `a sinistra va ${prev[1]}, a destra ${prev[0]} + ${prev[1]} = ${prev[0] + prev[1]}` +
-        `${prev[0] + prev[1] > 6 ? ` → ${cb}` : ''}.`,
+        `precedenti (se il conto supera il 6 si tolgono 7): ${chainWithHole(tiles, hidden)}. ` +
+        `Da ${fmt(prev)}: a sinistra va ${prev[1]}, a destra ${prev[0]} + ${prev[1]} = ` +
+        `${prev[0] + prev[1]}${prev[0] + prev[1] > 6 ? ` → ${cb}` : ''}.`,
     };
   }
 
   if (kind === 3) {
-    // alternanza di due mosse: +k su tutte e due le metà, poi ribaltamento
-    const n = pick(rng, [6, 6, 7]);
-    const hidden = chance(rng, 0.18) ? randInt(rng, 2, n - 2) : n - 1;
+    // alternanza di due mosse: +k su tutte e due le metà, poi la tessera si gira
+    const n = pick(rng, [5, 6, 6]);
+    const hidden = chance(rng, 0.28) ? randInt(rng, 2, n - 2) : n - 1;
     const k = pick(rng, [2, 3]);
     const a = randInt(rng, 0, 6);
     let b = randInt(rng, 0, 6);
@@ -693,125 +753,88 @@ function buildD3(rng: Rng): Built {
       tiles,
       hidden,
       mod: true,
+      hint: HINT_PREV,
+      refs: [hidden - 1],
       distractors: shuffle(rng, [
-        [prev[1], prev[0]], // applica la mossa sbagliata (ribalta invece di sommare)
-        [cb, ca], // metà scambiate
+        [prev[1], prev[0]], // gira quando invece bisognava sommare
+        [m7(prev[0] + k), m7(prev[1] + k)], // somma quando invece bisognava girare
         [m7(ca + k), m7(cb + k)], // applica la somma due volte
         [m7(prev[0] + k), prev[1]], // somma a una metà sola
+        [m7(prev[1] + k), m7(prev[0] + k)], // gira e somma nello stesso passo
       ] as Tile[]),
       explanation:
-        `Si alternano due mosse: prima si aggiunge ${k} a tutte e due le metà (dopo il 6 si riparte ` +
-        `da 0), poi si ribalta la tessera, poi di nuovo +${k}, poi di nuovo ribalta: ` +
-        `${chainWithHole(tiles, hidden)}.`,
+        `Si alternano due mosse: prima si aggiunge ${k} a tutte e due le metà (se il conto supera ` +
+        `il 6 si tolgono 7), poi la tessera si gira, poi di nuovo +${k}, poi di nuovo si gira: ` +
+        `${chainWithHole(tiles, hidden)}.` +
+        TURN_NOTE,
     };
   }
 
   if (kind === 4) {
-    // i salti di una metà accelerano, l'altra ha un passo fisso
-    const n = 6;
-    const hidden = chooseHidden(rng, n, 0.18, 0);
-    const c = pick(rng, [1, 2]);
-    const d = pick(rng, [1, 2]);
-    const r = pick(rng, [-1, 0, 1, 2]);
-    const accLeft = chance(rng, 0.5);
-    const a0 = randInt(rng, 0, 6);
-    const b0 = randInt(rng, 0, 6);
-    const acc: number[] = [];
-    const fix: number[] = [];
-    for (let i = 0; i < n; i++) {
-      acc.push(m7(a0 + i * d + (c * i * (i - 1)) / 2));
-      fix.push(m7(b0 + i * r));
+    // gira e aggiungi nello stesso passo: t(i+1) = (destra + k, sinistra + k)
+    const n = pick(rng, [5, 6, 6]);
+    const hidden = chance(rng, 0.28) ? randInt(rng, 2, n - 2) : n - 1;
+    const k = pick(rng, [1, 2, 3]);
+    const a = randInt(rng, 0, 6);
+    let b = randInt(rng, 0, 6);
+    if (b === a) b = m7(a + 1 + randInt(rng, 0, 4));
+    const tiles: Tile[] = [[a, b]];
+    let wrapped = false;
+    for (let i = 1; i < n; i++) {
+      const [x, y] = tiles[i - 1];
+      if (x + k > 6 || y + k > 6) wrapped = true;
+      tiles.push([m7(y + k), m7(x + k)]);
     }
-    const tiles = Array.from({ length: n }, (_, i) => (accLeft ? [acc[i], fix[i]] : [fix[i], acc[i]]) as Tile);
-    const [ca, cb] = tiles[hidden];
-    const prev = tiles[Math.max(0, hidden - 1)];
-    const lastStep = d + (hidden - 1) * c; // il salto precedente
-    return {
-      tiles,
-      hidden,
-      mod: true,
-      distractors: shuffle(rng, [
-        accLeft ? [m7(prev[0] + lastStep), cb] : [ca, m7(prev[1] + lastStep)], // ripete il salto senza accelerare
-        accLeft ? [m7(ca + c), cb] : [ca, m7(cb + c)], // accelera una volta di troppo
-        accLeft ? [ca, prev[1]] : [prev[0], cb], // dimentica l'altra metà
-        [cb, ca], // metà scambiate
-      ] as Tile[]),
-      explanation:
-        `I salti della metà di ${accLeft ? 'sinistra' : 'destra'} crescono a ogni passo (+${d}, ` +
-        `+${d + c}, +${d + 2 * c}, +${d + 3 * c}, …), mentre la metà di ` +
-        `${accLeft ? 'destra' : 'sinistra'} ${stepWord(r)}; dopo il 6 si riparte da 0. ` +
-        `Sinistra: ${halfList(tiles, 0)}; destra: ${halfList(tiles, 1)}.`,
-    };
-  }
-
-  if (kind === 5) {
-    // due file intrecciate: le tessere di posto dispari e quelle di posto pari
-    const n = 7;
-    const hidden = chance(rng, 0.2) ? pick(rng, [2, 4]) : n - 1;
-    const p1 = pick(rng, [-2, -1, 1, 2]);
-    const q1 = pick(rng, [-2, -1, 0, 1, 2]);
-    let p2 = pick(rng, [-2, -1, 1, 2]);
-    let q2 = pick(rng, [-2, -1, 0, 1, 2]);
-    if (p2 === p1 && q2 === q1) {
-      p2 = p1 === 2 ? -2 : p1 + 1;
-      q2 = q1 === 2 ? -2 : q1 + 1;
-    }
-    const e0: Tile = [randInt(rng, 0, 6), randInt(rng, 0, 6)];
-    const o0: Tile = [randInt(rng, 0, 6), randInt(rng, 0, 6)];
-    const tiles = Array.from({ length: n }, (_, i) => {
-      const j = Math.floor(i / 2);
-      return (i % 2 === 0
-        ? [m7(e0[0] + j * p1), m7(e0[1] + j * q1)]
-        : [m7(o0[0] + j * p2), m7(o0[1] + j * q2)]) as Tile;
-    });
+    const prev = tiles[hidden - 1];
     const [ca, cb] = tiles[hidden];
     return {
       tiles,
       hidden,
-      mod: true,
+      mod: wrapped,
+      hint: HINT_PREV,
+      refs: [hidden - 1],
       distractors: shuffle(rng, [
-        [m7(tiles[hidden - 1][0] + p2), m7(tiles[hidden - 1][1] + q2)], // continua la fila sbagliata
-        [m7(tiles[hidden - 2][0] + p2), m7(tiles[hidden - 2][1] + q2)], // usa i passi dell'altra fila
-        [cb, ca], // metà scambiate
-        [m7(ca + p1), m7(cb + q1)], // un passo di troppo
+        [prev[1], prev[0]], // gira senza aggiungere
+        [prev[1], m7(prev[0] + k)], // aggiunge solo alla metà finita a destra
+        [m7(prev[1] + k), prev[0]], // aggiunge solo alla metà finita a sinistra
+        [m7(ca + k), m7(cb + k)], // un passo di troppo
+        [m7(prev[1] - k), m7(prev[0] - k)], // toglie invece di aggiungere
       ] as Tile[]),
       explanation:
-        `Le tessere formano due file intrecciate. La 1ª, la 3ª, la 5ª e la 7ª: sinistra ${stepWord(p1)}, ` +
-        `destra ${stepWord(q1)}. La 2ª, la 4ª e la 6ª: sinistra ${stepWord(p2)}, destra ${stepWord(q2)}. ` +
-        `Il ? sta nella prima fila, dopo ${fmt(tiles[hidden - 2])}. Dopo il 6 si riparte da 0.`,
+        `Ogni tessera si ottiene dalla precedente in un colpo solo: la tessera si gira (le due metà ` +
+        `si scambiano di posto) e a tutte e due si aggiunge ${k}: ${chainWithHole(tiles, hidden)}.` +
+        (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
+        TURN_NOTE,
     };
   }
 
-  // due regole ricorsive diverse: somma mod 7 a sinistra, differenza a destra
-  const n = pick(rng, [6, 6, 7]);
-  const hidden = chance(rng, 0.18) ? randInt(rng, 3, n - 2) : n - 1;
-  const tiles: Tile[] = [
-    [randInt(rng, 0, 6), randInt(rng, 0, 6)],
-    [randInt(rng, 1, 6), randInt(rng, 1, 6)],
-  ];
-  for (let i = 2; i < n; i++) {
-    tiles.push([m7(tiles[i - 1][0] + tiles[i - 2][0]), Math.abs(tiles[i - 1][1] - tiles[i - 2][1])]);
-  }
-  const p1 = tiles[hidden - 1];
-  const p2 = tiles[hidden - 2];
-  const [ca, cb] = tiles[hidden];
+  // le tessere si incastrano come nel domino vero, ma i numeri fanno salti grandi
+  // e la fila gira in tondo
+  const n = pick(rng, [5, 6, 6]);
+  const hidden = chooseHidden(rng, n, 0.25, 0);
+  const k = pick(rng, [2, 3, 4, 5]);
+  const v0 = randInt(rng, 0, 6);
+  const vals = Array.from({ length: n + 1 }, (_, i) => m7(v0 + i * k));
+  const tiles = Array.from({ length: n }, (_, i) => [vals[i], vals[i + 1]] as Tile);
+  const prev = tiles[hidden - 1];
   return {
     tiles,
     hidden,
     mod: true,
+    hint: HINT_PREV,
+    refs: [hidden - 1],
     distractors: shuffle(rng, [
-      [Math.abs(p1[0] - p2[0]), m7(p1[1] + p2[1])], // regole scambiate fra le due metà
-      [m7(p1[0] + p2[0]), m7(p1[1] + p2[1])], // somma da tutte e due le parti
-      [cb, ca], // metà scambiate
-      [m7(p1[0] + p2[0] + 1), cb], // sbaglia il giro in tondo
+      [prev[1], m7(prev[1] + k + 1)], // sbaglia il salto di 1
+      [prev[1], m7(prev[1] + k - 1)], // lo sbaglia dall'altra parte
+      [m7(prev[1] + k), m7(prev[1] + 2 * k)], // un passo di troppo
+      [prev[1], m7(prev[1] - k)], // torna indietro invece di andare avanti
+      [prev[0], m7(prev[0] + k)], // riparte dal numero sbagliato
     ] as Tile[]),
     explanation:
-      `Le due metà seguono due regole diverse, tutte e due basate sulle DUE tessere precedenti: ` +
-      `a sinistra la somma delle due metà sinistre (dopo il 6 si riparte da 0), a destra la ` +
-      `differenza fra le due metà destre. Sinistra: ${halfList(tiles, 0)}; destra: ` +
-      `${halfList(tiles, 1)}. Al posto del ? va ${p2[0]} + ${p1[0]} = ${p2[0] + p1[0]}` +
-      `${p2[0] + p1[0] > 6 ? ` → ${ca}` : ''} a sinistra e ` +
-      `${Math.max(p1[1], p2[1])} − ${Math.min(p1[1], p2[1])} = ${cb} a destra.`,
+      `Le tessere si incastrano come nel domino vero: ogni tessera comincia con il numero con cui ` +
+      `finiva quella prima di lei. E il numero fa un salto di ${k} ogni volta, girando in tondo: ` +
+      `dopo il 6 si ricomincia da 0. La catena dei numeri è ${vals.join(' → ')}, quindi la fila è ` +
+      `${chainWithHole(tiles, hidden)}.`,
   };
 }
 
@@ -819,14 +842,17 @@ function buildD3(rng: Rng): Built {
 // Guscio comune
 // ---------------------------------------------------------------------------
 
-function promptFor(hidden: number, n: number, mod?: boolean): string {
+function promptFor(hidden: number, n: number, built: Built): string {
   const base =
     hidden === n - 1
-      ? 'Quale tessera continua la fila di domino?'
+      ? 'Quale tessera continua la fila?'
       : hidden === 0
-        ? 'Quale tessera apre la fila di domino?'
-        : 'Quale tessera manca nella fila di domino?';
-  return mod ? `${base} (i numeri vanno da 0 a 6: dopo il 6 si ricomincia da 0)` : base;
+        ? 'Quale tessera apre la fila?'
+        : 'Quale tessera manca nella fila?';
+  const notes: string[] = [];
+  if (built.hint) notes.push(built.hint);
+  if (built.mod) notes.push('dopo il 6 si torna a 0');
+  return notes.length ? `${base} (${notes.join('; ')})` : base;
 }
 
 function tailOf(tiles: Tile[], hidden: number): string {
@@ -851,33 +877,49 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
     // anti-ambiguità: nessuna regola semplice alternativa deve dare un'altra tessera
     for (const alt of alternatives(tiles, hidden)) if (!eq(alt, correct)) throw new Error('fila ambigua');
 
-    // due distrattori validi: errori tipici, mai tessere già visibili nella fila
+    // Due distrattori validi: errori tipici, mai tessere già visibili nella fila
+    // e — regola della convenzione ordinata — mai due opzioni che sono l'una la
+    // capovolta dell'altra, così il bambino non deve mai chiedersi se 5|4 e 4|5
+    // siano la stessa tessera.
     const chosen: Tile[] = [];
     for (const d of built.distractors) {
-      if (!inRange(d) || eq(d, correct)) continue;
+      if (!inRange(d) || eq(d, correct) || turned(d, correct)) continue;
       if (tiles.some((t, i) => i !== hidden && eq(t, d))) continue;
-      if (chosen.some((c) => eq(c, d))) continue;
+      if (chosen.some((c) => eq(c, d) || turned(c, d))) continue;
       chosen.push(d);
       if (chosen.length === 2) break;
     }
     if (chosen.length < 2) throw new Error('distrattori insufficienti');
 
-    const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: fmt(correct) }, [
-      { kind: 'text', text: fmt(chosen[0]) },
-      { kind: 'text', text: fmt(chosen[1]) },
+    const asChoice = (t: Tile) => ({ kind: 'domino' as const, tile: { a: t[0], b: t[1] } });
+    const { choices, correctIndex } = placeChoices(rng, asChoice(correct), [
+      asChoice(chosen[0]),
+      asChoice(chosen[1]),
     ]);
+
+    const refs = new Set(built.refs ?? []);
+    const drawn: DominoTile[] = tiles.map((t, i) => {
+      // l'incognita non porta con sé i suoi numeri: il payload arriva al client
+      if (i === hidden) return { a: 0, b: 0, unknown: true };
+      return refs.has(i) ? { a: t[0], b: t[1], highlight: true } : { a: t[0], b: t[1] };
+    });
+
+    // Se nella fila compaiono due tessere girate l'una rispetto all'altra (capita
+    // anche senza che la regola parli di giravolte, per esempio quando la somma
+    // delle due metà è costante), la spiegazione dichiara la convenzione: così
+    // nessuno resta col dubbio di aver visto due volte la stessa tessera.
+    const rowTurns = tiles.some((t, i) => t[0] !== t[1] && tiles.some((u, j) => j > i && turned(t, u)));
+    let explanation = built.explanation + tailOf(tiles, hidden);
+    if (rowTurns && !explanation.includes(TURN_NOTE.trim())) explanation += TURN_NOTE;
 
     return {
       qtype: 'domino',
       difficulty,
-      prompt: promptFor(hidden, tiles.length, built.mod),
-      payload: {
-        kind: 'numbers' as const,
-        seq: tiles.map((t, i) => (i === hidden ? '?' : fmt(t))),
-      },
+      prompt: promptFor(hidden, tiles.length, built),
+      payload: { kind: 'dominoes' as const, tiles: drawn },
       choices,
       correctIndex,
-      explanation: built.explanation + tailOf(tiles, hidden),
+      explanation,
     };
-  }, 60);
+  }, 120);
 }

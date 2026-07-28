@@ -42,6 +42,24 @@ export interface CellSpec {
   /** cella incognita: renderizzata come "?" */
   unknown?: boolean;
   highlight?: boolean;
+  /**
+   * Linea di piega disegnata sopra la cella: 'V' verticale, 'H' orizzontale,
+   * 'D' diagonale ↘, 'A' antidiagonale ↗. Serve al tipo "foglio piegato":
+   * senza vedere dove passa la piega il quesito è indecifrabile.
+   */
+  crease?: 'V' | 'H' | 'D' | 'A';
+  /** parte di foglio ripiegata via: disegnata in grigio smorzato */
+  dim?: boolean;
+  /** etichetta sopra la cella (es. "Gruppo 1") */
+  label?: string;
+}
+
+/** Una tessera del domino: due metà con i pallini */
+export interface DominoTile {
+  a: number;
+  b: number;
+  unknown?: boolean;
+  highlight?: boolean;
 }
 
 export interface ClockSpec {
@@ -68,7 +86,17 @@ export type VisualPayload =
       arrows?: boolean;
       /** modalità analogia: separatori "→" e "∶" tra le coppie */
       analogy?: boolean;
+      /** le righe sono gruppi distinti, incorniciati e separati */
+      groups?: boolean;
+      /**
+       * Le righe sono la continuazione di un'unica sequenza: il renderer
+       * disegna una freccia di continuazione a fine riga, così la catena si
+       * legge come tale anche quando va a capo.
+       */
+      wrapSequence?: boolean;
     }
+  /** fila di tessere del domino, disegnate con i pallini */
+  | { kind: 'dominoes'; tiles: DominoTile[] }
   /** serie numerica con incognita ('?') */
   | { kind: 'numbers'; seq: (number | string)[] }
   /** uno o più orologi analogici */
@@ -91,7 +119,8 @@ export type VisualPayload =
 export type ChoiceVisual =
   | { kind: 'cell'; cell: CellSpec }
   | { kind: 'text'; text: string }
-  | { kind: 'clock'; clock: ClockSpec };
+  | { kind: 'clock'; clock: ClockSpec }
+  | { kind: 'domino'; tile: DominoTile };
 
 // ---------------------------------------------------------------------------
 // Domande

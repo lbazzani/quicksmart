@@ -9,7 +9,19 @@
 // casella. 2: 2 gruppi in cui c'è sempre di mezzo il CONTEGGIO (bisogna contare
 // 1-2-3, non basta guardare) e ogni riga ha un attributo "quasi costante" (2
 // caselle su 3 uguali) che sembra la regola e non lo è. 3: tre gruppi da
-// intersecare, oppure la domanda negativa ("non appartiene a nessun gruppo").
+// intersecare; in una minoranza di round la domanda negativa ("non appartiene a
+// nessun gruppo"), che però usa solo DUE gruppi perché costa un giro di
+// verifiche in più.
+//
+// LEGGIBILITÀ (il disegno deve dire quello che dice la consegna):
+//  - il payload usa groups:true, così ogni gruppo è dentro la sua cornice e non
+//    si legge come una matrice; la prima casella di ogni riga porta l'etichetta
+//    "Gruppo 1/2/3" (le altre un'etichetta vuota, per restare allineate).
+//  - due valori che a schermo si confondono non possono mai essere l'UNICO
+//    segno che separa la risposta da un distrattore (vedi tooClose e
+//    COLOR_FAMILIES).
+//  - da d2 in su le caselle per gruppo sono 3: si arriva a 3 figure per casella
+//    e con 4 colonne diventerebbero troppo piccole per contarle.
 //
 // GARANZIA DI UNICITÀ (il punto delicato di questo tipo di domanda):
 //  - dentro un gruppo ogni attributo diverso da quello che lo definisce VARIA
@@ -47,10 +59,43 @@ const ATTRS: Attr[] = ['shape', 'color', 'count', 'fill'];
 // forme inconfondibili anche in miniatura (pentagono/esagono sarebbero cerchi)
 const SHAPES: ShapeName[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'heart', 'cross', 'moon'];
 // famiglie di colori: due colori della stessa famiglia sono troppo simili per
-// essere distinti a colpo d'occhio → mai insieme nella stessa domanda
-const COLOR_FAMILIES: number[][] = [[0, 6], [1, 5], [2], [3, 7], [4]];
+// essere distinti a colpo d'occhio → mai insieme nella stessa domanda.
+// Il viola #a78bfa sta con ciano e azzurro: viola contro azzurro #60a5fa, a
+// dimensione di opzione, sono lo stesso blu-viola e non possono essere l'unica
+// differenza fra la risposta e un distrattore.
+const COLOR_FAMILIES: number[][] = [[0, 6, 2], [1, 5], [3, 7], [4]];
 const FILLS: Fill[] = ['solid', 'outline', 'half'];
 const COUNTS = [1, 2, 3];
+
+/** etichetta stampata sopra la prima casella di ogni gruppo */
+const GROUP_LABEL = ['Gruppo 1', 'Gruppo 2', 'Gruppo 3'];
+/** etichetta "vuota": tiene le altre caselle allineate a quella intestata */
+const NO_LABEL = ' ';
+
+/**
+ * Coppie di valori che a schermo si assomigliano troppo: possono comparire nel
+ * disegno, ma non possono essere l'UNICA differenza fra la risposta giusta e un
+ * distrattore (sarebbe uno spot-the-difference, non un ragionamento).
+ * I colori non compaiono qui perché ci pensa già COLOR_FAMILIES.
+ */
+function tooClose(a: Attr, x: Val, y: Val): boolean {
+  const pair = (p: Val, q: Val) => (x === p && y === q) || (x === q && y === p);
+  // "piena" e "colorata a metà" differiscono solo per metà campitura
+  if (a === 'fill') return pair('solid', 'half');
+  // il rombo è il quadrato girato: in miniatura la differenza è un dettaglio
+  if (a === 'shape') return pair('square', 'diamond');
+  return false;
+}
+
+/**
+ * Valori "comodi da guardare" per un attributo che nelle opzioni è solo
+ * contorno: 3 figure in una casella sono un terzo della sua larghezza e la
+ * campitura a metà è la più faticosa da riconoscere.
+ */
+function readable(a: Attr, pool: Val[]): Val[] {
+  const easy = a === 'count' ? pool.filter((x) => x !== 3) : a === 'fill' ? pool.filter((x) => x !== 'half') : pool;
+  return easy.length > 0 ? easy : pool;
+}
 
 // ---------------------------------------------------------------------------
 // Testi italiani
@@ -104,12 +149,7 @@ const FILL_ADJ: Record<Fill, string> = {
   half: 'colorata a metà',
 };
 
-const ORD = ['prima', 'seconda', 'terza'];
-
-// 'sets' non è ancora nell'unione QuestionType (lo aggiunge il coordinatore):
-// finché non c'è, il cast tiene il file compilabile senza toccare types.ts.
-
-/** "contiene solo …" — che cosa hanno in comune le caselle della riga */
+/** "contiene solo …" — che cosa hanno in comune le caselle del gruppo */
 function rowClause(a: Attr, v: Val): string {
   if (a === 'shape') return `solo ${PLURAL[v as ShapeName]}`;
   if (a === 'color') return `solo figure di colore ${COLOR_NAME[v as number]}`;
@@ -207,15 +247,18 @@ function planFor(rng: Rng, difficulty: Difficulty): Plan {
   if (difficulty === 2) {
     const pair = pick(rng, D2_PAIRS);
     const attrs = chance(rng, 0.5) ? [pair[0], pair[1]] : [pair[1], pair[0]];
-    return { mode: 'intersect', attrs, cols: chance(rng, 0.3) ? 4 : 3, nearMiss: true };
+    // qui si conta fino a 3 figure per casella: con 4 colonne ogni figura
+    // scenderebbe a ~22px e contare diventerebbe un esercizio di vista
+    return { mode: 'intersect', attrs, cols: 3, nearMiss: true };
   }
-  const kind = rng();
-  // tre gruppi da intersecare
-  if (kind < 0.4) return { mode: 'intersect', attrs: pickN(rng, ATTRS, 3), cols: 3, nearMiss: chance(rng, 0.8) };
-  // tre gruppi, domanda negativa
-  if (kind < 0.8) return { mode: 'none', attrs: pickN(rng, ATTRS, 3), cols: 3, nearMiss: chance(rng, 0.7) };
-  // due gruppi, domanda negativa (più caselle per riga per compensare)
-  return { mode: 'none', attrs: pickN(rng, ATTRS, 2), cols: chance(rng, 0.4) ? 4 : 3, nearMiss: true };
+  // d3: quasi sempre tre gruppi da intersecare. La domanda negativa ribalta il
+  // compito ("quale NON entra") ed è la più facile da fraintendere: resta una
+  // minoranza dei round e usa solo DUE gruppi, così le verifiche da fare sono 6
+  // invece di 9.
+  if (chance(rng, 0.75)) {
+    return { mode: 'intersect', attrs: pickN(rng, ATTRS, 3), cols: 3, nearMiss: chance(rng, 0.8) };
+  }
+  return { mode: 'none', attrs: pickN(rng, ATTRS, 2), cols: 3, nearMiss: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -318,17 +361,27 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
   }
 
   // --- opzioni: differiscono SOLO negli attributi che definiscono i gruppi ---
+  // Ogni distrattore differisce dalla risposta per UN attributo: quel solo
+  // attributo deve quindi saltare all'occhio, altrimenti la domanda diventa una
+  // caccia alle differenze (vedi tooClose).
   let correct: Item = { shape: 'circle', color: 0, count: 1, fill: 'solid' };
   for (const a of ATTRS) {
     if (plan.attrs.includes(a)) {
-      // intersezione: prende il valore del gruppo; negativa: uno qualsiasi diverso
-      correct = withAttr(
-        correct,
-        a,
-        plan.mode === 'intersect' ? (v[a] as Val) : pick(rng, pools[a].filter((x) => x !== v[a]))
-      );
+      if (plan.mode === 'intersect') {
+        correct = withAttr(correct, a, v[a] as Val);
+      } else {
+        // negativa: un valore diverso da quello del gruppo, e ben distinguibile
+        // da esso (il distrattore differirà dalla risposta proprio qui)
+        const far = pools[a].filter((x) => x !== v[a] && !tooClose(a, v[a] as Val, x));
+        if (far.length === 0) throw new Error(`nessun valore ben distinguibile per ${a}`);
+        correct = withAttr(correct, a, pick(rng, far));
+      }
     } else {
-      correct = withAttr(correct, a, pick(rng, pools[a]));
+      // attributo che non definisce nessun gruppo: è identico in tutte e tre le
+      // opzioni, quindi non discrimina — lo teniamo sul valore che si legge
+      // meglio (poche figure, niente campitura a metà), così la differenza vera
+      // resta la più grande cosa che si vede
+      correct = withAttr(correct, a, pick(rng, readable(a, pools[a])));
     }
   }
 
@@ -338,9 +391,13 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
     // domanda negativa: il distrattore entra in UN gruppo solo
     if (plan.mode === 'none') return withAttr(correct, a, v[a] as Val);
     // intersezione: rispetta tutte le regole tranne questa, e il valore "sbagliato"
-    // è uno di quelli davvero mostrati nelle altre righe (errore più credibile)
-    const seen = [...new Set(rows.flat().map((it) => getAttr(it, a)))].filter((x) => x !== v[a]);
-    return withAttr(correct, a, pick(rng, seen.length > 0 ? seen : pools[a].filter((x) => x !== v[a])));
+    // è preferibilmente uno di quelli davvero mostrati nelle altre righe (errore
+    // più credibile), purché non si confonda con quello della risposta
+    const far = (xs: Val[]) => xs.filter((x) => x !== v[a] && !tooClose(a, v[a] as Val, x));
+    const seen = far([...new Set(rows.flat().map((it) => getAttr(it, a)))]);
+    const cand = seen.length > 0 ? seen : far(pools[a]);
+    if (cand.length === 0) throw new Error(`nessun valore ben distinguibile per ${a}`);
+    return withAttr(correct, a, pick(rng, cand));
   };
   const d1 = makeDistractor(g1);
   const d2 = makeDistractor(g2);
@@ -356,47 +413,69 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
     if (nIn(d1) !== 1 || nIn(d2) !== 1) throw new Error('un distrattore non sta in esattamente un gruppo');
   }
 
-  const rowCells = rows.map((r) => r.map(cellOf));
+  // --- controllo 4: ogni coppia di opzioni si distingue a colpo d'occhio ---
+  const opts = [correct, d1, d2];
+  for (let i = 0; i < opts.length; i++) {
+    for (let j = i + 1; j < opts.length; j++) {
+      const diff = ATTRS.filter((a) => getAttr(opts[i], a) !== getAttr(opts[j], a));
+      if (diff.length === 0) throw new Error('due opzioni identiche');
+      if (diff.length === 1 && tooClose(diff[0], getAttr(opts[i], diff[0]), getAttr(opts[j], diff[0]))) {
+        throw new Error('due opzioni separate solo da una differenza impercettibile');
+      }
+    }
+  }
+
+  const plainCells = rows.map((r) => r.map(cellOf));
   const choiceCells = [correct, d1, d2].map(cellOf);
   // nessuna opzione deve essere la copia di una casella già disegnata
-  const drawn = new Set(rowCells.flat().map((c) => JSON.stringify(c)));
+  // (confronto sulle celle nude, prima di attaccare le etichette di gruppo)
+  const drawn = new Set(plainCells.flat().map((c) => JSON.stringify(c)));
   for (const c of choiceCells) {
     if (drawn.has(JSON.stringify(c))) throw new Error('opzione identica a una casella del disegno');
   }
+  // intestazione del gruppo sulla prima casella; le altre prendono
+  // un'etichetta vuota solo per restare allineate alla prima
+  const rowCells = plainCells.map((row, i) =>
+    row.map((cell, c) => ({ ...cell, label: c === 0 ? GROUP_LABEL[i] : NO_LABEL }))
+  );
 
   const { choices, correctIndex } = placeChoices(rng, { kind: 'cell', cell: choiceCells[0] }, [
     { kind: 'cell', cell: choiceCells[1] },
     { kind: 'cell', cell: choiceCells[2] },
   ] as [ChoiceVisual, ChoiceVisual]);
 
-  const rowsText = plan.attrs.map((a, i) => `la ${ORD[i]} riga contiene ${rowClause(a, v[a] as Val)}`);
+  const rowsText = plan.attrs.map((a, i) => `il gruppo ${i + 1} contiene ${rowClause(a, v[a] as Val)}`);
   const prompt =
     plan.mode === 'none'
-      ? chance(rng, 0.5)
-        ? 'Ogni riga è un gruppo con la sua regola. Quale figura NON può entrare in nessuna riga?'
-        : 'Ogni riga segue una regola. Quale figura non va bene per nessuna delle righe?'
+      ? // niente doppia negazione: si dice al bambino che cosa cercare e quante
+        // figure entrano da qualche parte, così il compito non si può ribaltare
+        chance(rng, 0.5)
+        ? 'Ogni gruppo ha la sua regola. Due figure entrano in un gruppo, una NON entra in nessuno: qual è?'
+        : 'Ogni gruppo ha la sua regola. Trova la figura che NON va bene per nessun gruppo.'
       : total === 3
         ? chance(rng, 0.5)
-          ? 'Ogni riga è un gruppo con la sua regola. Quale figura può entrare in tutte e tre le righe?'
-          : 'Ogni riga segue una regola. Quale figura va bene per tutte e tre?'
+          ? 'Ogni gruppo ha la sua regola. Quale figura può entrare in tutti e tre i gruppi?'
+          : 'Guarda la regola di ogni gruppo: quale figura va bene per tutti e tre?'
         : chance(rng, 0.5)
-          ? 'Ogni riga è un gruppo con la sua regola. Quale figura può entrare in tutte e due le righe?'
-          : 'Ogni riga segue una regola. Quale figura va bene per entrambe le righe?';
+          ? 'Ogni gruppo ha la sua regola. Quale figura può entrare in tutti e due i gruppi?'
+          : 'Guarda la regola di ogni gruppo: quale figura va bene sia per il Gruppo 1 sia per il Gruppo 2?';
 
   const explanation =
     plan.mode === 'intersect'
-      ? `Regole: ${join(rowsText)}. La risposta deve avere tutto insieme: ` +
+      ? `Le regole: ${join(rowsText)}. La risposta deve avere tutto insieme: ` +
         `${join(plan.attrs.map((a) => needClause(a, v[a] as Val)))}. ` +
         `Le altre due opzioni rispettano ${total === 3 ? 'solo due regole su tre' : 'una regola sola'}.`
-      : `Regole: ${join(rowsText)}. La risposta giusta è quella che non rispetta nessuna regola: ` +
+      : `Le regole: ${join(rowsText)}. La risposta giusta è l'unica che non rispetta nessuna regola: ` +
         `${join(plan.attrs.map((a) => negClause(a, v[a] as Val)))}. ` +
-        `Le altre due opzioni entrano invece in una riga ciascuna.`;
+        `Le altre due entrano in un gruppo ciascuna.`;
 
   return {
     qtype: 'sets',
     difficulty,
     prompt,
-    payload: { kind: 'cells' as const, rows: rowCells },
+    // groups: ogni gruppo dentro la sua cornice, così il disegno dice quello che
+    // dice la consegna (senza, due righe di caselle si leggono come una matrice)
+    payload: { kind: 'cells' as const, rows: rowCells, groups: true },
     choices,
     correctIndex,
     explanation,

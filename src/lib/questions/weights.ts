@@ -7,8 +7,11 @@
 //
 // Difficoltà 1: una o due conversioni con numeri piccoli (moltiplica, dividi,
 // somma). 2: catene a tre livelli, una divisione intermedia, gruppi misti su un
-// piatto. 3: rapporti non unitari (serve il minimo comune multiplo), sistemi a
-// due incognite da risolvere per eliminazione, mcm esplicito.
+// piatto. 3: SOLO catene di conversione e confronti fra due bilance quasi
+// uguali — niente minimo comune multiplo, niente sistemi da risolvere per
+// sostituzione: dove i rapporti non sono unitari (2 A = 3 B) lo stesso gruppo
+// compare identico sulle due bilance, così il "ponte" si vede invece di doverlo
+// calcolare.
 //
 // I pesi interni sono INTERI e ogni bilancia viene verificata: se i due piatti
 // non valgono uguale la generazione fallisce invece di produrre una domanda
@@ -16,7 +19,9 @@
 //
 // Distrattori: errori tipici e mai casuali — sommare invece di moltiplicare,
 // fermarsi al livello intermedio (rispondere nella "valuta" sbagliata),
-// dimenticare la divisione, incrociare i moltiplicatori, off-by-one.
+// dimenticare la divisione, incrociare i moltiplicatori, off-by-one. Mai un
+// numero già stampato nel disegno: sembrerebbe da leggere invece che da
+// calcolare.
 
 import type { CountedShapes, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
@@ -86,24 +91,96 @@ function counted(gs: Group[]): CountedShapes[] {
   return gs.map((x) => ({ shape: x.s.shape, color: x.color, count: x.n }));
 }
 
-/** "2 soli e 1 luna" */
-function groupsText(gs: Group[]): string {
-  return gs.map((x) => cnt(x.n, x.s)).join(' e ');
+/**
+ * Verifica che i due gruppi valgano davvero uguale: è la rete di sicurezza
+ * contro un'aritmetica sbagliata nel generatore. Il confronto è negato così da
+ * intercettare anche il NaN di una forma senza peso dichiarato.
+ */
+function checkEq(w: Weights, a: Group[], b: Group[]): void {
+  const tot = (gs: Group[]) => gs.reduce((sum, x) => sum + x.n * (w.get(x.s.shape) ?? NaN), 0);
+  if (!(tot(a) === tot(b))) throw new Error('equivalenza incoerente nel generatore weights');
 }
 
-/**
- * Equivalenza fra due gruppi: la bilancia è in equilibrio per costruzione.
- * Il lato su cui finisce ciascun gruppo è casuale (non cambia il significato).
- * Lancia se i pesi interni non coincidono: è la rete di sicurezza contro
- * un'aritmetica sbagliata nel generatore.
- */
+/** Equivalenza fra due gruppi; il lato di ciascuno è casuale (non cambia il senso). */
 function eqScale(rng: Rng, w: Weights, a: Group[], b: Group[]): Scale {
-  const tot = (gs: Group[]) => gs.reduce((sum, x) => sum + x.n * (w.get(x.s.shape) ?? NaN), 0);
-  // confronto negato: intercetta anche il NaN di una forma senza peso dichiarato
-  if (!(tot(a) === tot(b))) throw new Error('equivalenza incoerente nel generatore weights');
+  checkEq(w, a, b);
   return chance(rng, 0.5)
     ? { left: counted(a), right: counted(b), tilt: 0 }
     : { left: counted(b), right: counted(a), tilt: 0 };
+}
+
+/**
+ * Equivalenza con i lati FISSI: serve quando due bilance vanno confrontate a
+ * colpo d'occhio (stesso gruppo ripetuto, oppure "una ha un pezzo in più"):
+ * se i gruppi saltellano da un lato all'altro il confronto non si vede.
+ */
+function eqScaleLeft(w: Weights, a: Group[], b: Group[]): Scale {
+  checkEq(w, a, b);
+  return { left: counted(a), right: counted(b), tilt: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// notazione dei piatti — UNA regola sola, valida per tutte le difficoltà
+// ---------------------------------------------------------------------------
+//
+// Il renderer (PanShapes in visuals.tsx) disegna i pezzi uno per uno finché
+// sono al massimo 3 e passa alla forma compatta "N×forma" da 4 in su. Il
+// generatore rispetta la stessa soglia dappertutto:
+//   1. nessun piatto supera MAX_COUNT pezzi;
+//   2. una stessa forma non compare mai "da contare" (2-3 pezzi disegnati) su
+//      una bilancia e "da leggere" (N×) su un'altra della stessa domanda: il
+//      pezzo singolo, che non si conta, è l'unica eccezione;
+//   3. un piatto non contiene mai due gruppi della stessa forma (si leggerebbe
+//      come un gruppo solo);
+//   4. il contenuto ci sta dentro il piatto (larghezza stimata).
+// Se una regola salta, la domanda viene rigenerata da retry().
+
+const DRAWN_MAX = 3; // fin qui il renderer disegna i pezzi
+const MAX_COUNT = 9; // oltre, il piatto diventa un muro di numeri
+const PLATE_INNER = 100; // px utili dentro un piatto (il riquadro è 108)
+
+/** larghezza stimata di un gruppo sul piatto: pezzi disegnati o scritta "N×" */
+function groupWidth(count: number): number {
+  return count <= DRAWN_MAX ? count * 26 : 46;
+}
+
+function plateWidth(items: CountedShapes[]): number {
+  const shapes = items.reduce((s, it) => s + groupWidth(it.count), 0);
+  return shapes + 14 * (items.length - 1); // i "+" fra un gruppo e l'altro
+}
+
+function checkPlates(scales: Scale[]): void {
+  const band = new Map<ShapeName, 'disegnata' | 'scritta'>();
+  for (const sc of scales) {
+    for (const pan of [sc.left, sc.right]) {
+      const seen = new Set<ShapeName>();
+      for (const it of pan) {
+        if (it.count < 1 || it.count > MAX_COUNT) throw new Error('piatto con troppi pezzi');
+        if (seen.has(it.shape)) throw new Error('due gruppi della stessa forma sullo stesso piatto');
+        seen.add(it.shape);
+        if (it.count === 1) continue; // il pezzo singolo si legge in entrambi i modi
+        const b = it.count <= DRAWN_MAX ? 'disegnata' : 'scritta';
+        const prev = band.get(it.shape);
+        if (prev && prev !== b) throw new Error('notazione dei piatti non uniforme');
+        band.set(it.shape, b);
+      }
+      if (plateWidth(pan) > PLATE_INNER) throw new Error('piatto troppo pieno');
+    }
+  }
+}
+
+/** i numeri STAMPATI nel disegno: solo i gruppi resi come "N×forma" */
+function printedNumbers(scales: Scale[]): number[] {
+  const out: number[] = [];
+  for (const sc of scales)
+    for (const pan of [sc.left, sc.right])
+      for (const it of pan) if (it.count > DRAWN_MAX) out.push(it.count);
+  return out;
+}
+
+/** i numeri scritti nel testo della domanda */
+function promptNumbers(prompt: string): number[] {
+  return (prompt.match(/\d+/g) ?? []).map(Number);
 }
 
 // ---------------------------------------------------------------------------
@@ -113,43 +190,54 @@ function eqScale(rng: Rng, w: Weights, a: Group[], b: Group[]): Scale {
 /**
  * Sceglie 2 distrattori fra i candidati (già ordinati per plausibilità):
  * interi positivi, diversi dalla risposta e fra loro, di ordine di grandezza
- * credibile. I fallback finali servono solo a non fallire mai su numeri piccoli.
+ * credibile, e MAI un numero già stampato nel disegno o nella domanda (sarebbe
+ * una trappola percettiva: sembra da leggere invece che da calcolare).
+ * La posizione della risposta nella scala dei tre numeri (più piccola, in
+ * mezzo, più grande) viene sorteggiata, così non esiste una scorciatoia del
+ * tipo "è sempre il numero più piccolo".
  */
-function chooseDistractors(rng: Rng, correct: number, candidates: number[]): [number, number] {
+function chooseDistractors(
+  rng: Rng,
+  correct: number,
+  candidates: number[],
+  printed: Set<number>
+): [number, number] {
   const seen = new Set<number>([correct]);
   const pool: number[] = [];
   const max = correct * 6 + 8;
-  for (const c of [...candidates, correct + 1, correct - 1, correct + 2, correct * 2, correct + 3]) {
+  // gli "errori tipici" vengono prima; questi ultimi sono solo tappabuchi
+  const filler = [correct + 1, correct - 1, correct + 2, correct - 2, correct * 2, correct + 3, correct + 4];
+  const strong = new Set<number>();
+  for (const c of [...candidates, ...filler]) {
     if (!Number.isFinite(c) || !Number.isInteger(c)) continue;
-    if (c < 1 || c > max || seen.has(c)) continue;
+    if (c < 1 || c > max || seen.has(c) || printed.has(c)) continue;
     seen.add(c);
     pool.push(c);
+    if (candidates.includes(c)) strong.add(c);
   }
   if (pool.length < 2) throw new Error('distrattori insufficienti');
-  // fra i più plausibili se ce ne sono, per non usare sempre gli stessi due
-  const head = pool.slice(0, Math.min(4, pool.length));
-  const [a, b] = pickN(rng, head, 2);
-  return [a, b];
-}
-
-// ---------------------------------------------------------------------------
-// aritmetica
-// ---------------------------------------------------------------------------
-
-function gcd(a: number, b: number): number {
-  while (b) [a, b] = [b, a % b];
-  return a;
-}
-
-function lcm(a: number, b: number): number {
-  return (a / gcd(a, b)) * b;
-}
-
-/** "4, 8, 12" — i multipli di p fino a limite compreso */
-function multiples(p: number, limit: number): string {
-  const out: number[] = [];
-  for (let k = p; k <= limit; k += p) out.push(k);
-  return out.join(', ');
+  const below = pool.filter((c) => c < correct);
+  const above = pool.filter((c) => c > correct);
+  const layouts: Array<[number[], number[]]> = [];
+  if (above.length >= 2) layouts.push([above, above]); // risposta = la più piccola
+  if (below.length >= 2) layouts.push([below, below]); // risposta = la più grande
+  if (below.length >= 1 && above.length >= 1) layouts.push([below, above]); // in mezzo
+  if (layouts.length === 0) {
+    const [a, b] = pickN(rng, pool, 2);
+    return [a, b];
+  }
+  // fra le posizioni possibili tengo solo quelle che lasciano entrare almeno un
+  // errore tipico: tre numeri consecutivi (17, 18, 19) non insegnano niente
+  const useful = layouts.filter(([x, y]) => x.some((c) => strong.has(c)) || y.some((c) => strong.has(c)));
+  const [x, y] = pick(rng, useful.length ? useful : layouts);
+  const head = (arr: number[]) => arr.slice(0, Math.min(3, arr.length));
+  const best = (arr: number[]) => {
+    const s = arr.filter((c) => strong.has(c));
+    return pick(rng, head(s.length ? s : arr));
+  };
+  if (x !== y) return [best(x), best(y)];
+  const a = best(x);
+  return [a, best(x.filter((c) => c !== a))];
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +254,9 @@ interface Built {
 }
 
 function finish(rng: Rng, difficulty: Difficulty, b: Built): Question {
-  const [w1, w2] = chooseDistractors(rng, b.answer, b.wrong);
+  checkPlates(b.scales);
+  const printed = new Set<number>([...printedNumbers(b.scales), ...promptNumbers(b.prompt)]);
+  const [w1, w2] = chooseDistractors(rng, b.answer, b.wrong, printed);
   const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(b.answer) }, [
     { kind: 'text', text: String(w1) },
     { kind: 'text', text: String(w2) },
@@ -212,7 +302,8 @@ function d1Div(rng: Rng): Built {
   const [A, B] = pickN(rng, SHAPES, 2);
   const [cA, cB] = pickN(rng, COLORS, 2);
   const a = randInt(rng, 2, 3);
-  const k = randInt(rng, 2, 4);
+  // il piatto delle B non deve diventare un muro: a·k resta dentro MAX_COUNT
+  const k = randInt(rng, 2, Math.floor(MAX_COUNT / a));
   const w: Weights = new Map([
     [A.shape, k],
     [B.shape, 1],
@@ -274,7 +365,7 @@ function d1ChainUp(rng: Rng): Built {
     ],
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${C.plural}?`,
     answer: m,
-    wrong: [unit, a * m, N - unit, m + 1],
+    wrong: [m + 1, unit, a * m, N - unit],
     explanation:
       `Prima il cambio: ${cnt(1, A)} ${val(1)} ${cnt(a, B)} = ${cnt(unit, C)}. ` +
       `Poi divido: ${N}÷${unit} = ${cnt(m, A)}.`,
@@ -285,9 +376,9 @@ function d1ChainUp(rng: Rng): Built {
 function d1Sum(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
-  const a = randInt(rng, 2, 5);
-  let b = randInt(rng, 2, 5);
-  if (b === a) b = a === 5 ? 2 : a + 1;
+  // a e b sono due conteggi della STESSA forma: o tutti e due disegnati (2-3)
+  // o tutti e due scritti (4-7), mai uno per tipo
+  const [a, b] = pickN(rng, chance(rng, 0.5) ? [2, 3] : [4, 5, 6, 7], 2);
   const w: Weights = new Map([
     [A.shape, a],
     [B.shape, b],
@@ -300,7 +391,9 @@ function d1Sum(rng: Rng): Built {
     ],
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${uno(A)} e ${uno(B)}?`,
     answer: a + b,
-    wrong: [a * b, Math.abs(a - b), Math.max(a, b), a + b + 1],
+    // errori tipici: moltiplicare invece di sommare, contare due volte lo stesso
+    // cambio, fermarsi al più grande, sbagliare di uno
+    wrong: [a * b, 2 * a, 2 * b, Math.max(a, b), a + b + 1, a + b - 1],
     explanation:
       `${cnt(1, A)} ${val(1)} ${cnt(a, C)} e ${cnt(1, B)} ${val(1)} ${cnt(b, C)}. ` +
       `Messi insieme: ${a}+${b} = ${cnt(a + b, C)}.`,
@@ -385,7 +478,7 @@ function d2Chain3Up(rng: Rng): Built {
     scales,
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${D.plural}?`,
     answer: m,
-    wrong: [unit, a * m, a * b * m, N - unit, m + 1],
+    wrong: [m + 1, unit, a * m, a * b * m, N - unit],
     explanation:
       `${cnt(1, A)} ${val(1)} ${a}×${b}×${c} = ${cnt(unit, D)}. ` +
       `Con ${N} ${D.plural} faccio ${N}÷${unit} = ${cnt(m, A)}.`,
@@ -397,7 +490,7 @@ function d2ChainDiv(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const p = randInt(rng, 2, 3);
-  const u = randInt(rng, 2, 4);
+  const u = randInt(rng, 2, Math.floor(8 / p)); // p·u pezzi sul piatto: max 8
   const c = randInt(rng, 2, 3);
   const w: Weights = new Map([
     [A.shape, u * c],
@@ -421,14 +514,18 @@ function d2ChainDiv(rng: Rng): Built {
   };
 }
 
-/** 1 A = 1 B + k C (piatto misto), 1 B = d C → "quante C valgono UN A?" */
+/** 1 A = 1 B + k C (piatto misto), 1 B = d C → "quante C valgono m A?" */
 function d2Combo(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
+  // k=1 sta bene con qualunque d (il pezzo singolo non si conta); con k=2 anche
+  // d resta fra i conteggi disegnati, così le C si leggono sempre allo stesso modo
   const k = randInt(rng, 1, 2);
-  const d = randInt(rng, 2, 5);
+  const d = k === 1 ? randInt(rng, 2, 6) : randInt(rng, 2, 3);
+  const m = randInt(rng, 1, 2);
+  const unit = d + k;
   const w: Weights = new Map([
-    [A.shape, d + k],
+    [A.shape, unit],
     [B.shape, d],
     [C.shape, 1],
   ]);
@@ -439,12 +536,13 @@ function d2Combo(rng: Rng): Built {
   shuffle(rng, scales);
   return {
     scales,
-    prompt: `${C.quanti} ${C.plural} valgono ${UNO(A)}?`,
-    answer: d + k,
-    wrong: [k * d, d, 2 * d, d - k, d + k + 1],
+    prompt: `${C.quanti} ${C.plural} valgono ${m === 1 ? UNO(A) : cnt(m, A)}?`,
+    answer: unit * m,
+    wrong: [unit, k * d, d, 2 * d, d - k, unit * m + 1],
     explanation:
       `Sul piatto misto ${cnt(1, A)} ${val(1)} ${cnt(1, B)} più ${cnt(k, C)}. ` +
-      `Siccome ${cnt(1, B)} ${val(1)} ${cnt(d, C)}, sostituisco: ${d}+${k} = ${cnt(d + k, C)}.`,
+      `Siccome ${cnt(1, B)} ${val(1)} ${cnt(d, C)}, sostituisco: ${d}+${k} = ${cnt(unit, C)}` +
+      (m === 1 ? '.' : `. E ${cnt(m, A)} valgono il doppio: ${m}×${unit} = ${cnt(unit * m, C)}.`),
   };
 }
 
@@ -452,9 +550,8 @@ function d2Combo(rng: Rng): Built {
 function d2SumMul(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
-  const a = randInt(rng, 2, 4);
-  let b = randInt(rng, 2, 4);
-  if (b === a) b = a === 4 ? 2 : a + 1;
+  // stessa forma C su due bilance: conteggi tutti disegnati o tutti scritti
+  const [a, b] = pickN(rng, chance(rng, 0.5) ? [2, 3] : [4, 5, 6], 2);
   const m = randInt(rng, 2, 3);
   const n = m === 2 ? pick(rng, [1, 3]) : pick(rng, [1, 2]);
   const answer = m * a + n * b;
@@ -472,7 +569,9 @@ function d2SumMul(rng: Rng): Built {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${cnt(m, A)} e ${cnt(n, B)}?`,
     answer,
-    wrong: [n * a + m * b, a + b, m * a, n * b, answer + 1],
+    // errori tipici: incrociare i cambi, usare un cambio solo per tutti i pezzi,
+    // dimenticarsi metà del conto, un pezzo in più o in meno
+    wrong: [n * a + m * b, (m + n) * a, (m + n) * b, m * a, n * b, a + b, answer + b, answer - b],
     explanation:
       `${cnt(1, A)} ${val(1)} ${cnt(a, C)}, quindi ${cnt(m, A)} valgono ${m}×${a} = ${m * a}. ` +
       `${cnt(1, B)} ${val(1)} ${cnt(b, C)}, quindi ${cnt(n, B)} ${val(n)} ${n}×${b} = ${n * b}. ` +
@@ -481,190 +580,141 @@ function d2SumMul(rng: Rng): Built {
 }
 
 // ---------------------------------------------------------------------------
-// difficoltà 3 — rapporti non unitari, sistemi, mcm
+// difficoltà 3 — catene con rapporti non unitari e confronto fra due bilance
 // ---------------------------------------------------------------------------
 
-interface ChainNU {
-  p: number;
-  q: number;
-  r: number;
-  t: number;
-  /** quanti A si devono prendere perché il cambio torni intero */
-  n: number;
-  ans: number;
-}
-
 /**
- * Catene con rapporti NON unitari: p A = q B e r B = t C. Per convertire serve
- * il minimo comune multiplo di q e r (il "ponte" in B): con L = mcm(q,r),
- * n = p·L/q pezzi di A valgono esattamente ans = t·L/r pezzi di C.
+ * Terzetti (p, q, t) per le due bilance "a ponte": p A = q B e q B = t C.
+ * Il gruppo di q B è IDENTICO sulle due bilance, quindi il ponte si vede a
+ * occhio e non c'è nessun minimo comune multiplo da calcolare: basta scambiare
+ * un blocco con l'altro. I tre numeri sono diversi fra loro, altrimenti due
+ * forme finirebbero per valere uguale e la domanda si sgonfierebbe.
  */
-function buildNonUnitChains(): ChainNU[] {
-  const out: ChainNU[] = [];
-  for (let p = 2; p <= 4; p++) {
-    for (let q = p + 1; q <= 6; q++) {
-      if (gcd(p, q) !== 1) continue; // altrimenti la relazione si semplifica
-      for (let r = 2; r <= 4; r++) {
-        if (r === q) continue; // niente aggancio diretto: il ponte deve costare qualcosa
-        for (let t = r + 1; t <= 6; t++) {
-          if (gcd(r, t) !== 1) continue;
-          const L = lcm(q, r);
-          const n = (p * L) / q;
-          const ans = (t * L) / r;
-          if (n < 2 || n > 12 || ans < 3 || ans > 24 || ans === n) continue;
-          out.push({ p, q, r, t, n, ans });
-        }
-      }
+const BRIDGES: Array<[number, number, number]> = [];
+for (let p = 2; p <= 3; p++) {
+  for (let q = 2; q <= 6; q++) {
+    for (let t = 2; t <= 6; t++) {
+      if (p === q || q === t || p === t) continue;
+      BRIDGES.push([p, q, t]);
     }
   }
-  return out;
 }
 
-const NON_UNIT_CHAINS = buildNonUnitChains();
-
-/** p A = q B, r B = t C → "quante C valgono n A?" (serve il mcm sul ponte B) */
-function d3NonUnitChain(rng: Rng): Built {
-  const [A, B, C] = pickN(rng, SHAPES, 3);
+/** costruisce le due bilance a ponte, con il blocco condiviso sempre a destra */
+function bridgeScales(
+  rng: Rng,
+  A: ShapeInfo,
+  B: ShapeInfo,
+  C: ShapeInfo,
+  p: number,
+  q: number,
+  t: number
+): Scale[] {
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
-  const { p, q, r, t, n, ans } = pick(rng, NON_UNIT_CHAINS);
-  const mid = lcm(q, r); // il "ponte": quante B corrispondono a n A
-  const f1 = mid / q; // di quanto va ingrandita la prima bilancia
-  const f2 = mid / r; // e la seconda
-  // pesi interi: C = p·r, B = p·t, A = q·t
   const w: Weights = new Map([
     [A.shape, q * t],
     [B.shape, p * t],
-    [C.shape, p * r],
+    [C.shape, p * q],
   ]);
-  const scales = [
-    eqScale(rng, w, [g(A, cA, p)], [g(B, cB, q)]),
-    eqScale(rng, w, [g(B, cB, r)], [g(C, cC, t)]),
-  ];
-  shuffle(rng, scales);
+  const shared = g(B, cB, q);
+  // il blocco condiviso sta dalla STESSA parte su tutte e due le bilance
+  // (incolonnato si riconosce a occhio); da quale parte lo decide il caso
+  return chance(rng, 0.5)
+    ? [eqScaleLeft(w, [g(A, cA, p)], [shared]), eqScaleLeft(w, [g(C, cC, t)], [shared])]
+    : [eqScaleLeft(w, [shared], [g(A, cA, p)]), eqScaleLeft(w, [shared], [g(C, cC, t)])];
+}
+
+/** p A = q B, q B = t C → "quante C valgono m·p A?" (scambio del blocco) */
+function d3Bridge(rng: Rng): Built {
+  const [A, B, C] = pickN(rng, SHAPES, 3);
+  const [p, q, t] = pick(rng, BRIDGES);
+  // m ≥ 2: se no la risposta sarebbe già stampata su un piatto e basterebbe copiarla
+  const m = randInt(rng, 2, 3);
+  const scales = bridgeScales(rng, A, B, C, p, q, t);
+  const nA = m * p;
+  const answer = m * t;
   return {
     scales,
-    prompt: `${C.quanti} ${C.plural} valgono ${n} ${A.plural}?`,
-    answer: ans,
-    wrong: [mid, q * t, ans + 1, ans - 1, n + t],
+    prompt: `${C.quanti} ${C.plural} valgono ${cnt(nA, A)}?`,
+    answer,
+    wrong: [t, m * q, m * p, t + m, answer + t, answer - t],
     explanation:
-      `Nessuna bilancia parla di UN pezzo solo: il ponte sono ${cnt(mid, B)}, ` +
-      `il minimo comune multiplo di ${q} e ${r}. ` +
-      `Da ${cnt(p, A)} = ${cnt(q, B)}${f1 > 1 ? `, tutto ×${f1}` : ''}: ${cnt(n, A)} = ${cnt(mid, B)}. ` +
-      `Da ${cnt(r, B)} = ${cnt(t, C)}${f2 > 1 ? `, tutto ×${f2}` : ''}: ${cnt(mid, B)} = ${cnt(ans, C)}. ` +
-      `Quindi ${cnt(n, A)} valgono ${cnt(ans, C)}.`,
+      `Sulle due bilance c'è lo stesso identico gruppo: ${cnt(q, B)}. ` +
+      `Allora posso scambiarlo: ${cnt(p, A)} valgono ${cnt(q, B)}, che valgono ${cnt(t, C)}. ` +
+      `Quindi ${cnt(p, A)} = ${cnt(t, C)}. E ${cnt(nA, A)} sono ${m} gruppi da ${p}: ` +
+      `${m}×${t} = ${cnt(answer, C)}.`,
   };
 }
 
-/** coefficienti dei piatti misti: al massimo 3 forme per piatto */
-const SYS_COEFFS = [
-  [1, 1],
-  [1, 2],
-  [2, 1],
-] as const;
+/** stesse bilance a ponte, domanda inversa: "quanti A valgono N C?" */
+function d3BridgeUp(rng: Rng): Built {
+  const [A, B, C] = pickN(rng, SHAPES, 3);
+  const [p, q, t] = pick(rng, BRIDGES);
+  const m = randInt(rng, 2, 3);
+  const scales = bridgeScales(rng, A, B, C, p, q, t);
+  const N = m * t;
+  const answer = m * p;
+  return {
+    scales,
+    prompt: `${A.quanti} ${A.plural} valgono ${N} ${C.plural}?`,
+    answer,
+    wrong: [m * q, m * t, p, N - answer, answer + 1, answer + p],
+    explanation:
+      `Le due bilance hanno lo stesso gruppo di ${cnt(q, B)}: posso scambiarlo. ` +
+      `Così ${cnt(t, C)} valgono ${cnt(q, B)}, che valgono ${cnt(p, A)}. ` +
+      `${N} ${C.plural} sono ${m} gruppi da ${t}, quindi ${m}×${p} = ${cnt(answer, A)}.`,
+  };
+}
 
 /**
- * Sistema a due incognite: x₁A + y₁B = z₁C e x₂A + y₂B = z₂C.
- * Due coppie di coefficienti diverse hanno sempre determinante ≠ 0, quindi la
- * soluzione è unica; i pesi sono scelti prima, così i totali sono interi.
+ * Coppie (peso della forma chiesta, peso dell'altra) per le due bilance quasi
+ * uguali: entrambi i totali in C restano fra 4 e MAX_COUNT, così il piatto
+ * delle C è scritto "N×" tutte e due le volte (niente notazione mista).
  */
-function d3System(rng: Rng): Built {
-  const [A, B, C] = pickN(rng, SHAPES, 3);
-  const [cA, cB, cC] = pickN(rng, COLORS, 3);
-  const wB = randInt(rng, 2, 3);
-  const wA = randInt(rng, wB + 1, 7);
-  const [e1, e2] = pickN(rng, SYS_COEFFS, 2);
-  let [x1, y1] = e1;
-  let [x2, y2] = e2;
-  let z1 = x1 * wA + y1 * wB;
-  let z2 = x2 * wA + y2 * wB;
-  const w: Weights = new Map([
-    [A.shape, wA],
-    [B.shape, wB],
-    [C.shape, 1],
-  ]);
-  // eliminazione delle B: moltiplico le righe per portarle allo stesso numero di B
-  const L = lcm(y1, y2);
-  let k1 = L / y1;
-  let k2 = L / y2;
-  if (k1 * x1 - k2 * x2 < 0) {
-    // sottraggo sempre la riga con MENO A, così i conti restano positivi
-    [x1, y1, z1, k1, x2, y2, z2, k2] = [x2, y2, z2, k2, x1, y1, z1, k1];
+const NEARLY_EQUAL: Array<[number, number]> = [];
+for (let wQ = 2; wQ <= 5; wQ++) {
+  for (let wR = 1; wR <= 5; wR++) {
+    const z1 = wQ + wR;
+    const z2 = 2 * wQ + wR;
+    if (z1 >= 4 && z2 <= MAX_COUNT) NEARLY_EQUAL.push([wQ, wR]);
   }
-  const dA = k1 * x1 - k2 * x2;
-  const dz = k1 * z1 - k2 * z2;
-  if (dA <= 0 || dz / dA !== wA) throw new Error('sistema degenere nel generatore weights');
-  const row1 = [g(A, cA, x1), g(B, cB, y1)];
-  const row2 = [g(A, cA, x2), g(B, cB, y2)];
-  const scales = [
-    eqScale(rng, w, row1, [g(C, cC, z1)]),
-    eqScale(rng, w, row2, [g(C, cC, z2)]),
-  ];
-  const scaled: string[] = [];
-  if (k1 > 1) scaled.push(`la riga "${groupsText(row1)}" per ${k1}`);
-  if (k2 > 1) scaled.push(`la riga "${groupsText(row2)}" per ${k2}`);
-  const step = scaled.length
-    ? `Moltiplico ${scaled.join(' e ')}, così tutte e due arrivano a ${cnt(L, B)}: ` +
-      `${cnt(k1 * x1, A)} + ${cnt(L, B)} = ${cnt(k1 * z1, C)} e ${cnt(k2 * x2, A)} + ${cnt(L, B)} = ${cnt(k2 * z2, C)}. `
-    : `Le due bilance hanno già lo stesso numero di ${B.plural}. `;
-  const tail =
-    dA === 1
-      ? `resta ${cnt(1, A)} = ${cnt(dz, C)}: ${uno(A)} ${val(1)} ${cnt(wA, C)}`
-      : `resta ${cnt(dA, A)} = ${cnt(dz, C)}, quindi ${uno(A)} ${val(1)} ${dz}÷${dA} = ${cnt(wA, C)}`;
-  return {
-    scales,
-    prompt: `${C.quanti} ${C.plural} valgono ${UNO(A)}?`,
-    answer: wA,
-    wrong: [wB, wA + wB, z1 - z2, wA + 1, wA - 1],
-    explanation:
-      `Due bilance, due incognite. ` +
-      step +
-      `Tolgo una riga dall'altra: ${B.pl} ${B.plural} spariscono e ${tail}. ` +
-      `Controprova: ${cnt(1, B)} ${val(1)} ${cnt(wB, C)}.`,
-  };
 }
 
-/** coppie (p,q) in cui nessuno dei due è multiplo dell'altro: serve il mcm vero */
-function buildLcmPairs(): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  for (let p = 2; p <= 6; p++) {
-    for (let q = 2; q <= 6; q++) {
-      if (p === q || p % q === 0 || q % p === 0) continue;
-      if (lcm(p, q) > 20) continue;
-      out.push([p, q]);
-    }
-  }
-  return out;
-}
-
-const LCM_PAIRS = buildLcmPairs();
-
-/** 1 A = p C, 1 B = q C → "il gruppo più piccolo di C cambiabile in A o in B" */
-function d3Lcm(rng: Rng): Built {
-  const [A, B, C] = pickN(rng, SHAPES, 3);
-  const [cA, cB, cC] = pickN(rng, COLORS, 3);
-  const [p, q] = pick(rng, LCM_PAIRS);
-  const L = lcm(p, q);
+/** 1 Q + 1 R = z₁ C e 2 Q + 1 R = z₂ C → la differenza dice quanto vale Q */
+function d3Difference(rng: Rng): Built {
+  const [Q, R, C] = pickN(rng, SHAPES, 3);
+  const [cQ, cR, cC] = pickN(rng, COLORS, 3);
+  const [wQ, wR] = pick(rng, NEARLY_EQUAL);
+  const m = randInt(rng, 1, 2);
+  const z1 = wQ + wR;
+  const z2 = 2 * wQ + wR;
   const w: Weights = new Map([
-    [A.shape, p],
-    [B.shape, q],
+    [Q.shape, wQ],
+    [R.shape, wR],
     [C.shape, 1],
   ]);
-  const scales = [
-    eqScale(rng, w, [g(A, cA, 1)], [g(C, cC, p)]),
-    eqScale(rng, w, [g(B, cB, 1)], [g(C, cC, q)]),
-  ];
-  shuffle(rng, scales);
+  // stesso ordine dei gruppi e stesso lato sulle due bilance: il pezzo in più
+  // si vede subito solo se le due righe sono incolonnate
+  const qFirst = chance(rng, 0.5);
+  const row = (n: number) => (qFirst ? [g(Q, cQ, n), g(R, cR, 1)] : [g(R, cR, 1), g(Q, cQ, n)]);
+  const mixedLeft = chance(rng, 0.5);
+  const scales = mixedLeft
+    ? [eqScaleLeft(w, row(1), [g(C, cC, z1)]), eqScaleLeft(w, row(2), [g(C, cC, z2)])]
+    : [eqScaleLeft(w, [g(C, cC, z1)], row(1)), eqScaleLeft(w, [g(C, cC, z2)], row(2))];
+  const qui = mixedLeft ? 'a sinistra' : 'a destra';
+  const là = mixedLeft ? 'a destra' : 'a sinistra';
+  const answer = m * wQ;
+  const step =
+    m === 1 ? '' : ` ${cnt(m, Q)} valgono il doppio: ${m}×${wQ} = ${cnt(answer, C)}.`;
   return {
     scales,
-    prompt:
-      `Un gruppo di ${C.plural} si può cambiare tutto in ${A.plural} oppure tutto in ${B.plural}. ` +
-      `${C.quanti} ${C.plural} servono come minimo?`,
-    answer: L,
-    wrong: [p * q, p + q, Math.max(p, q), L + Math.min(p, q)],
+    prompt: `${C.quanti} ${C.plural} valgono ${m === 1 ? UNO(Q) : cnt(m, Q)}?`,
+    answer,
+    wrong: [m * wR, wQ, m * z1, wQ + wR, answer + 1, answer - 1],
     explanation:
-      `Ogni ${A.name} vale ${cnt(p, C)}: con ${A.pl} ${A.plural} si arriva a ${multiples(p, L)} ${C.plural}. ` +
-      `Ogni ${B.name} ne vale ${q}: ${multiples(q, L)}. ` +
-      `Il primo numero che compare in tutte e due le file è ${L}, il minimo comune multiplo di ${p} e ${q}.`,
+      `Le due bilance sono quasi uguali: la seconda ha ${uno(Q)} in più ${qui}, ` +
+      `e ${là} ha ${cnt(wQ, C)} in più (${z2} invece di ${z1}). ` +
+      `Quel pezzo in più è tutta la differenza: ${uno(Q)} ${val(1)} ${cnt(wQ, C)}.${step}`,
   };
 }
 
@@ -673,11 +723,12 @@ function d3MixedTotal(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const p = randInt(rng, 2, 3);
-  const u = randInt(rng, 2, 3);
-  const c = randInt(rng, 2, 3);
+  const u = randInt(rng, 2, Math.floor(6 / p));
   const m = randInt(rng, 2, 3);
   const n = randInt(rng, 1, 3);
   const midB = m * u + n; // tutto convertito in B
+  // la C è la valuta piccola: tengo il totale sotto il muro dei numeri grandi
+  const c = midB * 3 <= 24 ? randInt(rng, 2, 3) : 2;
   const answer = midB * c;
   const w: Weights = new Map([
     [A.shape, u * c],
@@ -693,7 +744,9 @@ function d3MixedTotal(rng: Rng): Built {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${cnt(m, A)} e ${cnt(n, B)}?`,
     answer,
-    wrong: [(m * p * u + n) * c, m * u * c, (u + n) * c, m * u + n * c, answer + c],
+    // errori tipici: saltare la divisione, fermarsi alla valuta di mezzo,
+    // dimenticare un pezzo, mescolare le due valute
+    wrong: [(m * p * u + n) * c, midB, m * u * c, (u + n) * c, m * u + n * c, answer + c, answer - c],
     explanation:
       `${cnt(p, A)} valgono ${cnt(p * u, B)}, quindi ${uno(A)} ${val(1)} ${p * u}÷${p} = ${cnt(u, B)}. ` +
       `Allora ${cnt(m, A)} valgono ${m}×${u} = ${m * u} ${B.plural}, che con ${cnt(n, B)} fanno ${cnt(midB, B)}. ` +
@@ -714,7 +767,7 @@ function d3DeepUp(rng: Rng): Built {
   const [A, B, C, D] = pickN(rng, SHAPES, 4);
   const [cA, cB, cC, cD] = pickN(rng, COLORS, 4);
   const [a, v, c] = pick(rng, DEEP_TRIPLES);
-  const b = randInt(rng, 2, 3);
+  const b = randInt(rng, 2, Math.floor(6 / v)); // b·v pezzi sul piatto: max 6
   const m = randInt(rng, 2, 3);
   const unit = a * v * c;
   const N = unit * m;
@@ -734,9 +787,9 @@ function d3DeepUp(rng: Rng): Built {
     scales,
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${D.plural}?`,
     answer: m,
-    wrong: [unit, a * m, a * v * m, N - unit, m + 1],
+    wrong: [m + 1, unit, a * m, a * v * m, N - unit],
     explanation:
-      `La bilancia di mezzo va semplificata: ${cnt(b, B)} valgono ${cnt(b * v, C)}, cioè ` +
+      `La bilancia con ${cnt(b, B)} va semplificata: ${cnt(b, B)} valgono ${cnt(b * v, C)}, cioè ` +
       `${cnt(1, B)} ${val(1)} ${cnt(v, C)}. Allora ${cnt(1, A)} = ${cnt(a, B)} = ` +
       `${cnt(a * v, C)} = ${cnt(unit, D)}. Infine ${N}÷${unit} = ${cnt(m, A)}.`,
   };
@@ -746,7 +799,7 @@ function d3DeepUp(rng: Rng): Built {
 
 const D1 = [d1Mul, d1Div, d1ChainDown, d1ChainUp, d1Sum];
 const D2 = [d2Chain3Down, d2Chain3Up, d2ChainDiv, d2Combo, d2SumMul];
-const D3 = [d3NonUnitChain, d3System, d3Lcm, d3MixedTotal, d3DeepUp];
+const D3 = [d3Bridge, d3BridgeUp, d3Difference, d3MixedTotal, d3DeepUp];
 
 export function genWeights(rng: Rng, difficulty: Difficulty): Question {
   const variants = difficulty === 1 ? D1 : difficulty === 2 ? D2 : D3;

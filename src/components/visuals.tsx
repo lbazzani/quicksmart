@@ -7,6 +7,7 @@ import type {
   ChoiceVisual,
   ClockSpec,
   CountedShapes,
+  DominoTile,
   ShapeSpec,
   VisualPayload,
 } from '@/lib/types';
@@ -119,6 +120,30 @@ export function Shape({ spec }: { spec: ShapeSpec }) {
   );
 }
 
+/** Linea di piega tratteggiata sopra una cella (tipo "foglio piegato"). */
+function Crease({ dir }: { dir: NonNullable<CellSpec['crease']> }) {
+  const coords: Record<string, [number, number, number, number]> = {
+    V: [50, 4, 50, 96],
+    H: [4, 50, 96, 50],
+    D: [6, 6, 94, 94],
+    A: [94, 6, 6, 94],
+  };
+  const [x1, y1, x2, y2] = coords[dir];
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x2}
+      y2={y2}
+      stroke="#fbbf24"
+      strokeWidth={3}
+      strokeDasharray="7 5"
+      strokeLinecap="round"
+      opacity={0.95}
+    />
+  );
+}
+
 /** Una cella 100×100: 1 forma centrata, o più forme in griglia/fila. */
 export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   const n = cell.shapes.length;
@@ -155,7 +180,7 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
       );
     });
   }
-  return (
+  const svg = (
     <svg viewBox="0 0 100 100" width={size} height={size} className="shrink-0">
       <rect
         x={2}
@@ -163,12 +188,59 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
         width={96}
         height={96}
         rx={14}
-        fill={cell.highlight ? 'rgba(34,211,238,0.12)' : 'rgba(255,255,255,0.04)'}
+        fill={
+          cell.dim
+            ? 'rgba(255,255,255,0.015)'
+            : cell.highlight
+              ? 'rgba(34,211,238,0.12)'
+              : 'rgba(255,255,255,0.04)'
+        }
         stroke={cell.highlight ? '#22d3ee' : cell.unknown ? '#64748b' : 'rgba(255,255,255,0.14)'}
         strokeWidth={2}
         strokeDasharray={cell.unknown ? '7 6' : undefined}
       />
-      {content}
+      <g opacity={cell.dim ? 0.32 : 1}>{content}</g>
+      {cell.crease && <Crease dir={cell.crease} />}
+    </svg>
+  );
+  if (!cell.label) return svg;
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{cell.label}</span>
+      {svg}
+    </div>
+  );
+}
+
+/** Una tessera del domino: due metà con i pallini, come quelle vere. */
+export function Domino({ tile, size = 62 }: { tile: DominoTile; size?: number }) {
+  if (tile.unknown) {
+    return (
+      <svg viewBox="0 0 100 52" width={size * 1.9} height={size}>
+        <rect x={2} y={2} width={96} height={48} rx={8} fill="rgba(255,255,255,0.04)" stroke="#64748b" strokeWidth={2.5} strokeDasharray="7 6" />
+        <text x={50} y={38} textAnchor="middle" fontSize={30} fontWeight={800} fill="#94a3b8">?</text>
+      </svg>
+    );
+  }
+  const pips = (n: number, dx: number) =>
+    (PIP_POS[n] ?? []).map(([x, y], i) => (
+      <circle key={i} cx={dx + x * 0.42} cy={4 + y * 0.44} r={4} fill="#0b1020" />
+    ));
+  return (
+    <svg viewBox="0 0 100 52" width={size * 1.9} height={size} className="shrink-0">
+      <rect
+        x={2}
+        y={2}
+        width={96}
+        height={48}
+        rx={8}
+        fill={tile.highlight ? '#a5f3fc' : '#f8fafc'}
+        stroke={tile.highlight ? '#22d3ee' : '#94a3b8'}
+        strokeWidth={2.5}
+      />
+      <line x1={50} y1={7} x2={50} y2={45} stroke="#94a3b8" strokeWidth={2} />
+      {pips(tile.a, 5)}
+      {pips(tile.b, 53)}
     </svg>
   );
 }
@@ -295,6 +367,8 @@ function PanShapes({ items }: { items: CountedShapes[] }) {
     <div className="flex items-center justify-center gap-0.5">
       {items.map((it, i) => (
         <div key={i} className="flex items-center">
+          {/* con più gruppi sullo stesso piatto il "+" evita di leggerli come un unico blocco */}
+          {i > 0 && <span className="px-0.5 text-sm font-bold text-slate-300">+</span>}
           {it.count <= 3 ? (
             Array.from({ length: it.count }, (_, k) => (
               <svg key={k} viewBox="0 0 100 100" width={26} height={26}>
@@ -385,9 +459,14 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
       const cols = Math.max(...payload.rows.map((r) => r.length));
       const cellSize = cols >= 5 ? 56 : cols === 4 ? 66 : cols === 3 ? 82 : 92;
       return (
-        <div className="flex flex-col items-center gap-2">
+        <div className={`flex flex-col items-center ${payload.groups ? 'gap-2.5' : 'gap-2'}`}>
           {payload.rows.map((row, ri) => (
-            <div key={ri} className="flex items-center gap-1.5">
+            <div
+              key={ri}
+              className={`flex items-center gap-1.5 ${
+                payload.groups ? 'rounded-2xl border border-white/12 bg-white/[0.03] px-2 py-1.5' : ''
+              }`}
+            >
               {row.map((cell, ci) => (
                 <div key={ci} className="flex items-center gap-1.5">
                   {ci > 0 && (payload.arrows || payload.analogy) && (
@@ -396,7 +475,26 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
                   <Cell cell={cell} size={cellSize} />
                 </div>
               ))}
+              {/* la sequenza continua sulla riga sotto: senza questo segno le
+                  righe si leggono come una matrice invece che come una catena */}
+              {payload.wrapSequence && ri < payload.rows.length - 1 && (
+                <span className="font-display text-xl text-slate-500">↴</span>
+              )}
             </div>
+          ))}
+        </div>
+      );
+    }
+    case 'dominoes': {
+      // le tessere sono larghe il doppio dell'altezza: rimpiccioliscono quanto
+      // serve perché la fila resti su UNA riga (una fila spezzata si legge come
+      // due file diverse)
+      const n = payload.tiles.length;
+      const size = n <= 3 ? 56 : n === 4 ? 46 : n === 5 ? 38 : n === 6 ? 32 : 27;
+      return (
+        <div className="flex items-center justify-center gap-1">
+          {payload.tiles.map((t, i) => (
+            <Domino key={i} tile={t} size={size} />
           ))}
         </div>
       );
@@ -446,6 +544,8 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
       return <Cell cell={choice.cell} size={72} />;
     case 'clock':
       return <Clock clock={choice.clock} size={76} />;
+    case 'domino':
+      return <Domino tile={choice.tile} size={44} />;
     case 'text': {
       // le risposte testuali possono essere parole lunghe ("pentagono") o
       // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo

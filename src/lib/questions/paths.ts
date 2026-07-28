@@ -7,28 +7,40 @@
 //    contiene stella + freccia);
 //  - le altre figure (cuore, luna, croce…) sono segnaposto: marcano una
 //    casella ma NON fermano il cammino. È la domanda a dire dove ci si ferma
-//    ("fai 4 passi", "arriva al cuore").
+//    ("segui 4 frecce", "arriva al cuore").
 // Tutte le frecce puntano dentro la griglia, quindi da qualunque casella il
 // cammino non esce mai; essendo la griglia finita, ogni cammino o raggiunge il
 // bersaglio o entra in un girotondo (ciclo) — le difficoltà 2 e 3 ci giocano.
 //
+// PAROLE (regola di redazione, non cosmetica).
+// La parola "passo" è ambigua: chi conta le CASELLE toccate invece delle mosse
+// sbaglia di uno pur avendo ragionato bene. Qui l'unità è sempre la FRECCIA
+// SEGUITA: prompt e spiegazioni dicono "segui N frecce" / "quante frecce devi
+// seguire", mai "quanti passi". Le due grandezze restano diverse (le caselle
+// sono una in più delle frecce) ma ora il testo non lascia scegliere.
+// Per lo stesso motivo, a difficoltà 1 la casella "una freccia prima"
+// (tr[len-1]) NON è mai un distrattore: è esattamente la risposta di chi conta
+// le caselle, e a quel livello non deve essere punita.
+//
 // DIFFICOLTÀ
-//  1 (3×3, 2-4 passi): una sola regola, si risolve col dito.
-//     a) dove ti fermi dopo N passi   b) quanti passi fino al cuore
-//     c) quante volte cambi direzione d) direzione dell'ultimo passo
-//  2 (4×4, 3-6 passi): percorso più lungo, distrattori sul percorso stesso,
+//  1 (3×3, 2-4 frecce): una sola regola, si risolve col dito.
+//     a) dove ti fermi dopo N frecce  b) quante frecce fino al cuore
+//     c) quante volte cambi direzione d) dove punta l'ultima freccia
+//  2 (4×4, 3-6 frecce): percorso più lungo, distrattori sul percorso stesso,
 //     oppure più partenze / un anello da riconoscere.
-//     a) quanti passi (con segnaposto esca)  b) dove ti fermi dopo N passi
+//     a) quante frecce (con segnaposto esca)  b) dove ti fermi dopo N frecce
 //     c) quale stella arriva al cuore (2 stelle finiscono in un anello)
-//     d) dopo quanti passi torni sulla stella (anello chiuso)
-//  3 (4×4 o 4×5): cicli e confronti fra percorsi, con conti da fare.
-//     a) quale stella arriva prima (o pareggio)  b) dove ti fermi dopo K passi
+//     d) quante frecce per tornare sulla stella (anello chiuso)
+//  3 (4×4, mai più larga: a 5 colonne il renderer scende a celle da 56px e le
+//     frecce — l'unica informazione utile — diventano illeggibili):
+//     cicli e confronti fra percorsi, con conti da fare.
+//     a) quale stella arriva prima (o pareggio)  b) dove ti fermi dopo K frecce
 //        con K grande (serve il resto della divisione)
 //     c) quale stella gira in tondo per sempre   d) quante caselle ha l'anello
 //
 // Tutti i percorsi sono SIMULATI davvero (funzione `trace`) prima di comporre
 // la domanda: se la simulazione non conferma la costruzione si rigenera.
-// I distrattori non sono mai casuali: casella prima / casella dopo, su e giù
+// I distrattori non sono mai casuali: una freccia in più / in meno, su e giù
 // scambiati, conteggio ±1, "mi sono dimenticato del pezzo prima del girotondo".
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
@@ -52,12 +64,15 @@ const HFLIP: Record<Dir, Dir> = { 0: 180, 90: 90, 180: 0, 270: 270 };
 const OPPOSITE: Record<Dir, Dir> = { 0: 180, 90: 270, 180: 0, 270: 90 };
 /** parola usata nel racconto del percorso */
 const DIR_WORD: Record<Dir, string> = { 0: 'destra', 90: 'giù', 180: 'sinistra', 270: 'su' };
-/** testo delle opzioni di risposta */
+/**
+ * Testo delle opzioni di risposta: corto di proposito. "verso il basso" (14
+ * caratteri) nel riquadro dell'opzione finisce sotto l'etichetta A/B/C.
+ */
 const DIR_CHOICE: Record<Dir, string> = {
-  0: 'verso destra',
-  90: 'verso il basso',
-  180: 'verso sinistra',
-  270: "verso l'alto",
+  0: 'a destra',
+  90: 'in basso',
+  180: 'a sinistra',
+  270: 'in alto',
 };
 
 interface Pos {
@@ -109,8 +124,13 @@ const FIGS: FigInfo[] = [
   { shape: 'square', name: 'quadrato', il: 'il quadrato', al: 'al quadrato', sul: 'sul quadrato' },
 ];
 
-/** "1 passo" / "3 passi" */
-const passi = (n: number) => `${n} ${n === 1 ? 'passo' : 'passi'}`;
+/**
+ * "1 freccia" / "3 frecce" — l'unità di misura del percorso. Volutamente NON
+ * esiste più un helper `passi`: vedi la nota "PAROLE" in testa al file.
+ */
+const frecce = (n: number) => `${n} ${n === 1 ? 'freccia' : 'frecce'}`;
+/** "1 mossa" / "3 mosse": una mossa = una freccia seguita */
+const mosse = (n: number) => `${n} ${n === 1 ? 'mossa' : 'mosse'}`;
 /** "1 casella" / "4 caselle" */
 const caselle = (n: number) => `${n} ${n === 1 ? 'casella' : 'caselle'}`;
 
@@ -121,6 +141,11 @@ function pickTarget(rng: Rng): FigInfo {
 
 /** colori delle stelle: ben distinguibili tra loro e dal ciano delle frecce */
 const STAR_COLORS = [1, 2, 3, 4]; // rosa, viola, gialla, verde
+/**
+ * Nomi dei colori: PALETTE[3] è #fbbf24 (ambra), ma in tutto il gioco quel
+ * colore si chiama "giallo" (COLOR_NAMES in sequence.ts) ed è così che lo
+ * chiama una bambina. Restiamo coerenti con il resto del gioco: "gialla".
+ */
 const STAR_NAME: Record<number, string> = { 1: 'rosa', 2: 'viola', 3: 'gialla', 4: 'verde' };
 /** colori dei segnaposto (mai il ciano/azzurro delle frecce) */
 const FIG_COLORS = [1, 2, 3, 4, 5, 7];
@@ -210,7 +235,7 @@ function trace(b: Board, start: Pos, steps: number, flip: 'none' | 'v' | 'h' = '
   return out;
 }
 
-/** dopo quanti passi si tocca `target` (−1 = mai: il cammino gira in tondo altrove) */
+/** dopo quante frecce seguite si tocca `target` (−1 = mai: gira in tondo altrove) */
 function reachStep(b: Board, start: Pos, target: Pos): number {
   const limit = b.R * b.C + 2; // oltre questo il cammino si è già ripetuto
   const tr = trace(b, start, limit);
@@ -233,6 +258,16 @@ function routeWords(path: Pos[]): string {
   return w.join(' → ');
 }
 
+/**
+ * Dimensioni delle forme dentro la cella. La freccia è l'unica informazione
+ * che serve per risolvere: le si dà tutto lo spazio disponibile. Nelle celle
+ * con stella/segnaposto il renderer divide la cella in due mezzi box, quindi
+ * lì la freccia parte già da metà larghezza: senza questo ingrandimento a 4
+ * colonne (celle da 66px) resterebbe una freccina da ~26px.
+ */
+const ARROW_ALONE = 0.92;
+const ARROW_PAIRED = 0.96;
+
 function toPayload(b: Board, arrowColor: number): { kind: 'cells'; rows: CellSpec[][] } {
   const rows: CellSpec[][] = [];
   for (let r = 0; r < b.R; r++) {
@@ -240,19 +275,19 @@ function toPayload(b: Board, arrowColor: number): { kind: 'cells'; rows: CellSpe
     for (let c = 0; c < b.C; c++) {
       const d = b.dir[r][c];
       if (d === null) throw new Error('casella senza freccia');
-      const arrow: ShapeSpec = { shape: 'arrow', rot: d, color: arrowColor, fillMode: 'solid' };
+      const paired: ShapeSpec = { shape: 'arrow', rot: d, color: arrowColor, fillMode: 'solid', size: ARROW_PAIRED };
       const star = b.star[r][c];
       const land = b.land[r][c];
       if (star !== null) {
         row.push({
-          shapes: [{ shape: 'star', color: star, fillMode: 'solid' }, arrow],
+          shapes: [{ shape: 'star', color: star, fillMode: 'solid' }, paired],
           layout: 'row',
           highlight: true,
         });
       } else if (land) {
-        row.push({ shapes: [{ shape: land.shape, color: land.color, fillMode: 'solid' }, arrow], layout: 'row' });
+        row.push({ shapes: [{ shape: land.shape, color: land.color, fillMode: 'solid' }, paired], layout: 'row' });
       } else {
-        row.push({ shapes: [arrow] });
+        row.push({ shapes: [{ ...paired, size: ARROW_ALONE }] });
       }
     }
     rows.push(row);
@@ -272,7 +307,7 @@ interface CarveOpts {
 }
 
 /**
- * Scava un cammino semplice di `steps` passi (steps+1 caselle distinte) che non
+ * Scava un cammino semplice di `steps` frecce (steps+1 caselle distinte) che non
  * tocca le caselle già impegnate. Ricerca in profondità con direzioni mescolate:
  * il risultato dipende solo dall'rng.
  */
@@ -381,7 +416,7 @@ function without(set: Set<number>, p: Pos): Set<number> {
 
 /**
  * Struttura "ρ": una coda che entra in un anello. È il cuore delle domande di
- * difficoltà 3: dopo `tail` passi si entra nell'anello e si gira per sempre.
+ * difficoltà 3: dopo `tail` frecce si entra nell'anello e si gira per sempre.
  */
 interface Rho {
   b: Board;
@@ -418,10 +453,26 @@ interface Cand {
   why: string;
 }
 
-/** "dove ti fermi dopo N passi?" — i segnaposto marcano arrivo ed errori tipici */
+/**
+ * Dove finisce chi parte bene ma poi va sempre dritto, senza accorgersi che le
+ * frecce girano: è l'errore più onesto di tutti e non ha niente a che vedere
+ * con il conteggio, quindi si può usare anche a difficoltà 1.
+ */
+function straightEnd(R: number, C: number, path: Pos[], len: number): Pos {
+  const first = dirBetween(path[0], path[1]);
+  let cur = path[0];
+  for (let i = 0; i < len; i++) {
+    const n = stepPos(cur, first);
+    if (!inside(R, C, n)) break;
+    cur = n;
+  }
+  return cur;
+}
+
+/** "dove ti fermi dopo N frecce?" — i segnaposto marcano arrivo ed errori tipici */
 function genLanding(rng: Rng, difficulty: Difficulty, R: number, C: number, len: number): Question {
   const blocked = new Set<number>();
-  // un passo in più del necessario: serve la casella "una avanti" come esca
+  // una freccia in più del necessario: serve la casella "una avanti" come esca
   const path = carvePath(rng, R, C, blocked, len + 1, { minTurns: difficulty === 1 ? 1 : 2 });
   if (!path) throw new Error('percorso non trovato');
   const b = newBoard(R, C);
@@ -437,8 +488,16 @@ function genLanding(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   if (!samePos(end, path[len])) throw new Error('simulazione incoerente');
 
   const cands: Cand[] = [
-    { pos: tr[len + 1], why: `è una casella più avanti: ci si arriva con ${passi(len + 1)}` },
-    { pos: tr[len - 1], why: `è una casella indietro: sono solo ${passi(len - 1)}` },
+    { pos: tr[len + 1], why: `è dove arrivi seguendo una freccia in più, cioè ${frecce(len + 1)}` },
+    // "una freccia prima" è la casella su cui finisce chi conta le CASELLE
+    // invece delle frecce: a difficoltà 1 non la usiamo mai come distrattore.
+    ...(difficulty === 1
+      ? []
+      : [{ pos: tr[len - 1], why: `è dove arrivi fermandoti una freccia prima, con sole ${frecce(len - 1)}` }]),
+    {
+      pos: straightEnd(R, C, tr, len),
+      why: 'è dove arrivi andando sempre dritto come la prima freccia, senza accorgerti che poi le frecce girano',
+    },
     { pos: trace(b, start, len, 'v').slice(-1)[0], why: 'è dove si finisce scambiando su e giù' },
     { pos: trace(b, start, len, 'h').slice(-1)[0], why: 'è dove si finisce scambiando destra e sinistra' },
   ];
@@ -465,17 +524,17 @@ function genLanding(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Parti dalla stella e fai ${len} passi seguendo le frecce: su quale figura ti fermi?`,
+    prompt: `Parti dalla stella e segui ${len} frecce, una dopo l'altra: su quale figura ti fermi?`,
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `Le frecce dicono: ${routeWords(tr.slice(0, len + 1))}. Dopo ${passi(len)} ti fermi ${figs[0].sul}. ` +
+      `Le frecce da seguire dicono: ${routeWords(tr.slice(0, len + 1))}. Dopo ${mosse(len)} ti fermi ${figs[0].sul}. ` +
       `Attenzione: ${figs[1].il} ${chosen[0].why}; ${figs[2].il} ${chosen[1].why}.`,
   };
 }
 
-/** "quanti passi per arrivare al cuore?" */
+/** "quante frecce per arrivare al cuore?" */
 function genCount(rng: Rng, difficulty: Difficulty, R: number, C: number, len: number, decoys: number): Question {
   const blocked = new Set<number>();
   const path = carvePath(rng, R, C, blocked, len, { minTurns: difficulty === 1 ? 1 : 2 });
@@ -505,19 +564,20 @@ function genCount(rng: Rng, difficulty: Difficulty, R: number, C: number, len: n
 
   const arrowColor = pick(rng, ARROW_COLORS);
   const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(len) }, [
-    { kind: 'text', text: String(len + 1) }, // conta le caselle invece dei passi
-    { kind: 'text', text: String(len - 1) }, // ne perde uno per strada
+    { kind: 'text', text: String(len + 1) }, // conta anche la freccia disegnata sull'arrivo
+    { kind: 'text', text: String(len - 1) }, // ne perde una per strada
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Parti dalla stella e segui le frecce: quanti passi servono per arrivare ${figs[0].al}?`,
+    prompt: `Quante frecce devi seguire per andare dalla stella ${figs[0].al}?`,
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `Il percorso dalla stella ${figs[0].al} è: ${routeWords(path)}. Sono ${len} frecce, quindi ${passi(len)}. ` +
-      `Le caselle toccate sono ${len + 1}: i passi sono sempre uno in meno delle caselle.`,
+      `Il percorso dalla stella ${figs[0].al} è: ${routeWords(path)}. Le frecce da seguire sono ${len}. ` +
+      `La freccia disegnata ${figs[0].sul} non la segui: lì sei già arrivata. ` +
+      `Le caselle toccate sono ${len + 1}, una in più delle frecce: conta le frecce, non le caselle.`,
   };
 }
 
@@ -566,8 +626,8 @@ function genTurns(rng: Rng, difficulty: Difficulty, R: number, C: number, len: n
     choices,
     correctIndex,
     explanation:
-      `Il percorso è: ${routeWords(path)} — ${passi(len)} in tutto. I cambi di direzione sono ${turns}: ${changes.join('; ')}. ` +
-      `Attenzione a non confondere i passi (${len}) con le curve (${turns}): si gira solo quando la freccia nuova punta da un'altra parte.`,
+      `Il percorso è: ${routeWords(path)} — ${frecce(len)} in tutto. I cambi di direzione sono ${turns}: ${changes.join('; ')}. ` +
+      `Attenzione a non confondere le frecce (${len}) con le curve (${turns}): si gira solo quando la freccia nuova punta da un'altra parte.`,
   };
 }
 
@@ -603,13 +663,13 @@ function genLastDir(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Vai dalla stella ${fig.al} seguendo le frecce: in che direzione fai l'ultimo passo?`,
+    prompt: `Vai dalla stella ${fig.al} seguendo le frecce: dove punta l'ultima freccia che segui?`,
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `Il percorso è: ${routeWords(path)}. L'ultimo passo, quello che ti porta ${fig.sul}, va ${DIR_CHOICE[last]}. ` +
-      `Non basta guardare le frecce vicine alla figura: conta solo quella della casella da cui arrivi.`,
+      `Il percorso è: ${routeWords(path)}. L'ultima freccia che segui, quella che ti porta ${fig.sul}, punta ${DIR_CHOICE[last]}. ` +
+      `La freccia disegnata ${fig.sul} non conta: quella la vedresti solo ripartendo. Conta la freccia della casella da cui arrivi.`,
   };
 }
 
@@ -665,13 +725,13 @@ function genWhichStar(rng: Rng, difficulty: Difficulty, R: number, C: number, le
     choices,
     correctIndex,
     explanation:
-      `La ${starLabel(cols[0])} fa ${routeWords(good)} e in ${passi(len)} arriva ${fig.sul}. ` +
+      `La ${starLabel(cols[0])} fa ${routeWords(good)} e con ${frecce(len)} arriva ${fig.sul}. ` +
       `Le altre due finiscono nello stesso anello di ${caselle(loopLen)} e continuano a girare in tondo: ` +
       `da lì le frecce non portano più ${fig.al}.`,
   };
 }
 
-/** "dopo quanti passi torni sulla stella?" — la stella sta su un anello chiuso */
+/** "quante frecce per tornare sulla stella?" — la stella sta su un anello chiuso */
 function genLoopBack(rng: Rng, difficulty: Difficulty, R: number, C: number): Question {
   const loopLen = pick(rng, [4, 6, 8]);
   const reserved = new Set<number>();
@@ -701,20 +761,22 @@ function genLoopBack(rng: Rng, difficulty: Difficulty, R: number, C: number): Qu
   return {
     qtype: 'paths',
     difficulty,
-    prompt: 'Parti dalla stella e segui le frecce: dopo quanti passi torni sulla casella della stella?',
+    prompt: 'Parti dalla stella: quante frecce devi seguire per tornare sulla casella della stella?',
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `Le frecce formano un anello chiuso: ${routeWords(tr)}. L'anello ha ${caselle(loopLen)}, ` +
-      `quindi servono esattamente ${passi(loopLen)} per tornare al punto di partenza: l'ultimo passo rientra sulla stella. ` +
-      `Le caselle da attraversare prima di rivedere la stella sono ${loopLen - 1}, ma i passi sono ${loopLen}.`,
+      `Le frecce formano un anello chiuso: ${routeWords(tr)}. L'anello ha ${caselle(loopLen)} e ogni casella ha la sua freccia, ` +
+      `quindi servono esattamente ${frecce(loopLen)} per tornare al punto di partenza: l'ultima ti fa rientrare sulla stella. ` +
+      `Le caselle nuove che vedi prima di rivedere la stella sono ${loopLen - 1}, ma le frecce da seguire sono ${loopLen}.`,
   };
 }
 
 /** d3: "quale stella arriva prima?" — due percorsi verso lo stesso bersaglio */
 function genRace(rng: Rng, R: number, C: number): Question {
-  const lenA = randInt(rng, 3, 5);
+  // la gara più corta parte da 2 frecce: a livello 3 la fatica deve stare nel
+  // confronto fra i due percorsi, non nella lunghezza di ciascuno
+  const lenA = randInt(rng, 2, 5);
   const tie = chance(rng, 0.3);
   const lenB = tie ? lenA : lenA + pick(rng, [1, 2]);
   const reserved = new Set<number>();
@@ -735,10 +797,12 @@ function genRace(rng: Rng, R: number, C: number): Question {
   const sB = reachStep(b, pathB[0], target);
   if (sA !== lenA || sB !== lenB) throw new Error('simulazione incoerente');
 
-  const correct: string = tie ? 'arrivano insieme' : starLabel(sA < sB ? cols[0] : cols[1]);
+  // "insieme" invece di "arrivano insieme": nel riquadro dell'opzione la frase
+  // lunga finiva sotto l'etichetta A/B/C
+  const correct: string = tie ? 'insieme' : starLabel(sA < sB ? cols[0] : cols[1]);
   const others = tie
     ? [starLabel(cols[0]), starLabel(cols[1])]
-    : [starLabel(sA < sB ? cols[1] : cols[0]), 'arrivano insieme'];
+    : [starLabel(sA < sB ? cols[1] : cols[0]), 'insieme'];
   const arrowColor = pick(rng, ARROW_COLORS);
   const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: correct }, [
     { kind: 'text', text: others[0] },
@@ -752,15 +816,15 @@ function genRace(rng: Rng, R: number, C: number): Question {
     choices,
     correctIndex,
     explanation:
-      `La ${starLabel(cols[0])} fa ${routeWords(pathA)}: ${passi(sA)}. ` +
-      `La ${starLabel(cols[1])} fa ${routeWords(pathB)}: ${passi(sB)}. ` +
+      `La ${starLabel(cols[0])} fa ${routeWords(pathA)}: ${frecce(sA)}. ` +
+      `La ${starLabel(cols[1])} fa ${routeWords(pathB)}: ${frecce(sB)}. ` +
       (tie
-        ? `Stesso numero di passi: arrivano insieme. Non conta chi sembra più vicina in linea d'aria, ma quante frecce servono.`
-        : `Vince chi fa meno passi: la ${starLabel(sA < sB ? cols[0] : cols[1])}.`),
+        ? `Stesso numero di frecce: arrivano insieme. Non conta chi sembra più vicina in linea d'aria, ma quante frecce servono.`
+        : `Vince chi segue meno frecce: la ${starLabel(sA < sB ? cols[0] : cols[1])}.`),
   };
 }
 
-/** d3: "dove ti fermi dopo K passi?" con K grande — serve il resto della divisione */
+/** d3: "dove ti fermi dopo K frecce?" con K grande — serve il resto della divisione */
 function genCycleLanding(rng: Rng, R: number, C: number): Question {
   const loopLen = pick(rng, [4, 6, 8]);
   const tailLen = randInt(rng, 1, Math.min(3, loopLen - 1));
@@ -779,10 +843,10 @@ function genCycleLanding(rng: Rng, R: number, C: number): Question {
   const cands: Cand[] = [
     {
       pos: cyc[(entry + (total % loopLen)) % loopLen],
-      why: `è dove finisce chi dimentica ${tailLen === 1 ? 'il passo' : `i ${tailLen} passi`} del corridoio e divide subito ${total} per ${loopLen}`,
+      why: `è dove finisce chi dimentica ${tailLen === 1 ? 'la freccia' : `le ${tailLen} frecce`} del corridoio e divide subito ${total} per ${loopLen}`,
     },
-    { pos: tr[total + 1], why: 'è una casella più avanti nel girotondo' },
-    { pos: tr[total - 1], why: 'è una casella indietro nel girotondo' },
+    { pos: tr[total + 1], why: 'è una casella più avanti nel girotondo: una freccia in più' },
+    { pos: tr[total - 1], why: 'è una casella indietro nel girotondo: una freccia in meno' },
   ];
   const chosen: Cand[] = [];
   for (const cand of cands) {
@@ -808,14 +872,14 @@ function genCycleLanding(rng: Rng, R: number, C: number): Question {
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: `Parti dalla stella e fai ${total} passi seguendo le frecce: su quale figura ti fermi?`,
+    prompt: `Parti dalla stella e segui ${total} frecce, una dopo l'altra: su quale figura ti fermi?`,
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `Non serve contare tutti i ${total} passi. ` +
-      `${tailLen === 1 ? 'Il primo passo ti porta' : `I primi ${tailLen} passi ti portano`} dentro un girotondo di ${caselle(loopLen)}; ` +
-      `restano ${total} − ${tailLen} = ${total - tailLen} passi da fare girando. ` +
+      `Non serve seguire una per una tutte e ${total} le frecce. ` +
+      `${tailLen === 1 ? 'La prima freccia ti porta' : `Le prime ${tailLen} frecce ti portano`} dentro un girotondo di ${caselle(loopLen)}; ` +
+      `restano ${total} − ${tailLen} = ${total - tailLen} frecce da seguire girando. ` +
       `${total - tailLen} : ${loopLen} fa ${laps} ${laps === 1 ? 'giro' : 'giri'} con resto ${rest}, ` +
       (rest === 0
         ? `quindi ti fermi proprio sulla casella da cui eri entrato nel girotondo: ${figs[0].sul}.`
@@ -859,14 +923,16 @@ function genCycleStar(rng: Rng, R: number, C: number): Question {
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: `Una stella gira in tondo per sempre: quale stella non arriverà mai ${fig.al}?`,
+    // niente premessa dichiarativa ("Una stella gira in tondo per sempre: …"):
+    // il fatto e la domanda stanno in una frase sola, che finisce con "quale?"
+    prompt: `Una delle tre stelle gira in tondo e non arriva mai ${fig.al}: quale?`,
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
       `La ${starLabel(cols[0])} parte (${routeWords([...tail, trace(b, tail[tail.length - 1], 1)[1]])}) ed entra in un anello di ` +
       `${caselle(loopLen)}: da lì le frecce la fanno girare sempre sulle stesse caselle, non ne esce più. ` +
-      `La ${starLabel(cols[1])} arriva ${fig.sul} in ${passi(lenA)} e la ${starLabel(cols[2])} in ${passi(lenB)}. ` +
+      `La ${starLabel(cols[1])} arriva ${fig.sul} con ${frecce(lenA)} e la ${starLabel(cols[2])} con ${frecce(lenB)}. ` +
       `Il trucco è accorgersi che un gruppo di frecce si richiude su sé stesso.`,
   };
 }
@@ -902,14 +968,14 @@ function genCycleLen(rng: Rng, R: number, C: number): Question {
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: 'Parti dalla stella e segui le frecce: finisci in un girotondo. Da quante caselle è fatto?',
+    prompt: 'Parti dalla stella e segui le frecce: finisci in un girotondo. Da quante caselle è fatto il girotondo?',
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
     explanation:
-      `I primi ${passi(tailLen)} (${routeWords([...tail, tr[tailLen]])}) sono solo il corridoio d'ingresso: ` +
+      `Le prime ${frecce(tailLen)} (${routeWords([...tail, tr[tailLen]])}) sono solo il corridoio d'ingresso: ` +
       `su quelle caselle non ripassi più. Dalla casella d'ingresso le frecce ti riportano allo stesso punto ` +
-      `dopo ${passi(loopLen)}, quindi il girotondo è fatto di ${caselle(loopLen)}. ` +
+      `dopo ${frecce(loopLen)}, quindi il girotondo è fatto di ${caselle(loopLen)}. ` +
       `Le caselle toccate in tutto sono ${tailLen + loopLen}, ma il corridoio non fa parte del giro.`,
   };
 }
@@ -944,10 +1010,11 @@ export function genPaths(rng: Rng, difficulty: Difficulty): Question {
           return genLoopBack(rng, 2, 4, 4);
       }
     }
-    const [R, C] = pick(rng, [
-      [4, 4],
-      [4, 5],
-    ] as const);
+    // MAI 4×5: con 5 colonne il renderer scende a celle da 56px e nelle caselle
+    // con stella/figura la freccia resta larga ~26px. La difficoltà a livello 3
+    // deve stare nel ragionamento (cicli, resti), non nella vista.
+    const R = 4;
+    const C = 4;
     switch (randInt(rng, 0, 3)) {
       case 0:
         return genRace(rng, R, C);

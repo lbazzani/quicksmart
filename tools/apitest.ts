@@ -177,8 +177,11 @@ async function testTeam() {
     `SELECT p.nickname, p.score FROM players p JOIN games g ON g.id = p.game_id WHERE g.code = $1 ORDER BY p.score DESC`,
     [code]
   );
-  const inMemory = s.players.map((p) => `${p.nickname}:${p.score}`).join(',');
-  const persisted = db.rows.map((r) => `${r.nickname}:${r.score}`).join(',');
+  // ordine stabile: a parità di punteggio la classifica non ha un ordine
+  // definito, quindi il confronto va fatto sull'insieme, non sulla sequenza
+  const key = (n: string, sc: number) => `${n}:${sc}`;
+  const inMemory = s.players.map((p) => key(p.nickname, p.score)).sort().join(',');
+  const persisted = db.rows.map((r) => key(r.nickname as string, r.score as number)).sort().join(',');
   check(inMemory === persisted, `punteggi persistiti su Postgres (${persisted})`);
   const rounds = await pool.query(
     `SELECT count(*) AS n FROM rounds r JOIN games g ON g.id = r.game_id WHERE g.code = $1`,

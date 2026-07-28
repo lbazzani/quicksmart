@@ -1,20 +1,33 @@
 // Generatore "mirror": una composizione asimmetrica e la sua immagine ALLO SPECCHIO.
-// Il payload mostra una cella (griglia 2×2, 3×2 o fila) con forme di colori tutti
+// Il payload mostra una cella (griglia 2×2 o fila di 3) con forme di colori tutti
 // diversi; si chiede come appare riflessa. I distrattori sono le ROTAZIONI della
 // stessa composizione — l'errore classico di chi confonde "riflettere" con "girare" —
 // e le riflessioni "a metà" (sposto le forme ma non le ribalto, o viceversa).
 //
-// Difficoltà 1: specchio verticale, forme e colori molto distinti, nessuna rotazione.
-// 2: specchio verticale con forme direzionali ruotate (freccia, luna, triangolo):
-//    conta anche l'orientamento di ogni singola forma.
-// 3: specchio orizzontale (l'acqua di un lago), composizioni da 6 forme, oppure
-//    DOPPIO specchio (verticale + orizzontale = mezzo giro: due riflessioni si
-//    annullano). Il distrattore migliore diventa il riflesso nell'asse sbagliato.
+// Difficoltà 1: specchio a destra, forme dritte, colori di famiglie diverse.
+// 2: specchio a destra con forme direzionali inclinate: conta anche l'angolo.
+// 3: specchio sotto (l'acqua di un lago) oppure DOPPIO specchio (destra + sotto =
+//    mezzo giro: due riflessioni si annullano). Il distrattore migliore diventa il
+//    riflesso nell'asse sbagliato.
 //
-// Univocità: prima di costruire le opzioni si confrontano le IMMAGINI (non i dati)
-// di riflessioni e rotazioni tramite una firma che tiene conto delle simmetrie di
-// ogni forma; se il riflesso coincide con una rotazione — o due opzioni si
-// vedrebbero identiche — la domanda viene scartata e rigenerata.
+// LEGGIBILITÀ — il punto delicato di questo tipo. Due opzioni possono avere dati
+// diversi e vedersi IDENTICHE, perché ruotare un quadrato di 90°, una stella di
+// 72° o un esagono di 60° non si nota. Peggio: differenze come i 36° fra una
+// stella dritta e la stessa stella girata di mezzo giro esistono sulla carta ma
+// non sullo schermo di un telefono, dove ogni forma è larga ~24 px. Qui sotto la
+// somiglianza fra due forme non è un confronto di campi ma una DISTANZA ANGOLARE
+// percettiva (shapeDist): sotto i 40° due orientamenti si considerano uguali.
+// Su quella distanza poggiano tre regole, tutte verificate prima di accettare la
+// domanda:
+//   A) le tre opzioni devono essere percettivamente distinte;
+//   B) ogni coppia di opzioni deve differire in almeno DUE celle (mai una sola
+//      forma a fare da unico indizio);
+//   C) almeno DUE forme devono distinguere la risposta giusta da ENTRAMBI i
+//      distrattori: guardando solo quelle due si risponde con sicurezza.
+// In più: le forme che portano il verso (freccia, luna, cuore, triangolo) sono le
+// uniche a essere ruotate; quadrati, stelle, pentagoni, esagoni, croci e cerchi
+// restano dritti e fanno da punto di riferimento di colore e posizione, così una
+// rotazione non si trasforma mai in un indizio da 18°.
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
 import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
@@ -27,24 +40,36 @@ import { normRot, placeChoices, retry } from './qutils';
 //   <g transform="translate(100 0) scale(-1 1) rotate(rot 50 50)">
 // cioè applica PRIMA la rotazione e POI l'eventuale specchio: l'immagine finale è
 // M^flip ∘ R(rot). Da qui:
-//   specchio verticale  (sx↔dx):  M ∘ (M^f R(r)) = M^(1-f) R(r)      → flip, rot invariata
-//   specchio orizzontale (alto↔basso): V = M∘R(180) → M^(1-f) R(r+180) → flip, rot+180
-//   rotazione di θ:      R(θ) ∘ (M^f R(r)) = M^f R(r ± θ)            → segno − se flip
+//   specchio a destra (sx↔dx):   M ∘ (M^f R(r)) = M^(1-f) R(r)      → flip, rot invariata
+//   specchio sotto (alto↔basso): V = M∘R(180) → M^(1-f) R(r+180)    → flip, rot+180
+//   rotazione di θ:              R(θ) ∘ (M^f R(r)) = M^f R(r ± θ)   → segno − se flip
 
 /** elemento [rot, flip] del gruppo di simmetria: lascia la forma identica a sé stessa */
 type SymElem = readonly [number, 0 | 1];
 
-const D4: SymElem[] = [
-  [0, 0], [90, 0], [180, 0], [270, 0],
-  [0, 1], [90, 1], [180, 1], [270, 1],
-];
-const D6: SymElem[] = [0, 60, 120, 180, 240, 300].flatMap((r): SymElem[] => [[r, 0], [r, 1]]);
+const dihedral = (period: number): SymElem[] => {
+  const out: SymElem[] = [];
+  for (let a = 0; a < 360; a += period) out.push([a, 0], [a, 1]);
+  return out;
+};
+
+const D4 = dihedral(90);
+const D6 = dihedral(60);
+const D3 = dihedral(120);
+const D5 = dihedral(72);
 /** simmetriche rispetto all'asse verticale (puntano in su) */
 const AXIS_V: SymElem[] = [[0, 0], [0, 1]];
 /** simmetriche rispetto all'asse orizzontale (puntano di lato) */
 const AXIS_H: SymElem[] = [[0, 0], [180, 1]];
 
-/** simmetrie reali dei disegni in visuals.tsx, verificate sui punti dei poligoni */
+/**
+ * Simmetrie PERCETTIVE dei disegni di visuals.tsx. Non sono quelle esatte al
+ * pixel: la stella e il pentagono sono centrati in (50,52) mentre il renderer
+ * ruota attorno a (50,50), e il triangolo non è perfettamente equilatero, quindi
+ * girarli di 72°/120° li sposta di un paio di px. Su una forma da 24 px quello
+ * scarto non si vede: per chi guarda lo schermo sono rotazioni identiche, ed è
+ * questo che il generatore deve credere.
+ */
 const SYM: Record<ShapeName, SymElem[] | 'full'> = {
   circle: 'full',
   dot: 'full',
@@ -52,13 +77,56 @@ const SYM: Record<ShapeName, SymElem[] | 'full'> = {
   diamond: D4,
   cross: D4,
   hexagon: D6,
-  triangle: AXIS_V,
-  star: AXIS_V,
-  pentagon: AXIS_V,
+  triangle: D3,
+  star: D5,
+  pentagon: D5,
   heart: AXIS_V,
   arrow: AXIS_H,
   moon: AXIS_H,
 };
+
+/** sotto questa differenza angolare due orientamenti si vedono uguali (gradi) */
+const TH = 40;
+
+/** angolo ridotto a [0, 180]: quanto "gira" davvero una rotazione */
+function absAngle(deg: number): number {
+  const d = normRot(deg);
+  return d > 180 ? 360 - d : d;
+}
+
+/**
+ * Distanza percettiva fra due forme disegnate: Infinity se cambia forma, colore o
+ * riempimento (differenza lampante), altrimenti di quanti gradi bisogna girare la
+ * prima per vedere la seconda, tenendo conto delle simmetrie della forma.
+ * Due specifiche con distanza 0 sono lo stesso disegno.
+ */
+function shapeDist(a: ShapeSpec, b: ShapeSpec): number {
+  if (a.shape !== b.shape) return Infinity;
+  if ((a.color ?? 0) !== (b.color ?? 0)) return Infinity;
+  if ((a.fillMode ?? 'solid') !== (b.fillMode ?? 'solid')) return Infinity;
+  const sym = SYM[a.shape];
+  if (sym === 'full') return 0;
+  const r1 = normRot(a.rot ?? 0);
+  const r2 = normRot(b.rot ?? 0);
+  const f1: 0 | 1 = a.flip ? 1 : 0;
+  const f2: 0 | 1 = b.flip ? 1 : 0;
+  const same = f1 === f2;
+  // stesso verso → le due immagini differiscono per una rotazione di r1−r2;
+  // versi opposti → per una riflessione, che diventa rotazione solo componendola
+  // con una simmetria a specchio della forma
+  const theta = same ? r1 - r2 : r1 + r2;
+  let best = 180;
+  for (const [gr, gf] of sym) {
+    if (same && gf === 0) best = Math.min(best, absAngle(theta + gr));
+    if (!same && gf === 1) best = Math.min(best, absAngle(gr - theta));
+  }
+  return best;
+}
+
+/** true se le due forme, una volta disegnate, si vedono uguali */
+function sameLook(a: ShapeSpec, b: ShapeSpec): boolean {
+  return shapeDist(a, b) < TH;
+}
 
 /** forma normalizzata: chiavi sempre nello stesso ordine, rot 0 e flip falso omessi */
 function clean(s: ShapeSpec): ShapeSpec {
@@ -67,29 +135,6 @@ function clean(s: ShapeSpec): ShapeSpec {
   if (rot) out.rot = rot;
   if (s.flip) out.flip = true;
   return out;
-}
-
-/**
- * Orientamento CANONICO: due forme con lo stesso valore si vedono identiche.
- * (un cerchio ruotato di 90° o un quadrato specchiato non cambiano aspetto)
- */
-function orient(s: ShapeSpec): string {
-  const sym = SYM[s.shape];
-  if (sym === 'full') return '*';
-  const r = normRot(s.rot ?? 0);
-  const f: 0 | 1 = s.flip ? 1 : 0;
-  let best = '';
-  for (const [gr, gf] of sym) {
-    const rr = gf === 0 ? normRot(r + gr) : normRot(gr - r);
-    const ff = gf === 0 ? f : 1 - f;
-    const key = `${ff}:${String(rr).padStart(3, '0')}`;
-    if (!best || key < best) best = key;
-  }
-  return best;
-}
-
-function shapeSig(s: ShapeSpec): string {
-  return `${s.shape}/${s.color ?? 0}/${s.fillMode ?? 'solid'}/${orient(s)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,13 +157,22 @@ function mkComp(layout: 'grid' | 'row', shapes: ShapeSpec[]): Comp {
   return { layout, cols, rows: Math.ceil(n / cols), shapes };
 }
 
-/** firma VISIVA della composizione: due comp con la stessa firma si vedono identiche */
-function compSig(c: Comp): string {
-  return `${c.layout}:${c.rows}x${c.cols}:${c.shapes.map(shapeSig).join(',')}`;
+function sameFrame(a: Comp, b: Comp): boolean {
+  return a.layout === b.layout && a.rows === b.rows && a.cols === b.cols;
 }
 
-function toCell(c: Comp): CellSpec {
-  return { shapes: c.shapes.map(clean), layout: c.layout };
+/** celle in cui le due composizioni mostrano qualcosa di visibilmente diverso */
+function cues(a: Comp, b: Comp): number {
+  if (!sameFrame(a, b)) return 99;
+  let n = 0;
+  for (let i = 0; i < a.shapes.length; i++) if (!sameLook(a.shapes[i], b.shapes[i])) n++;
+  return n;
+}
+
+function toCell(c: Comp, label?: string): CellSpec {
+  const cell: CellSpec = { shapes: c.shapes.map(clean), layout: c.layout };
+  if (label) cell.label = label;
+  return cell;
 }
 
 // --- trasformazioni delle singole forme ------------------------------------
@@ -164,8 +218,8 @@ interface OpDef {
 
 const OPS: Record<OpName, OpDef> = {
   id: { perm: pKeep, shape: keep, label: 'la figura di partenza, identica' },
-  mirV: { perm: pMirV, shape: flipV, label: 'il riflesso nello specchio verticale (destra e sinistra scambiate)' },
-  mirH: { perm: pMirH, shape: flipH, label: 'il riflesso nello specchio orizzontale (alto e basso scambiati)' },
+  mirV: { perm: pMirV, shape: flipV, label: 'il riflesso nello specchio a destra (destra e sinistra scambiate)' },
+  mirH: { perm: pMirH, shape: flipH, label: 'il riflesso nello specchio messo sotto (alto e basso scambiati)' },
   rot90: { perm: p90, shape: turn(90), label: 'la figura girata di un quarto di giro (90°)' },
   rot180: { perm: p180, shape: turn(180), label: 'la figura girata di mezzo giro (180°)' },
   rot270: { perm: p270, shape: turn(270), label: 'la figura girata di tre quarti di giro (270°)' },
@@ -212,6 +266,18 @@ const SHAPE_IT: Record<ShapeName, string> = {
 /** nomi di colore invariabili, così vanno bene con maschile e femminile */
 const COLOR_IT = ['ciano', 'rosa', 'viola', 'ambra', 'verde', 'corallo', 'blu', 'arancione'];
 
+/**
+ * Famiglie di colore: ciano e blu, rosa e corallo, ambra e arancione sono coppie
+ * che a 24 px si confondono. In una stessa figura ne entra al massimo una per
+ * famiglia, così il colore resta l'etichetta sicura di ogni forma.
+ */
+const COLOR_FAMILIES: number[][] = [[0, 6], [1, 5], [2], [3, 7], [4]];
+
+function pickColors(rng: Rng, n: number): number[] {
+  const fams = pickN(rng, COLOR_FAMILIES, n);
+  return fams.map((f) => pick(rng, f));
+}
+
 function nameOf(s: ShapeSpec): string {
   return `${SHAPE_IT[s.shape]} ${COLOR_IT[(s.color ?? 0) % COLOR_IT.length]}`;
 }
@@ -229,12 +295,16 @@ function posName(c: Comp, i: number): string {
 // Costruzione delle composizioni
 // ---------------------------------------------------------------------------
 
-const SIMPLE: ShapeName[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'pentagon', 'hexagon', 'heart', 'cross'];
-/** forme che cambiano aspetto già a rot 0 sotto lo specchio verticale */
+/** forme senza un verso riconoscibile: fanno da punto di riferimento, sempre dritte */
+const CALM: ShapeName[] = ['circle', 'square', 'diamond', 'star', 'pentagon', 'hexagon', 'cross'];
+/** forme che puntano di lato: allo specchio a destra si vede subito che si girano */
 const SIDEWAYS: ShapeName[] = ['arrow', 'moon'];
 /** forme "in piedi": si vede subito se qualcuno le capovolge */
-const UPRIGHT: ShapeName[] = ['triangle', 'star', 'pentagon', 'heart'];
-const RICH: ShapeName[] = [...SIMPLE, ...SIDEWAYS];
+const UPRIGHT: ShapeName[] = ['triangle', 'heart'];
+/** tutte le forme con un verso inconfondibile: sono le uniche che vengono ruotate */
+const TURNED: ShapeName[] = [...SIDEWAYS, ...UPRIGHT];
+/** sfondo di default: anche triangolo e cuore, che dritti smascherano un mezzo giro */
+const BACKDROP: ShapeName[] = [...CALM, ...UPRIGHT];
 
 const STEPS45 = [0, 45, 90, 135, 180, 225, 270, 315];
 const STEPS90 = [0, 90, 180, 270];
@@ -242,31 +312,39 @@ const STEPS90 = [0, 90, 180, 270];
 interface Plan {
   layout: 'grid' | 'row';
   n: number;
-  pool: ShapeName[];
-  /** almeno una forma pescata qui (le altre dal pool) */
-  must?: ShapeName[];
-  /** la stessa forma ripetuta n volte, distinguibile solo da colore e rotazione */
-  repeat?: ShapeName[];
-  rots: number[];
-  /** rotazioni tutte diverse tra loro */
-  distinctRots?: boolean;
+  /** le forme che portano il verso: quante, da quale gruppo, con quali angoli */
+  cue: { pool: ShapeName[]; n: number; rots: number[] };
+  /** forme di sfondo, sempre dritte (default: BACKDROP) */
+  calm?: ShapeName[];
+  /** tutte le forme uguali: si distinguono solo per colore e verso */
+  repeat?: boolean;
   /** quante forme disegnate solo col contorno */
   outlines?: number;
 }
 
 function buildComp(rng: Rng, p: Plan): Comp {
-  const colors = pickN(rng, [0, 1, 2, 3, 4, 5, 6, 7], p.n);
+  const colors = pickColors(rng, p.n);
   let names: ShapeName[];
+  let rots: number[];
   if (p.repeat) {
-    const one = pick(rng, p.repeat);
+    const one = pick(rng, p.cue.pool);
     names = Array.from({ length: p.n }, () => one);
-  } else if (p.must) {
-    const first = pick(rng, p.must);
-    names = shuffle(rng, [first, ...pickN(rng, p.pool.filter((s) => s !== first), p.n - 1)]);
+    rots = p.cue.rots.length >= p.n ? pickN(rng, p.cue.rots, p.n) : names.map(() => pick(rng, p.cue.rots));
   } else {
-    names = pickN(rng, p.pool, p.n);
+    const turned = pickN(rng, p.cue.pool, p.cue.n);
+    const calmPool = (p.calm ?? BACKDROP).filter((s) => !turned.includes(s));
+    const still = pickN(rng, calmPool, p.n - p.cue.n);
+    const angles =
+      p.cue.rots.length >= turned.length
+        ? pickN(rng, p.cue.rots, turned.length)
+        : turned.map(() => pick(rng, p.cue.rots));
+    const mixed = shuffle(rng, [
+      ...turned.map((shape, i) => ({ shape, rot: angles[i] })),
+      ...still.map((shape) => ({ shape, rot: 0 })),
+    ]);
+    names = mixed.map((m) => m.shape);
+    rots = mixed.map((m) => m.rot);
   }
-  const rots = p.distinctRots && p.rots.length >= p.n ? pickN(rng, p.rots, p.n) : names.map(() => pick(rng, p.rots));
   const outline = new Set(p.outlines ? pickN(rng, Array.from({ length: p.n }, (_, i) => i), p.outlines) : []);
   const shapes = names.map((shape, i) =>
     clean({ shape, color: colors[i], rot: rots[i], fillMode: outline.has(i) ? 'outline' : 'solid' })
@@ -291,6 +369,8 @@ interface Variant {
   rule: string;
   /** verbo usato per il ribaltamento delle singole forme */
   selfWord: string;
+  /** etichetta della cella con il punto interrogativo */
+  outLabel: string;
 }
 
 class Ambiguous extends Error {}
@@ -299,44 +379,60 @@ function assemble(rng: Rng, difficulty: Difficulty, v: Variant): Question {
   const src = buildComp(rng, v.plan);
   const right = applyOp(src, v.correct);
   const opts = [right, applyOp(src, v.wrong[0]), applyOp(src, v.wrong[1])];
-  const sigs = opts.map(compSig);
 
-  // 1) il riflesso deve cambiare davvero qualcosa
-  if (compSig(src) === sigs[0]) throw new Ambiguous('il riflesso è identico alla figura');
-  // 2) le tre opzioni devono vedersi diverse (non basta che i dati differiscano)
-  if (new Set(sigs).size !== 3) throw new Ambiguous('due opzioni si vedrebbero identiche');
-  // 3) verifica cruciale: una riflessione non deve MAI coincidere con una rotazione,
+  // 1) il riflesso deve cambiare davvero qualcosa, e cambiarlo in più punti
+  if (cues(src, right) < 2) throw new Ambiguous('la risposta somiglia troppo alla figura di partenza');
+
+  // 2) DEDUP PERCETTIVO + regola dei due indizi: nessuna coppia di opzioni può
+  //    vedersi uguale e nessuna può giocarsi su un dettaglio solo
+  for (let i = 0; i < opts.length; i++) {
+    for (let j = i + 1; j < opts.length; j++) {
+      if (cues(opts[i], opts[j]) < 2) throw new Ambiguous('due opzioni si distinguono per meno di due dettagli');
+    }
+  }
+
+  // 3) due forme "libere": due celle in cui la risposta giusta si stacca da
+  //    ENTRAMBI i distrattori. Guardando solo quelle si risponde con sicurezza.
+  let solo = 0;
+  for (let i = 0; i < right.shapes.length; i++) {
+    const a = sameFrame(right, opts[1]) ? sameLook(right.shapes[i], opts[1].shapes[i]) : false;
+    const b = sameFrame(right, opts[2]) ? sameLook(right.shapes[i], opts[2].shapes[i]) : false;
+    if (!a && !b) solo++;
+  }
+  if (solo < 2) throw new Ambiguous('un solo dettaglio distingue la risposta giusta');
+
+  // 4) verifica cruciale: una riflessione non deve MAI coincidere con una rotazione,
   //    altrimenti "specchio" e "giro" darebbero la stessa figura e la domanda è ambigua
   if (v.correct === 'mirV' || v.correct === 'mirH') {
     for (const rot of ROTATIONS) {
       if (!renderable(src, rot)) continue;
-      if (compSig(applyOp(src, rot)) === sigs[0]) throw new Ambiguous('il riflesso coincide con una rotazione');
+      if (cues(applyOp(src, rot), right) === 0) throw new Ambiguous('il riflesso coincide con una rotazione');
     }
   }
 
-  const cells = opts.map(toCell);
+  const cells = opts.map((c) => toCell(c));
   const rows: CellSpec[][] = [];
   let exSrc: Comp | null = null;
 
   if (v.style === 'example') {
     exSrc = buildComp(rng, v.plan);
     const exOut = applyOp(exSrc, v.correct);
-    if (compSig(exSrc) === compSig(exOut)) throw new Ambiguous("l'esempio non mostra alcun cambiamento");
+    // l'esempio deve mostrare il cambiamento a occhio nudo, in almeno due celle
+    if (cues(exSrc, exOut) < 2) throw new Ambiguous("l'esempio non mostra abbastanza");
     // l'esempio non deve essere la stessa figura della domanda: regalerebbe la risposta
-    if (compSig(exSrc) === compSig(src)) throw new Ambiguous("l'esempio ripete la figura della domanda");
+    if (cues(exSrc, src) === 0) throw new Ambiguous("l'esempio ripete la figura della domanda");
     // l'esempio deve INCHIODARE la regola: ogni trasformazione compatibile con
     // l'esempio deve dare, sulla figura della domanda, la stessa risposta
-    const exSig = compSig(exOut);
     for (const op of ALL_OPS) {
       if (op === v.correct || !renderable(exSrc, op) || !renderable(src, op)) continue;
-      if (compSig(applyOp(exSrc, op)) === exSig && compSig(applyOp(src, op)) !== sigs[0]) {
+      if (cues(applyOp(exSrc, op), exOut) === 0 && cues(applyOp(src, op), right) > 0) {
         throw new Ambiguous("l'esempio non basta a capire la regola");
       }
     }
-    rows.push([toCell(exSrc), toCell(exOut)]);
-    rows.push([toCell(src), { shapes: [], unknown: true }]);
+    rows.push([toCell(exSrc, 'esempio'), toCell(exOut, v.outLabel)]);
+    rows.push([toCell(src, 'e questa?'), { shapes: [], unknown: true, label: v.outLabel }]);
   } else {
-    rows.push([toCell(src), { shapes: [], unknown: true }]);
+    rows.push([toCell(src, 'la figura'), { shapes: [], unknown: true, label: v.outLabel }]);
   }
 
   const { choices, correctIndex } = placeChoices(rng, { kind: 'cell', cell: cells[0] }, [
@@ -348,7 +444,15 @@ function assemble(rng: Rng, difficulty: Difficulty, v: Variant): Question {
     qtype: 'mirror',
     difficulty,
     prompt: v.prompt,
-    payload: { kind: 'cells', rows, arrows: v.style === 'direct', analogy: v.style === 'example' },
+    payload: {
+      kind: 'cells',
+      rows,
+      arrows: v.style === 'direct',
+      analogy: v.style === 'example',
+      // le due righe dell'esempio sono due momenti distinti: incorniciate non si
+      // leggono per sbaglio come un'unica figura da 4 celle
+      groups: v.style === 'example',
+    },
     choices,
     correctIndex,
     explanation: explain(v, src, right, exSrc),
@@ -369,266 +473,301 @@ function explain(v: Variant, src: Comp, out: Comp, example: Comp | null): string
     moves.push(`${nameOf(src.shapes[s])} che era ${posName(src, s)} passa ${posName(out, d)}`);
   }
   if (moves.length) parts.push(`Così ${moves.join(' e ')}.`);
+  else parts.push('Nessuna forma cambia posto: cambia solo il verso di ognuna.');
 
-  const changed = src.shapes.findIndex((s) => orient(s) !== orient(OPS[v.correct].shape(s)));
+  const changed = src.shapes.findIndex((s) => !sameLook(s, OPS[v.correct].shape(s)));
   if (changed >= 0) {
     parts.push(`Anche ogni singola forma ${v.selfWord}: guarda ${nameOf(src.shapes[changed])}.`);
   }
 
-  parts.push(
-    `Le altre due risposte sono ${OPS[v.wrong[0]].label} e ${OPS[v.wrong[1]].label}.`
-  );
+  parts.push(`Le altre due risposte sono ${OPS[v.wrong[0]].label} e ${OPS[v.wrong[1]].label}.`);
   return parts.join(' ');
 }
 
 // ---------------------------------------------------------------------------
 // Testi delle regole
 // ---------------------------------------------------------------------------
+// Ogni prompt dice DOVE sta lo specchio. "Specchio verticale" è ambiguo: c'è chi
+// legge "lo specchio è messo in verticale" (scambia destra e sinistra) e chi
+// legge "ribalta in verticale" (scambia alto e basso), e in questo tipo di
+// domanda le due letture portano a due opzioni diverse, entrambe presenti.
 
 const PROMPT_V = [
-  "Lo specchio è a destra della figura: come si vede l'immagine riflessa?",
-  'Come appare questa figura vista in uno specchio verticale?',
-  'Metti uno specchio di fianco alla figura: quale immagine ci vedi?',
+  "Lo specchio è a destra della figura: cosa si vede riflesso?",
+  'Metti uno specchio in piedi a destra della figura: quale immagine ci vedi?',
+  'La figura si guarda in uno specchio messo a destra: qual è il suo riflesso?',
 ];
 const PROMPT_H = [
   "Lo specchio è sotto la figura, come l'acqua di un lago: qual è il riflesso?",
-  'Come appare questa figura riflessa in uno specchio orizzontale, messo sotto?',
+  'La figura si specchia nell\'acqua, proprio sotto di lei: quale riflesso vedi?',
 ];
 const PROMPT_DOUBLE = [
-  'La figura si riflette prima in uno specchio verticale e poi in uno orizzontale: come appare alla fine?',
-  'Due specchi di fila: prima quello di fianco, poi quello sotto. Che immagine esce?',
+  'Due specchi di fila: prima quello a destra, poi quello sotto. Che immagine esce alla fine?',
+  'La figura si riflette prima nello specchio a destra e poi in quello sotto: come appare alla fine?',
 ];
 const PROMPT_EX_V = [
-  'Il primo esempio mostra una figura e il suo riflesso allo specchio: come si riflette la seconda figura?',
-  'Guarda come si trasforma la prima figura allo specchio e applica la stessa regola alla seconda.',
+  "Guarda l'esempio: la figura si riflette nello specchio a destra. Ora tocca alla seconda figura.",
+  "Sopra c'è una figura e il suo riflesso nello specchio a destra: qual è il riflesso della seconda?",
 ];
 const PROMPT_EX_H = [
-  'Il primo esempio mostra una figura e il suo riflesso: applica la stessa regola alla seconda figura.',
+  "Guarda l'esempio: la figura si riflette nell'acqua sotto di lei. Ora tocca alla seconda figura.",
+  "Sopra c'è una figura e il suo riflesso nello specchio messo sotto: qual è il riflesso della seconda?",
 ];
 
-const RULE_V =
-  "Uno specchio verticale scambia la destra con la sinistra, ma lascia l'alto in alto.";
-const RULE_H =
-  "Uno specchio orizzontale scambia l'alto con il basso, ma lascia la sinistra a sinistra.";
+const RULE_V = "Uno specchio messo a destra scambia la destra con la sinistra, ma lascia l'alto in alto.";
+const RULE_H = "Uno specchio messo sotto scambia l'alto con il basso, ma lascia la sinistra a sinistra.";
 const RULE_DOUBLE =
-  'Due riflessioni di fila si annullano come specchi: la prima scambia destra e sinistra, la seconda alto e basso, e il risultato è la figura girata di mezzo giro (180°).';
+  'Due riflessioni di fila si annullano a metà: la prima scambia destra e sinistra, la seconda alto e basso, e alla fine la figura risulta girata di mezzo giro (180°).';
 
 const SELF_V = "si ribalta su sé stessa, come se guardasse dall'altra parte";
 const SELF_H = 'si capovolge sottosopra';
 const SELF_TURN = 'fa mezzo giro su sé stessa';
 
+const OUT_V = 'riflesso';
+const OUT_H = 'riflesso';
+const OUT_DOUBLE = '2 specchi';
+
 // ---------------------------------------------------------------------------
-// Difficoltà 1 — specchio verticale, forme e colori molto distinti
+// Difficoltà 1 — specchio a destra, forme dritte
 // ---------------------------------------------------------------------------
 
 function genD1(rng: Rng): Question {
   const kind = randInt(rng, 0, 4);
-  const spin: OpName = pick(rng, ['rot90', 'rot270']);
   if (kind === 0) {
-    // griglia 2×2 di forme diverse, dritte: conta solo lo scambio di posto
+    // griglia 2×2 di forme diverse, dritte: conta solo lo scambio di posto.
+    // I tre distrattori hanno tre disposizioni diverse: bastano i colori.
     return assemble(rng, 1, {
-      plan: { layout: 'grid', n: 4, pool: SIMPLE, rots: [0] },
-      correct: 'mirV',
-      wrong: ['rot180', spin],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  if (kind === 1) {
-    // con frecce e lune: allo specchio ogni forma punta dall'altra parte
-    return assemble(rng, 1, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: SIDEWAYS, rots: [0] },
-      correct: 'mirV',
-      wrong: ['posV', 'rot180'],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  if (kind === 2) {
-    // fila di 3: l'ordine si rovescia
-    return assemble(rng, 1, {
-      plan: { layout: 'row', n: 3, pool: SIMPLE, must: UPRIGHT, rots: [0] },
+      plan: { layout: 'grid', n: 4, cue: { pool: SIDEWAYS, n: 1, rots: [0] }, outlines: randInt(rng, 0, 1) },
       correct: 'mirV',
       wrong: ['rot180', 'mirH'],
       style: 'direct',
       prompt: pick(rng, PROMPT_V),
       rule: RULE_V,
       selfWord: SELF_V,
+      outLabel: OUT_V,
     });
   }
-  if (kind === 3) {
-    // fila di 3 con forme direzionali
+  if (kind === 1) {
+    // due frecce/lune: allo specchio puntano dall'altra parte, e si vede benissimo
     return assemble(rng, 1, {
-      plan: { layout: 'row', n: 3, pool: RICH, must: SIDEWAYS, rots: [0] },
+      plan: { layout: 'grid', n: 4, cue: { pool: SIDEWAYS, n: 2, rots: [0] }, outlines: randInt(rng, 0, 1) },
       correct: 'mirV',
       wrong: ['posV', 'rot180'],
       style: 'direct',
       prompt: pick(rng, PROMPT_V),
       rule: RULE_V,
       selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  if (kind === 2) {
+    // fila di 3: l'ordine si rovescia e le due forme di lato si girano
+    return assemble(rng, 1, {
+      plan: { layout: 'row', n: 3, cue: { pool: SIDEWAYS, n: 2, rots: [0] } },
+      correct: 'mirV',
+      wrong: ['posV', 'selfV'],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  if (kind === 3) {
+    // 2×2 con una forma in piedi: il mezzo giro la capovolge, lo specchio no
+    return assemble(rng, 1, {
+      plan: { layout: 'grid', n: 4, cue: { pool: SIDEWAYS, n: 2, rots: [0] }, calm: UPRIGHT },
+      correct: 'mirV',
+      wrong: ['rot180', 'mirH'],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
     });
   }
   // esempio risolto + figura nuova: la regola si scopre guardando
   return assemble(rng, 1, {
-    plan: { layout: 'grid', n: 4, pool: SIMPLE, rots: [0] },
-    correct: 'mirV',
-    wrong: ['rot180', spin],
-    style: 'example',
-    prompt: pick(rng, PROMPT_EX_V),
-    rule: RULE_V,
-    selfWord: SELF_V,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Difficoltà 2 — specchio verticale con forme direzionali ruotate
-// ---------------------------------------------------------------------------
-
-function genD2(rng: Rng): Question {
-  const kind = randInt(rng, 0, 4);
-  const spin: OpName = pick(rng, ['rot90', 'rot270']);
-  if (kind === 0) {
-    // 2×2 con frecce/lune inclinate: conta anche l'angolo di ogni forma
-    return assemble(rng, 2, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: SIDEWAYS, rots: STEPS45 },
-      correct: 'mirV',
-      wrong: ['rot180', spin],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  if (kind === 1) {
-    // quattro volte la stessa forma: distinguono solo colore e inclinazione
-    return assemble(rng, 2, {
-      plan: { layout: 'grid', n: 4, pool: RICH, repeat: ['arrow', 'moon', 'triangle'], rots: STEPS45, distinctRots: true },
-      correct: 'mirV',
-      wrong: ['posV', spin],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  if (kind === 2) {
-    // fila di 3 inclinate: ordine rovesciato E forme ribaltate
-    return assemble(rng, 2, {
-      plan: { layout: 'row', n: 3, pool: RICH, must: SIDEWAYS, rots: STEPS45 },
-      correct: 'mirV',
-      wrong: ['rot180', 'posV'],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  if (kind === 3) {
-    // due forme solo contornate: un attributo in più da seguire
-    return assemble(rng, 2, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: SIDEWAYS, rots: STEPS90, outlines: randInt(rng, 1, 2) },
-      correct: 'mirV',
-      wrong: [spin, 'selfV'],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
-    });
-  }
-  // esempio risolto, con forme inclinate
-  return assemble(rng, 2, {
-    plan: { layout: 'grid', n: 4, pool: RICH, must: SIDEWAYS, rots: STEPS45 },
+    plan: { layout: 'grid', n: 4, cue: { pool: SIDEWAYS, n: 2, rots: [0] } },
     correct: 'mirV',
     wrong: ['rot180', 'mirH'],
     style: 'example',
     prompt: pick(rng, PROMPT_EX_V),
     rule: RULE_V,
     selfWord: SELF_V,
+    outLabel: OUT_V,
   });
 }
 
 // ---------------------------------------------------------------------------
-// Difficoltà 3 — specchio orizzontale, 6 forme, doppio specchio
+// Difficoltà 2 — specchio a destra con forme inclinate
 // ---------------------------------------------------------------------------
+
+function genD2(rng: Rng): Question {
+  const kind = randInt(rng, 0, 4);
+  const spin: OpName = pick(rng, ['rot90', 'rot270']);
+  if (kind === 0) {
+    // 2×2 con due forme inclinate: conta anche l'angolo di ognuna
+    return assemble(rng, 2, {
+      plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
+      correct: 'mirV',
+      wrong: ['rot180', spin],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  if (kind === 1) {
+    // quattro volte la stessa forma: distinguono solo colore e inclinazione
+    return assemble(rng, 2, {
+      plan: {
+        layout: 'grid',
+        n: 4,
+        cue: { pool: ['arrow', 'moon', 'heart'], n: 4, rots: STEPS45 },
+        repeat: true,
+      },
+      correct: 'mirV',
+      wrong: ['posV', spin],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  if (kind === 2) {
+    // fila di 3 inclinate: ordine rovesciato E forme ribaltate
+    return assemble(rng, 2, {
+      plan: { layout: 'row', n: 3, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
+      correct: 'mirV',
+      wrong: ['posV', 'selfV'],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  if (kind === 3) {
+    // qualche forma solo contornata: un attributo in più da seguire
+    return assemble(rng, 2, {
+      plan: {
+        layout: 'grid',
+        n: 4,
+        cue: { pool: TURNED, n: 2, rots: STEPS90 },
+        outlines: randInt(rng, 1, 2),
+      },
+      correct: 'mirV',
+      wrong: [spin, 'selfV'],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_V),
+      rule: RULE_V,
+      selfWord: SELF_V,
+      outLabel: OUT_V,
+    });
+  }
+  // esempio risolto, con forme inclinate
+  return assemble(rng, 2, {
+    plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
+    correct: 'mirV',
+    wrong: ['rot180', 'mirH'],
+    style: 'example',
+    prompt: pick(rng, PROMPT_EX_V),
+    rule: RULE_V,
+    selfWord: SELF_V,
+    outLabel: OUT_V,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Difficoltà 3 — specchio sotto (l'acqua) e doppio specchio
+// ---------------------------------------------------------------------------
+// Qui la difficoltà sta nella TRASFORMAZIONE, non nel numero di forme: griglie
+// più grandi rendevano ogni forma larga 24 px e trasformavano il ragionamento
+// spaziale in una caccia alle differenze.
 
 function genD3(rng: Rng): Question {
   const kind = randInt(rng, 0, 5);
   if (kind === 0) {
     // specchio d'acqua su una 2×2 inclinata: il distrattore è l'asse sbagliato
     return assemble(rng, 3, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: UPRIGHT, rots: STEPS45 },
+      plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
       correct: 'mirH',
       wrong: ['mirV', 'rot180'],
       style: 'direct',
       prompt: pick(rng, PROMPT_H),
       rule: RULE_H,
       selfWord: SELF_H,
+      outLabel: OUT_H,
     });
   }
   if (kind === 1) {
     // doppio specchio: due riflessioni = mezzo giro
     return assemble(rng, 3, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: SIDEWAYS, rots: STEPS45 },
+      plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
       correct: 'rot180',
       wrong: ['mirV', 'mirH'],
       style: 'direct',
       prompt: pick(rng, PROMPT_DOUBLE),
       rule: RULE_DOUBLE,
       selfWord: SELF_TURN,
+      outLabel: OUT_DOUBLE,
     });
   }
   if (kind === 2) {
-    // sei forme su due righe, specchio d'acqua
+    // tre forme girate su quattro: lo specchio d'acqua contro il "solo spostate"
     return assemble(rng, 3, {
-      plan: { layout: 'grid', n: 6, pool: RICH, must: UPRIGHT, rots: STEPS90 },
+      plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 3, rots: STEPS45 } },
+      correct: 'mirH',
+      wrong: ['posH', 'mirV'],
+      style: 'direct',
+      prompt: pick(rng, PROMPT_H),
+      rule: RULE_H,
+      selfWord: SELF_H,
+      outLabel: OUT_H,
+    });
+  }
+  if (kind === 3) {
+    // fila di 3 nell'acqua: nessuna forma cambia posto, si capovolgono e basta
+    return assemble(rng, 3, {
+      plan: { layout: 'row', n: 3, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
       correct: 'mirH',
       wrong: ['mirV', 'rot180'],
       style: 'direct',
       prompt: pick(rng, PROMPT_H),
       rule: RULE_H,
       selfWord: SELF_H,
-    });
-  }
-  if (kind === 3) {
-    // sei forme, specchio verticale: tanta roba da tenere a mente
-    return assemble(rng, 3, {
-      plan: { layout: 'grid', n: 6, pool: RICH, must: SIDEWAYS, rots: STEPS45 },
-      correct: 'mirV',
-      wrong: ['rot180', 'posV'],
-      style: 'direct',
-      prompt: pick(rng, PROMPT_V),
-      rule: RULE_V,
-      selfWord: SELF_V,
+      outLabel: OUT_H,
     });
   }
   if (kind === 4) {
-    // esempio risolto con lo specchio orizzontale: la regola va dedotta
+    // esempio risolto con lo specchio d'acqua: la regola va dedotta
     return assemble(rng, 3, {
-      plan: { layout: 'grid', n: 4, pool: RICH, must: UPRIGHT, rots: STEPS45 },
+      plan: { layout: 'grid', n: 4, cue: { pool: TURNED, n: 2, rots: STEPS45 }, outlines: randInt(rng, 0, 1) },
       correct: 'mirH',
       wrong: ['rot180', 'mirV'],
       style: 'example',
       prompt: pick(rng, PROMPT_EX_H),
       rule: RULE_H,
       selfWord: SELF_H,
+      outLabel: OUT_H,
     });
   }
   // doppio specchio su una fila
   return assemble(rng, 3, {
-    plan: { layout: 'row', n: 3, pool: RICH, must: UPRIGHT, rots: STEPS45 },
+    plan: { layout: 'row', n: 3, cue: { pool: TURNED, n: 2, rots: STEPS45 } },
     correct: 'rot180',
     wrong: ['mirV', 'mirH'],
     style: 'direct',
     prompt: pick(rng, PROMPT_DOUBLE),
     rule: RULE_DOUBLE,
     selfWord: SELF_TURN,
+    outLabel: OUT_DOUBLE,
   });
 }
 
 export function genMirror(rng: Rng, difficulty: Difficulty): Question {
-  return retry(() => (difficulty === 1 ? genD1(rng) : difficulty === 2 ? genD2(rng) : genD3(rng)), 40);
+  return retry(() => (difficulty === 1 ? genD1(rng) : difficulty === 2 ? genD2(rng) : genD3(rng)), 60);
 }
