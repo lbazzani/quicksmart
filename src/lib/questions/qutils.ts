@@ -1,7 +1,7 @@
 // Utility condivise dai generatori di domande.
 
 import type { ChoiceVisual, Question } from '../types';
-import type { Rng } from '../rng';
+import { pick, shuffle, type Rng } from '../rng';
 
 /** hash FNV-1a stabile del contenuto della domanda (per dedup in archivio) */
 export function hashQuestion(q: Omit<Question, 'hash' | 'id'>): string {
@@ -40,6 +40,53 @@ export function placeChoices(
 /** normalizza una rotazione in [0, 360) */
 export function normRot(deg: number): number {
   return ((deg % 360) + 360) % 360;
+}
+
+/**
+ * Sceglie due distrattori numerici in modo che la risposta non finisca sempre
+ * nella stessa posizione della classifica.
+ *
+ * Il problema: i distrattori naturali sono "uno in più" e "uno in meno", quindi
+ * la risposta è quasi sempre il numero di mezzo — e chi lo scopre risponde
+ * senza ragionare. Qui si pesca da un insieme più ampio di errori plausibili
+ * scegliendo, a rotazione, due valori sopra, due sotto, o uno per parte.
+ *
+ * @param correct il valore giusto
+ * @param candidates errori plausibili (interi, anche ripetuti: vengono ripuliti)
+ * @param minGap distanza minima dalla risposta (2 evita l'off-by-one punitivo)
+ * @returns due distrattori distinti, o null se i candidati non bastano
+ */
+export function balancedNumericDistractors(
+  rng: Rng,
+  correct: number,
+  candidates: number[],
+  minGap = 1
+): [number, number] | null {
+  const ok = [...new Set(candidates)].filter(
+    (v) => Number.isFinite(v) && v !== correct && Math.abs(v - correct) >= minGap
+  );
+  const below = ok.filter((v) => v < correct);
+  const above = ok.filter((v) => v > correct);
+
+  // tre disposizioni: risposta in mezzo, risposta più piccola, risposta più grande
+  const layouts: Array<[number[], number[]]> = [
+    [below, above], // uno sotto e uno sopra → risposta di mezzo
+    [above, above], // due sopra → risposta più piccola
+    [below, below], // due sotto → risposta più grande
+  ];
+  const order = shuffle(rng, [0, 1, 2]);
+  for (const idx of order) {
+    const [poolA, poolB] = layouts[idx];
+    if (poolA === poolB) {
+      if (poolA.length < 2) continue;
+      const picked = shuffle(rng, [...poolA]).slice(0, 2);
+      return [picked[0], picked[1]];
+    }
+    if (poolA.length && poolB.length) {
+      return [pick(rng, poolA), pick(rng, poolB)];
+    }
+  }
+  return null;
 }
 
 /** genera finché `make` produce una domanda valida (placeChoices può lanciare) */

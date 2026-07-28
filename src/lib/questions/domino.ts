@@ -10,12 +10,42 @@
 //      capovolgimento dell'altra (quindi la capovolta della risposta corretta
 //      non è mai un distrattore): il bambino non deve mai decidere se 5|4 e 4|5
 //      sono la stessa tessera o no;
-//   2. quando la regola prevede che la tessera si giri, l'explanation lo dice a
-//      chiare lettere ("una tessera girata è una tessera diversa").
+//   2. quando la regola gira le tessere, o quando nella fila compaiono una
+//      tessera e la sua capovolta, la convenzione sta nel PROMPT ("una tessera
+//      girata è un'altra tessera") e non solo nell'explanation, che si legge
+//      dopo aver risposto: serve per leggere la fila, quindi serve prima.
 //
 // Nelle regole con salti grandi la fila "gira in tondo": dopo il 6 si riparte da
 // 0 (modulo 7) — quando succede il prompt lo dichiara, così la regola resta
 // sempre deducibile da ciò che si vede.
+//
+// FAMIGLIE DI REGOLE. Ogni fila appartiene a una sola famiglia e OGNI FAMIGLIA HA
+// IL SUO SUGGERIMENTO NEL PROMPT: dice che TIPO di legame tiene insieme la fila
+// (dove guardare), mai quale sia la risposta. Non basta un generico "ogni tessera
+// nasce da quella prima di lei": sotto quelle parole ci stanno regole
+// strutturalmente diverse (girare la tessera, sommare le due metà, incastrarle)
+// e chi ragiona bene può arrivare a una tessera diversa da quella attesa.
+//   halves — ogni metà segue la sua regola (passo fisso, passi alternati, metà
+//            ferma, rimbalzo fra due valori, somma costante)
+//   chain  — le tessere si incastrano: ogni tessera comincia con il numero con
+//            cui finiva quella prima
+//   flip   — ogni tessera nasce girando quella prima di lei (più un'aggiunta
+//            sempre uguale)
+//   alt    — si alternano due mosse: girare la tessera oppure aggiungere lo
+//            stesso numero a tutte e due le metà
+//   sum2   — ogni tessera si ricava sommando le due metà di quella prima
+//   prev2  — ogni tessera nasce dalle DUE tessere prima di lei (somma o
+//            differenza, metà per metà)
+//
+// UNA SOLA TESSERA DIFENDIBILE. Prima di accettare una domanda si prova a mettere
+// al posto del "?" TUTTE E 49 le tessere del domino e si tiene la domanda solo se
+// una sola di esse rende la fila coerente con la famiglia annunciata nel prompt
+// (`defensible`). Così la regola scritta nel prompt, applicata alla fila
+// disegnata, non può portare da nessuna parte se non alla risposta corretta: non
+// c'è modo di ragionare bene e sbagliare. Lo stesso controllo gira anche sulle
+// altre cinque famiglie: se una di loro giustificasse una tessera diversa, chi
+// legge la fila "a modo suo" potrebbe difendere una risposta che il gioco chiama
+// errore, e la domanda viene scartata.
 //
 // d1: una sola regola sulle metà — somma costante, stesso passo su entrambe,
 //     una metà ferma, tessere doppie, tessere che si incastrano.
@@ -39,10 +69,11 @@
 // tessere a caso — e mai una tessera già visibile nella fila, che si eliminerebbe
 // senza ragionare.
 //
-// Anti-ambiguità: prima di accettare una domanda si rileggono le tessere visibili
-// con tutte le regole semplici alternative (passi costanti o alternati, salti che
-// accelerano, somma/differenza dei due precedenti, ribaltamento con offset, due
-// file intrecciate, tessera-da-tessera). Se una di queste giustificherebbe una
+// Anti-ambiguità: oltre al controllo sulla famiglia annunciata, prima di
+// accettare una domanda si rileggono le tessere visibili con tutte le regole
+// semplici alternative (passi costanti o alternati, salti che accelerano,
+// somma/differenza dei due precedenti, ribaltamento con offset, due file
+// intrecciate, tessera-da-tessera). Se una di queste giustificherebbe una
 // tessera diversa da quella voluta, la domanda viene scartata e rigenerata: la
 // risposta corretta è così l'unica difendibile.
 
@@ -84,6 +115,34 @@ function chainWithHole(tiles: Tile[], hidden: number): string {
   return tiles.map((t, i) => (i === hidden ? '?' : fmt(t))).join(' → ');
 }
 
+/**
+ * La famiglia di regole a cui appartiene la fila. Ogni famiglia ha il suo
+ * suggerimento nel prompt e il suo controllo di coerenza: le due cose devono
+ * dire la stessa identica cosa.
+ */
+type Family = 'halves' | 'chain' | 'flip' | 'alt' | 'sum2' | 'prev2';
+
+const ALL_FAMILIES: Family[] = ['halves', 'chain', 'flip', 'alt', 'sum2', 'prev2'];
+
+/**
+ * Il suggerimento che finisce nel prompt, cioè PRIMA della risposta. Dice di che
+ * tipo di legame si tratta — dove guardare — senza svelare né i numeri né la
+ * tessera. Deve descrivere ESATTAMENTE lo spazio di regole che `fitsFamily`
+ * accetta: se il prompt promettesse meno, il bambino potrebbe difendere una
+ * tessera diversa; se promettesse di più, si sentirebbe imbrogliato.
+ */
+const FAMILY_HINT: Record<Family, string> = {
+  halves: 'ogni metà segue la sua regola',
+  chain: 'ogni tessera comincia con il numero con cui finiva quella prima',
+  flip: 'ogni tessera nasce girando quella prima di lei',
+  // "o tutte e due" non è un dettaglio: una mossa può girare la tessera E
+  // aggiungere un numero (1|6 → 6|1 → 2|0). Senza quelle parole chi prova solo
+  // mosse "pure" non trova nessuna tessera che torna.
+  alt: 'si alternano due mosse: girare la tessera, aggiungere lo stesso numero alle due metà, o tutte e due',
+  sum2: 'ogni tessera si ricava sommando le due metà di quella prima',
+  prev2: 'ogni tessera nasce dalle DUE tessere prima di lei',
+};
+
 interface Built {
   /** la fila completa, incognita compresa */
   tiles: Tile[];
@@ -95,17 +154,136 @@ interface Built {
   explanation: string;
   /** la regola gira in tondo dopo il 6: va dichiarato nel prompt */
   mod?: boolean;
-  /**
-   * Da dove nasce ogni tessera, annunciato nel prompt quando la regola lega una
-   * tessera a quelle prima di lei (altrimenti il bambino non sa dove guardare).
-   */
-  hint?: string;
+  /** che tipo di legame tiene insieme la fila: finisce nel prompt */
+  family: Family;
   /** tessere di riferimento della regola: evidenziate nel disegno */
   refs?: number[];
 }
 
-const HINT_PREV = 'ogni tessera nasce da quella prima di lei';
-const HINT_PREV2 = 'ogni tessera nasce dalle DUE tessere prima di lei';
+// ---------------------------------------------------------------------------
+// La regola annunciata, letta come la leggerebbe chi risponde
+// ---------------------------------------------------------------------------
+
+/**
+ * Una metà che «segue la sua regola»: v(i) = base + ⌈i/2⌉·p + ⌊i/2⌋·q (mod 7).
+ * Con p = q è un passo fisso, con p = −q è un rimbalzo fra due valori, con p = 0
+ * e q = 0 la metà è ferma; il caso generale sono i due salti che si alternano.
+ */
+function fitsHalf(v: number[]): boolean {
+  for (let p = 0; p < M; p++) {
+    for (let q = 0; q < M; q++) {
+      let ok = true;
+      for (let i = 1; i < v.length && ok; i++) {
+        if (v[i] !== m7(v[0] + Math.ceil(i / 2) * p + Math.floor(i / 2) * q)) ok = false;
+      }
+      if (ok) return true;
+    }
+  }
+  return false;
+}
+
+const column = (row: Tile[], s: 0 | 1) => row.map((t) => t[s]);
+
+/** una mossa della famiglia `alt`: gira o no, poi aggiunge k a tutte e due le metà */
+function altMoveFits(row: Tile[], parity: number, turn: boolean, k: number): boolean {
+  for (let i = 0; i + 1 < row.length; i++) {
+    if (i % 2 !== parity) continue;
+    const [a, b] = row[i];
+    const want: Tile = turn ? [m7(b + k), m7(a + k)] : [m7(a + k), m7(b + k)];
+    if (!eq(row[i + 1], want)) return false;
+  }
+  return true;
+}
+
+/** la fila (senza buchi) è coerente con ALMENO una regola della famiglia? */
+function fitsFamily(fam: Family, row: Tile[]): boolean {
+  switch (fam) {
+    case 'halves':
+      return fitsHalf(column(row, 0)) && fitsHalf(column(row, 1));
+
+    case 'chain': {
+      // ogni tessera comincia dove finiva la precedente, e i numeri della catena
+      // seguono la loro regola (quella che si vede nel disegno)
+      for (let i = 0; i + 1 < row.length; i++) if (row[i + 1][0] !== row[i][1]) return false;
+      return fitsHalf(column(row, 0)) && fitsHalf(column(row, 1));
+    }
+
+    case 'flip': {
+      // t(i+1) = (destra + p, sinistra + q), sempre gli stessi p e q
+      for (let p = 0; p < M; p++) {
+        for (let q = 0; q < M; q++) {
+          let ok = true;
+          for (let i = 0; i + 1 < row.length && ok; i++) {
+            if (row[i + 1][0] !== m7(row[i][1] + p) || row[i + 1][1] !== m7(row[i][0] + q)) ok = false;
+          }
+          if (ok) return true;
+        }
+      }
+      return false;
+    }
+
+    case 'alt': {
+      // due mosse che si alternano: ognuna gira la tessera oppure aggiunge lo
+      // stesso numero a tutte e due le metà (o tutte e due le cose insieme)
+      for (const parity of [0, 1]) {
+        let found = false;
+        for (const turn of [false, true]) {
+          for (let k = 0; k < M && !found; k++) if (altMoveFits(row, parity, turn, k)) found = true;
+        }
+        if (!found) return false;
+      }
+      return true;
+    }
+
+    case 'sum2': {
+      // la somma delle due metà (mod 7) diventa una metà della tessera dopo,
+      // l'altra metà ripete una delle due metà di prima
+      const variants: Array<(t: Tile) => Tile> = [
+        (t) => [m7(t[0] + t[1]), t[0]],
+        (t) => [m7(t[0] + t[1]), t[1]],
+        (t) => [t[0], m7(t[0] + t[1])],
+        (t) => [t[1], m7(t[0] + t[1])],
+      ];
+      return variants.some((v) => {
+        for (let i = 0; i + 1 < row.length; i++) if (!eq(row[i + 1], v(row[i]))) return false;
+        return true;
+      });
+    }
+
+    case 'prev2': {
+      // ogni metà nasce dalle due tessere prima: somma (mod 7) o differenza in
+      // valore assoluto — le due metà possono anche seguire operazioni diverse,
+      // perché nessuno ha promesso che siano uguali
+      const half = (v: number[]) =>
+        ([true, false] as const).some((isSum) => {
+          for (let i = 2; i < v.length; i++) {
+            const want = isSum ? m7(v[i - 1] + v[i - 2]) : Math.abs(v[i - 1] - v[i - 2]);
+            if (v[i] !== want) return false;
+          }
+          return true;
+        });
+      return half(column(row, 0)) && half(column(row, 1));
+    }
+  }
+}
+
+/**
+ * Tutte le tessere che, messe al posto del "?", rendono la fila coerente con la
+ * regola annunciata nel prompt. Se ne esce più di una, la domanda non ha una
+ * risposta sola e va rigenerata: è esattamente il caso in cui si ragiona bene e
+ * si prende comunque la risposta sbagliata.
+ */
+function defensible(fam: Family, tiles: Tile[], hidden: number): Tile[] {
+  const out: Tile[] = [];
+  const row = tiles.slice();
+  for (let a = 0; a <= 6; a++) {
+    for (let b = 0; b <= 6; b++) {
+      row[hidden] = [a, b];
+      if (fitsFamily(fam, row)) out.push([a, b]);
+    }
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Anti-ambiguità: quali tessere sarebbero difendibili con una regola semplice?
@@ -277,6 +455,7 @@ function buildD1(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       distractors: shuffle(rng, [
         [ca + dir, cb - dir], // un passo di troppo
         [ca, cb + dir], // muove la destra dalla parte sbagliata (somma sballata)
@@ -301,6 +480,7 @@ function buildD1(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       distractors: shuffle(rng, [
         [ca, cb - k], // ha mosso solo la metà di sinistra
         [ca - k, cb], // ha mosso solo la metà di destra
@@ -327,6 +507,7 @@ function buildD1(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       distractors: shuffle(rng, [
         movingRight ? [ca + k, cb] : [ca, cb + k], // ha mosso la metà sbagliata
         movingRight ? [ca, cb + k] : [ca + k, cb], // un passo di troppo
@@ -352,6 +533,7 @@ function buildD1(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'chain',
       distractors: shuffle(rng, [
         [ca + k, cb + k], // un passo di troppo
         [ca, cb + k], // fa avanzare solo la metà di destra
@@ -374,6 +556,7 @@ function buildD1(rng: Rng): Built {
   return {
     tiles,
     hidden,
+    family: 'halves',
     distractors: shuffle(rng, [
       [ca, ca + k], // ha mosso una metà sola
       [ca + k, ca + k], // un passo di troppo
@@ -414,6 +597,7 @@ function buildD2(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       mod: wrapped,
       distractors: shuffle(rng, [
         [m7(ref[0] + q), m7(ref[1] + p)], // ha scambiato i due passi
@@ -445,8 +629,8 @@ function buildD2(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'flip',
       mod: wrapped,
-      hint: HINT_PREV,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
         [prev[1], prev[0]], // gira e basta, dimentica il ±k
@@ -483,8 +667,8 @@ function buildD2(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'alt',
       mod: wrapped,
-      hint: HINT_PREV,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
         [prev[1], prev[0]], // gira senza aggiungere 1
@@ -531,6 +715,7 @@ function buildD2(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       mod: wrapped,
       distractors: shuffle(rng, [
         altLeft ? [m7(prev[0] + other), cb] : [ca, m7(prev[1] + other)], // usa il salto sbagliato dell'alternanza
@@ -572,6 +757,7 @@ function buildD2(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'halves',
       mod: wrapped,
       distractors: shuffle(rng, [
         bounceLeft ? [prev[0], cb] : [ca, prev[1]], // dimentica il rimbalzo
@@ -605,6 +791,7 @@ function buildD2(rng: Rng): Built {
   return {
     tiles,
     hidden,
+    family: 'halves',
     mod: true,
     distractors: shuffle(rng, [
       [m7(prev[0] + k), prev[1]], // muove una metà sola
@@ -645,8 +832,8 @@ function buildD3(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'prev2',
       mod: true,
-      hint: HINT_PREV2,
       refs: [hidden - 2, hidden - 1],
       distractors: shuffle(rng, [
         [Math.abs(p1[0] - p2[0]), Math.abs(p1[1] - p2[1])], // differenza invece di somma
@@ -685,7 +872,7 @@ function buildD3(rng: Rng): Built {
     return {
       tiles,
       hidden,
-      hint: HINT_PREV2,
+      family: 'prev2',
       refs: [hidden - 2, hidden - 1],
       distractors: shuffle(rng, [
         [m7(p1[0] + p2[0]), m7(p1[1] + p2[1])], // somma invece di differenza
@@ -717,8 +904,8 @@ function buildD3(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'sum2',
       mod: true,
-      hint: HINT_PREV,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
         [prev[0], cb], // tiene la metà sbagliata a sinistra
@@ -752,8 +939,8 @@ function buildD3(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'alt',
       mod: true,
-      hint: HINT_PREV,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
         [prev[1], prev[0]], // gira quando invece bisognava sommare
@@ -790,8 +977,8 @@ function buildD3(rng: Rng): Built {
     return {
       tiles,
       hidden,
+      family: 'flip',
       mod: wrapped,
-      hint: HINT_PREV,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
         [prev[1], prev[0]], // gira senza aggiungere
@@ -820,8 +1007,8 @@ function buildD3(rng: Rng): Built {
   return {
     tiles,
     hidden,
+    family: 'chain',
     mod: true,
-    hint: HINT_PREV,
     refs: [hidden - 1],
     distractors: shuffle(rng, [
       [prev[1], m7(prev[1] + k + 1)], // sbaglia il salto di 1
@@ -842,17 +1029,27 @@ function buildD3(rng: Rng): Built {
 // Guscio comune
 // ---------------------------------------------------------------------------
 
-function promptFor(hidden: number, n: number, built: Built): string {
+/**
+ * Il prompt porta TUTTO quello che serve per rispondere: che tipo di legame
+ * tiene insieme la fila (il suggerimento della famiglia), se i numeri girano in
+ * tondo dopo il 6, e — quando nella fila compaiono una tessera e la sua
+ * capovolta — la convenzione che una tessera girata è un'altra tessera. Niente
+ * di tutto questo può stare solo nell'explanation, che si legge dopo.
+ */
+function promptFor(hidden: number, n: number, built: Built, rowTurns: boolean): string {
   const base =
     hidden === n - 1
       ? 'Quale tessera continua la fila?'
       : hidden === 0
         ? 'Quale tessera apre la fila?'
         : 'Quale tessera manca nella fila?';
-  const notes: string[] = [];
-  if (built.hint) notes.push(built.hint);
+  const notes: string[] = [FAMILY_HINT[built.family]];
   if (built.mod) notes.push('dopo il 6 si torna a 0');
-  return notes.length ? `${base} (${notes.join('; ')})` : base;
+  // con 'flip' e 'alt' il suggerimento parla già di girare la tessera
+  if (rowTurns && built.family !== 'flip' && built.family !== 'alt') {
+    notes.push('una tessera girata è un\'altra tessera');
+  }
+  return `${base} (${notes.join('; ')})`;
 }
 
 function tailOf(tiles: Tile[], hidden: number): string {
@@ -874,6 +1071,25 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
     }
 
     const correct = tiles[hidden];
+
+    // LA REGOLA ANNUNCIATA DEVE PORTARE A UNA TESSERA SOLA. Si prova a mettere al
+    // posto del "?" tutte e 49 le tessere: se più di una rende la fila coerente
+    // con la famiglia dichiarata nel prompt, la domanda è irrisolvibile per chi
+    // ragiona bene (potrebbe difendere l'altra) e si rigenera.
+    const ok = defensible(built.family, tiles, hidden);
+    if (ok.length !== 1) throw new Error(`la regola annunciata ammette ${ok.length} tessere`);
+    if (!eq(ok[0], correct)) throw new Error('la regola annunciata non porta alla risposta corretta');
+
+    // E se provasse un'altra famiglia invece di quella annunciata? Nessuna delle
+    // altre cinque deve giustificare una tessera diversa: chi legge la fila "a
+    // modo suo" non deve poter difendere una risposta che il gioco chiama errore.
+    for (const fam of ALL_FAMILIES) {
+      if (fam === built.family) continue;
+      for (const t of defensible(fam, tiles, hidden)) {
+        if (!eq(t, correct)) throw new Error(`anche la famiglia ${fam} giustifica ${fmt(t)}`);
+      }
+    }
+
     // anti-ambiguità: nessuna regola semplice alternativa deve dare un'altra tessera
     for (const alt of alternatives(tiles, hidden)) if (!eq(alt, correct)) throw new Error('fila ambigua');
 
@@ -891,6 +1107,16 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
     }
     if (chosen.length < 2) throw new Error('distrattori insufficienti');
 
+    // Controllo finale sulle TRE opzioni davvero mostrate: una sola può essere
+    // compatibile con la regola annunciata, ed è la corretta. Discende già dal
+    // controllo sulle 49 tessere, ma qui è esplicito: se un domani quel controllo
+    // si allentasse, questa riga se ne accorge invece di far uscire una domanda
+    // in cui due risposte sono difendibili.
+    const compatibili = [correct, ...chosen].filter((t) => ok.some((d) => eq(d, t)));
+    if (compatibili.length !== 1 || !eq(compatibili[0], correct)) {
+      throw new Error('più di un\'opzione compatibile con la regola annunciata');
+    }
+
     const asChoice = (t: Tile) => ({ kind: 'domino' as const, tile: { a: t[0], b: t[1] } });
     const { choices, correctIndex } = placeChoices(rng, asChoice(correct), [
       asChoice(chosen[0]),
@@ -906,8 +1132,9 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
 
     // Se nella fila compaiono due tessere girate l'una rispetto all'altra (capita
     // anche senza che la regola parli di giravolte, per esempio quando la somma
-    // delle due metà è costante), la spiegazione dichiara la convenzione: così
-    // nessuno resta col dubbio di aver visto due volte la stessa tessera.
+    // delle due metà è costante), la convenzione va detta PRIMA, nel prompt — e
+    // ripetuta nella spiegazione: così nessuno resta col dubbio di aver visto due
+    // volte la stessa tessera.
     const rowTurns = tiles.some((t, i) => t[0] !== t[1] && tiles.some((u, j) => j > i && turned(t, u)));
     let explanation = built.explanation + tailOf(tiles, hidden);
     if (rowTurns && !explanation.includes(TURN_NOTE.trim())) explanation += TURN_NOTE;
@@ -915,7 +1142,7 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
     return {
       qtype: 'domino',
       difficulty,
-      prompt: promptFor(hidden, tiles.length, built),
+      prompt: promptFor(hidden, tiles.length, built, rowTurns),
       payload: { kind: 'dominoes' as const, tiles: drawn },
       choices,
       correctIndex,

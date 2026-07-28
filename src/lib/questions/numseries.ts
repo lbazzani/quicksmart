@@ -1492,6 +1492,47 @@ function buildD3(rng: Rng): Built {
 
 // ---------------------------------------------------------------------------
 
+export const __debugFamilies: Record<string, (rng: Rng) => Built> = {
+  legacyD1: (r) => legacyD1(r),
+  legacyD2: (r) => legacyD2(r),
+  legacyD3: (r) => legacyD3(r),
+  endArith: (r) => endSeries(r, chance(r, 0.5) ? rArith(r) : rArithDown(r)),
+  endGeomDown: (r) => endSeries(r, rGeomDown(r)),
+  endZigzag: (r) => endSeries(r, rZigzag(r)),
+  endDigitSum: (r) => endSeries(r, rDigitSum(r)),
+  endSquares: (r) => endSeries(r, chance(r, 0.5) ? rSquares(r) : rCubes(r)),
+  endDigitProd: (r) => endSeries(r, rDigitProd(r)),
+  endPeriod3: (r) => endSeries(r, rPeriod3(r)),
+  endPrimes: (r) => endSeries(r, rPrimes(r)),
+  endDown: (r) => endSeries(r, chance(r, 0.5) ? rDownZero(r) : rDownAccel(r)),
+  midArith: (r) => middleSeries(r, rArith(r)),
+  midArithDown: (r) => middleSeries(r, rArithDown(r)),
+  midGeom: (r) => middleSeries(r, rGeom(r)),
+  midGrow: (r) => middleSeries(r, rGrow(r)),
+  midAltOps: (r) => middleSeries(r, rAltOps(r)),
+  midSquares: (r) => middleSeries(r, rSquares(r)),
+  midZigzag: (r) => middleSeries(r, rZigzag(r)),
+  midFib: (r) => middleSeries(r, rFib(r)),
+  midAccel: (r) => middleSeries(r, rAccel(r)),
+  midInter: (r) => middleSeries(r, rInter(r)),
+  midAffine: (r) => middleSeries(r, rAffine(r)),
+  midDownAccel: (r) => middleSeries(r, rDownAccel(r)),
+  pairsD1end: (r) => pairsFamily(r, pairRulesD1(r), true),
+  pairsD1mid: (r) => pairsFamily(r, pairRulesD1(r), false),
+  pairsD2: (r) => pairsFamily(r, pairRulesD2(r), chance(r, 0.65)),
+  pairsD3: (r) => pairsFamily(r, pairRulesD3(r), chance(r, 0.65)),
+  tri: (r) => triFamily(r),
+  intruder1: (r) => intruderFamily(r, 1),
+  intruder2: (r) => intruderFamily(r, 2),
+  intruder3: (r) => intruderFamily(r, 3),
+  parallel1: (r) => parallelSame(r, 1),
+  parallel2: (r) => parallelSame(r, 2),
+  parallel3: (r) => parallelSame(r, 3),
+  mapD1: (r) => parallelMap(r, pairRulesD1(r)),
+  mapD2: (r) => parallelMap(r, pairRulesD2(r)),
+  mapD3: (r) => parallelMap(r, pairRulesD3(r)),
+};
+
 export function genNumseries(rng: Rng, difficulty: Difficulty): Question {
   return retry(() => {
     const built = difficulty === 1 ? buildD1(rng) : difficulty === 2 ? buildD2(rng) : buildD3(rng);

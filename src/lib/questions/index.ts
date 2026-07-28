@@ -51,9 +51,12 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
  *
  * - fold: la regola "un buco sulla piega non si sdoppia" non è mai detta prima
  *   di rispondere, e il pannello "1ª piega" disegna la piega sbagliata;
- * - symmetry: l'asse di simmetria è disegnato negli esempi ma non nelle opzioni.
+ * - symmetry: l'asse di simmetria è disegnato negli esempi ma non nelle opzioni;
+ * - domino: in una famiglia di regole il suggerimento nel prompt ("ogni tessera
+ *   nasce girando quella prima di lei") è letteralmente falso, e chi lo segue
+ *   alla lettera sceglie il distrattore. Un gioco non può mentire al giocatore.
  */
-export const QUARANTINED: QuestionType[] = ['fold', 'symmetry'];
+export const QUARANTINED: QuestionType[] = ['fold', 'symmetry', 'domino'];
 
 /** tutti i tipi esistenti, inclusi quelli in quarantena (per test e audit) */
 export const ALL_QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];

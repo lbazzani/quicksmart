@@ -19,7 +19,7 @@
 //    "Gruppo 1/2/3" (le altre un'etichetta vuota, per restare allineate).
 //  - due valori che a schermo si confondono non possono mai essere l'UNICO
 //    segno che separa la risposta da un distrattore (vedi tooClose e
-//    COLOR_FAMILIES).
+//    pickPalette, che usa le coppie confondibili di src/lib/colors.ts).
 //  - da d2 in su le caselle per gruppo sono 3: si arriva a 3 figure per casella
 //    e con 4 colonne diventerebbero troppo piccole per contarle.
 //
@@ -36,11 +36,34 @@
 //  - i distrattori violano ESATTAMENTE una proprietà (intersezione) o ne
 //    soddisfano esattamente una (domanda negativa): sono gli errori tipici di
 //    chi guarda una riga sola.
-// Le tre condizioni sono anche verificate a runtime: se saltano, si rigenera.
+//
+// VINCOLO DI COPERTURA (perché non si venga puniti per aver ragionato bene):
+//  chi guarda gli esempi non deduce solo "che cosa hanno in comune": deduce
+//  anche che cosa in questa domanda è POSSIBILE. Se il gruppo 1 mostra caselle
+//  da 3, 3 e 2 figure e la risposta ne ha una sola, "servono almeno 2 figure" è
+//  una regola falsa che gli esempi non smentiscono mai: si ragiona benissimo e
+//  si scarta la risposta giusta. Quindi:
+//   - ogni valore che la risposta assume (forma, colore, conteggio,
+//     riempimento) deve comparire in almeno una casella disegnata;
+//   - per gli attributi LIBERI (che non definiscono nessun gruppo, e che perciò
+//     sono identici in tutte e tre le opzioni) il valore della risposta deve
+//     comparire in OGNI gruppo: nessuna cornice può suggerire "qui una figura
+//     così non ci sta".
+//  Il vincolo non si può estendere agli attributi che definiscono i gruppi: il
+//  colore del gruppo 2 non può comparire nel gruppo 1, altrimenti i gruppi non
+//  sarebbero disgiunti. Per quelli la difesa è la consegna, che dice esplicita-
+//  mente che la regola di un gruppo è l'unica cosa uguale a tutte le sue
+//  caselle e che il resto cambia e non conta.
+// Tutte le condizioni sono verificate a runtime: se saltano, si rigenera.
+//
+// CONTEGGIO LEGGIBILE: tre figure in fila escono dalla casella (il renderer non
+// scende sotto il 45% di larghezza per figura) e vengono tagliate ai bordi: si
+// conta male proprio quando il conteggio è la regola. Le caselle da 3 figure
+// usano quindi la disposizione a griglia (2 sopra, 1 sotto), che sta dentro.
 
 import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
-import { COLOR_NAMES } from '../colors';
+import { COLOR_NAMES, tooSimilar } from '../colors';
 import { placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -59,14 +82,28 @@ const ATTRS: Attr[] = ['shape', 'color', 'count', 'fill'];
 
 // forme inconfondibili anche in miniatura (pentagono/esagono sarebbero cerchi)
 const SHAPES: ShapeName[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'heart', 'cross', 'moon'];
-// famiglie di colori: due colori della stessa famiglia sono troppo simili per
-// essere distinti a colpo d'occhio → mai insieme nella stessa domanda.
-// Il viola #a78bfa sta con ciano e azzurro: viola contro azzurro #60a5fa, a
-// dimensione di opzione, sono lo stesso blu-viola e non possono essere l'unica
-// differenza fra la risposta e un distrattore.
-const COLOR_FAMILIES: number[][] = [[0, 6, 2], [1, 5], [3, 7], [4]];
+const PALETTE_SIZE = COLOR_NAMES.length;
 const FILLS: Fill[] = ['solid', 'outline', 'half'];
 const COUNTS = [1, 2, 3];
+
+/**
+ * Quattro colori che si distinguono a due a due (la lista delle coppie che si
+ * confondono è quella condivisa in src/lib/colors.ts). Qui un colore può essere
+ * l'unica differenza fra la risposta e un distrattore: se due opzioni fossero
+ * ciano e verde, la domanda diventerebbe un test della vista.
+ * La presa "golosa" su un ordine casuale ne trova sempre almeno 4: le coppie
+ * confondibili formano tre catene separate (azzurro-ciano-verde con viola,
+ * rosa-rosso, giallo-arancione).
+ */
+function pickPalette(rng: Rng): number[] {
+  const out: number[] = [];
+  for (const c of shuffle(rng, Array.from({ length: PALETTE_SIZE }, (_, i) => i))) {
+    if (out.every((x) => !tooSimilar(x, c))) out.push(c);
+    if (out.length === 4) break;
+  }
+  if (out.length < 4) throw new Error('colori distinguibili insufficienti');
+  return out;
+}
 
 /** etichetta stampata sopra la prima casella di ogni gruppo */
 const GROUP_LABEL = ['Gruppo 1', 'Gruppo 2', 'Gruppo 3'];
@@ -77,7 +114,8 @@ const NO_LABEL = ' ';
  * Coppie di valori che a schermo si assomigliano troppo: possono comparire nel
  * disegno, ma non possono essere l'UNICA differenza fra la risposta giusta e un
  * distrattore (sarebbe uno spot-the-difference, non un ragionamento).
- * I colori non compaiono qui perché ci pensa già COLOR_FAMILIES.
+ * I colori non compaiono qui perché ci pensa già pickPalette: nella stessa
+ * domanda non entrano mai due colori confondibili.
  */
 function tooClose(a: Attr, x: Val, y: Val): boolean {
   const pair = (p: Val, q: Val) => (x === p && y === q) || (x === q && y === p);
@@ -196,8 +234,8 @@ function withAttr(it: Item, a: Attr, v: Val): Item {
   return n;
 }
 
-/** dimensione per rendere leggibili 1, 2 o 3 figure affiancate */
-const SIZE_BY_COUNT = [0, 0.8, 0.9, 0.96];
+/** dimensione per rendere leggibili 1, 2 o 3 figure nella casella */
+const SIZE_BY_COUNT = [0, 0.8, 0.9, 0.92];
 
 function cellOf(it: Item): CellSpec {
   return {
@@ -207,8 +245,16 @@ function cellOf(it: Item): CellSpec {
       fillMode: it.fill,
       size: SIZE_BY_COUNT[it.count],
     })),
-    layout: 'row',
+    // 1 e 2 figure stanno in fila dentro la casella; 3 in fila sborderebbero
+    // (45% di larghezza ciascuna) e le due esterne verrebbero tagliate a metà:
+    // a griglia (2 sopra, 1 sotto) restano intere e si contano davvero
+    layout: it.count === 3 ? 'grid' : 'row',
   };
+}
+
+/** chiave di uguaglianza fra caselle (le opzioni non devono copiare il disegno) */
+function keyOf(it: Item): string {
+  return `${it.shape}|${it.color}|${it.count}|${it.fill}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,13 +313,12 @@ function planFor(rng: Rng, difficulty: Difficulty): Plan {
 // ---------------------------------------------------------------------------
 
 function buildPools(rng: Rng, difficulty: Difficulty, attrs: Attr[]): Record<Attr, Val[]> {
-  const colors = pickN(rng, COLOR_FAMILIES, 4).map((fam) => pick(rng, fam));
   // a d1 gli attributi che fanno solo rumore restano semplici: al massimo due
   // figure per casella e niente riempimento "a metà"
   const easy = difficulty === 1;
   return {
     shape: pickN(rng, SHAPES, 4),
-    color: colors,
+    color: pickPalette(rng),
     count: easy && !attrs.includes('count') ? [1, 2] : [...COUNTS],
     fill: easy && !attrs.includes('fill') ? ['solid', 'outline'] : [...FILLS],
   };
@@ -282,16 +327,34 @@ function buildPools(rng: Rng, difficulty: Difficulty, attrs: Attr[]): Record<Att
 /**
  * Distribuisce `n` valori presi da `allowed` in modo che NON siano tutti uguali.
  * `nearMiss` = tutti uguali tranne uno (rumore che somiglia a una regola).
+ * `must` = valore che DEVE comparire almeno una volta: è il valore che avranno
+ * le opzioni per quell'attributo, e ogni gruppo deve mostrarne un esempio
+ * (vincolo di copertura).
  */
-function spread(rng: Rng, allowed: Val[], n: number, nearMiss: boolean): Val[] {
+function spread(rng: Rng, allowed: Val[], n: number, nearMiss: boolean, must?: Val): Val[] {
   if (allowed.length < 2) throw new Error('valori insufficienti per far variare la proprietà');
+  if (must !== undefined && !allowed.includes(must)) throw new Error('il valore da coprire non è disponibile');
   if (nearMiss) {
-    const [x, y] = pickN(rng, allowed, 2);
+    // due valori: uno in 2 caselle su 3, l'altro in una sola (il "quasi uguale"
+    // che sembra una regola). Il valore da coprire può fare l'una o l'altra
+    // parte, così non diventa riconoscibile per posizione.
+    const [x, y] =
+      must === undefined
+        ? pickN(rng, allowed, 2)
+        : chance(rng, 0.5)
+          ? [must, pick(rng, allowed.filter((z) => z !== must))]
+          : [pick(rng, allowed.filter((z) => z !== must)), must];
     const vals = Array<Val>(n).fill(x);
     vals[n - 1] = y;
     return shuffle(rng, vals);
   }
   const base = shuffle(rng, [...allowed]);
+  if (must !== undefined) {
+    // in testa: il giro base[i % len] lo pesca di sicuro anche se le caselle
+    // sono meno dei valori disponibili
+    base.splice(base.indexOf(must), 1);
+    base.unshift(must);
+  }
   return shuffle(rng, Array.from({ length: n }, (_, i) => base[i % base.length]));
 }
 
@@ -300,7 +363,8 @@ function buildRow(
   plan: Plan,
   pools: Record<Attr, Val[]>,
   idx: number,
-  v: Partial<Record<Attr, Val>>
+  v: Partial<Record<Attr, Val>>,
+  free: Partial<Record<Attr, Val>>
 ): Item[] {
   const own = plan.attrs[idx];
   const others = ATTRS.filter((a) => a !== own);
@@ -310,7 +374,7 @@ function buildRow(
   for (const a of others) {
     // niente casella che soddisfi ANCHE la proprietà di un altro gruppo
     const allowed = pools[a].filter((x) => !(plan.attrs.includes(a) && x === v[a]));
-    values[a] = spread(rng, allowed, plan.cols, a === nmAttr);
+    values[a] = spread(rng, allowed, plan.cols, a === nmAttr, free[a]);
   }
 
   const items: Item[] = [];
@@ -340,7 +404,17 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
   const v: Partial<Record<Attr, Val>> = {};
   for (const a of plan.attrs) v[a] = pick(rng, pools[a]);
 
-  const rows = plan.attrs.map((_, i) => buildRow(rng, plan, pools, i, v));
+  // Attributi LIBERI: non definiscono nessun gruppo, quindi sono identici in
+  // tutte e tre le opzioni e non discriminano. Il loro valore si sceglie PRIMA
+  // delle righe (comodo da guardare: poche figure, niente campitura a metà) e
+  // ogni gruppo dovrà mostrarne un esempio, così nessuna cornice fa pensare
+  // "una figura così qui non ci starebbe".
+  const free: Partial<Record<Attr, Val>> = {};
+  for (const a of ATTRS) {
+    if (!plan.attrs.includes(a)) free[a] = pick(rng, readable(a, pools[a]));
+  }
+
+  const rows = plan.attrs.map((_, i) => buildRow(rng, plan, pools, i, v, free));
 
   // --- controllo 1: dentro ogni gruppo solo la proprietà giusta è costante ---
   for (let i = 0; i < rows.length; i++) {
@@ -365,24 +439,30 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
   // Ogni distrattore differisce dalla risposta per UN attributo: quel solo
   // attributo deve quindi saltare all'occhio, altrimenti la domanda diventa una
   // caccia alle differenze (vedi tooClose).
+  /** valori di un attributo davvero disegnati nelle caselle */
+  const shown = (a: Attr): Val[] => [...new Set(rows.flat().map((it) => getAttr(it, a)))];
+  const drawn = new Set(rows.flat().map(keyOf));
+
   let correct: Item = { shape: 'circle', color: 0, count: 1, fill: 'solid' };
   for (const a of ATTRS) {
     if (plan.attrs.includes(a)) {
       if (plan.mode === 'intersect') {
+        // il valore del gruppo: è sotto gli occhi, uguale in tutta la sua cornice
         correct = withAttr(correct, a, v[a] as Val);
       } else {
-        // negativa: un valore diverso da quello del gruppo, e ben distinguibile
-        // da esso (il distrattore differirà dalla risposta proprio qui)
-        const far = pools[a].filter((x) => x !== v[a] && !tooClose(a, v[a] as Val, x));
-        if (far.length === 0) throw new Error(`nessun valore ben distinguibile per ${a}`);
+        // negativa: un valore diverso da quello del gruppo, ben distinguibile da
+        // esso (il distrattore differirà dalla risposta proprio qui) e comunque
+        // MOSTRATO nel disegno: se la risposta fosse l'unica figura di un colore
+        // mai visto si risponderebbe "quella strana" senza guardare i gruppi
+        const far = shown(a).filter((x) => x !== v[a] && !tooClose(a, v[a] as Val, x));
+        if (far.length === 0) throw new Error(`nessun valore mostrato e ben distinguibile per ${a}`);
         correct = withAttr(correct, a, pick(rng, far));
       }
     } else {
-      // attributo che non definisce nessun gruppo: è identico in tutte e tre le
-      // opzioni, quindi non discrimina — lo teniamo sul valore che si legge
-      // meglio (poche figure, niente campitura a metà), così la differenza vera
-      // resta la più grande cosa che si vede
-      correct = withAttr(correct, a, pick(rng, readable(a, pools[a])));
+      // attributo libero: identico in tutte e tre le opzioni, quindi non
+      // discrimina. Il valore è già stato scelto (e ogni gruppo ne mostra un
+      // esempio, vedi il vincolo di copertura più sotto).
+      correct = withAttr(correct, a, free[a] as Val);
     }
   }
 
@@ -395,10 +475,19 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
     // è preferibilmente uno di quelli davvero mostrati nelle altre righe (errore
     // più credibile), purché non si confonda con quello della risposta
     const far = (xs: Val[]) => xs.filter((x) => x !== v[a] && !tooClose(a, v[a] as Val, x));
-    const seen = far([...new Set(rows.flat().map((it) => getAttr(it, a)))]);
+    const seen = far(shown(a));
     const cand = seen.length > 0 ? seen : far(pools[a]);
     if (cand.length === 0) throw new Error(`nessun valore ben distinguibile per ${a}`);
-    return withAttr(correct, a, pick(rng, cand));
+    // a parità di tutto, un valore che non renda il distrattore la copia di una
+    // casella già disegnata (sarebbe una figura "già vista", quindi sospetta)
+    const fresh = cand.filter((x) => !drawn.has(keyOf(withAttr(correct, a, x))));
+    const use = fresh.length > 0 ? fresh : cand;
+    // fra questi, il valore più presente nel disegno: così il distrattore non è
+    // "quello strano" e non si può rispondere scegliendo la figura più familiare
+    // senza guardare i gruppi
+    const freq = (x: Val) => rows.flat().filter((it) => getAttr(it, a) === x).length;
+    const top = Math.max(...use.map(freq));
+    return withAttr(correct, a, pick(rng, use.filter((x) => freq(x) === top)));
   };
   const d1 = makeDistractor(g1);
   const d2 = makeDistractor(g2);
@@ -426,13 +515,31 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
     }
   }
 
+  // --- controllo 5: VINCOLO DI COPERTURA ---
+  // Nessun valore della risposta deve essere "impossibile" secondo gli esempi.
+  for (const a of ATTRS) {
+    const val = getAttr(correct, a);
+    if (!shown(a).includes(val)) {
+      throw new Error(`copertura: nessun esempio mostra ${a}=${val}, che la risposta richiede`);
+    }
+    // per gli attributi liberi il controllo è gruppo per gruppo: sono uguali in
+    // tutte le opzioni, quindi un gruppo che non li mostra mai non aiuta a
+    // scegliere e semina il dubbio ("qui una figura così non c'è mai")
+    if (plan.attrs.includes(a)) continue;
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].some((it) => getAttr(it, a) === val)) {
+        throw new Error(`copertura: il gruppo ${i + 1} non mostra mai ${a}=${val}`);
+      }
+    }
+  }
+
   const plainCells = rows.map((r) => r.map(cellOf));
   const choiceCells = [correct, d1, d2].map(cellOf);
   // nessuna opzione deve essere la copia di una casella già disegnata
   // (confronto sulle celle nude, prima di attaccare le etichette di gruppo)
-  const drawn = new Set(plainCells.flat().map((c) => JSON.stringify(c)));
+  const drawnCells = new Set(plainCells.flat().map((c) => JSON.stringify(c)));
   for (const c of choiceCells) {
-    if (drawn.has(JSON.stringify(c))) throw new Error('opzione identica a una casella del disegno');
+    if (drawnCells.has(JSON.stringify(c))) throw new Error('opzione identica a una casella del disegno');
   }
   // intestazione del gruppo sulla prima casella; le altre prendono
   // un'etichetta vuota solo per restare allineate alla prima
@@ -446,20 +553,27 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
   ] as [ChoiceVisual, ChoiceVisual]);
 
   const rowsText = plan.attrs.map((a, i) => `il gruppo ${i + 1} contiene ${rowClause(a, v[a] as Val)}`);
+  // La consegna dice COME si legge un gruppo, non solo che cosa cercare: la
+  // regola è l'unica cosa uguale a tutte le sue caselle, il resto cambia e non
+  // conta. Senza questa frase ogni regolarità apparente ("qui sono tutte
+  // grandi", "qui non c'è mai una figura sola") sembra una regola da rispettare.
+  const meta = chance(rng, 0.5)
+    ? 'La regola di un gruppo è la cosa uguale in tutte le sue caselle: il resto cambia e non conta.'
+    : 'Ogni gruppo ha una regola: è la cosa uguale in tutte le sue caselle, il resto non conta.';
   const prompt =
     plan.mode === 'none'
       ? // niente doppia negazione: si dice al bambino che cosa cercare e quante
         // figure entrano da qualche parte, così il compito non si può ribaltare
         chance(rng, 0.5)
-        ? 'Ogni gruppo ha la sua regola. Due figure entrano in un gruppo, una NON entra in nessuno: qual è?'
-        : 'Ogni gruppo ha la sua regola. Trova la figura che NON va bene per nessun gruppo.'
+        ? `${meta} Due figure entrano in un gruppo, una NON entra in nessuno: qual è?`
+        : `${meta} Trova la figura che NON va bene per nessun gruppo.`
       : total === 3
         ? chance(rng, 0.5)
-          ? 'Ogni gruppo ha la sua regola. Quale figura può entrare in tutti e tre i gruppi?'
-          : 'Guarda la regola di ogni gruppo: quale figura va bene per tutti e tre?'
+          ? `${meta} Quale figura può entrare in tutti e tre i gruppi?`
+          : `${meta} Quale figura va bene per tutti e tre i gruppi?`
         : chance(rng, 0.5)
-          ? 'Ogni gruppo ha la sua regola. Quale figura può entrare in tutti e due i gruppi?'
-          : 'Guarda la regola di ogni gruppo: quale figura va bene sia per il Gruppo 1 sia per il Gruppo 2?';
+          ? `${meta} Quale figura può entrare in tutti e due i gruppi?`
+          : `${meta} Quale figura va bene sia per il Gruppo 1 sia per il Gruppo 2?`;
 
   const explanation =
     plan.mode === 'intersect'
