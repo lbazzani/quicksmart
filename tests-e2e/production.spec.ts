@@ -16,7 +16,14 @@ interface Snap {
   roundIndex: number;
   sofia: { text: string; ai: boolean } | null;
   players: { id: string; nickname: string; score: number; stats: { correct: number; wrong: number } }[];
-  current: { prompt: string; buzzerId?: string; outcome?: string; choices: unknown[]; correctIndex?: number } | null;
+  current: {
+    prompt: string;
+    buzzerId?: string;
+    outcome?: string;
+    choices: unknown[];
+    correctIndex?: number;
+    lockedOut: string[];
+  } | null;
 }
 
 async function snap(code: string): Promise<Snap> {
