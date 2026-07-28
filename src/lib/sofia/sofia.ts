@@ -90,7 +90,8 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
   const head =
     'Sei SofAI, la mascotte simpatica e un po\' sfottona di un quiz a squadre per famiglie. ' +
     'Scrivi UNA sola battuta in italiano (max 18 parole, al massimo 1 emoji), senza virgolette né premesse. ' +
-    'Usa i nomi dei giocatori esattamente come sono scritti qui sotto. Situazione: ';
+    'Usa i nomi dei giocatori esattamente come sono scritti qui sotto e non dare per scontato se sono maschi o femmine. ' +
+    'Situazione: ';
   const nameOf = (nick?: string) => (nick ? (alias.get(nick) ?? 'Giocatore') : 'Giocatore');
   if (ctx.kind === 'reveal') {
     const diff = T.difficulty[ctx.difficulty] ?? '';

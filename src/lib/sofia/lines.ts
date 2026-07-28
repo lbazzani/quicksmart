@@ -37,10 +37,10 @@ export const LINES: Record<SofiaLineKind, string[]> = {
     'Ciao {name}! Pronta a vedere chi ha il cervello più scattante?',
   ],
   join: [
-    'Ooh, è arrivato {name}! La sfida si fa interessante…',
+    'Ooh, ecco {name}! La sfida si fa interessante…',
     '{name} è in squadra! Occhio, ha la faccia di chi le sa tutte.',
-    'Benvenuto {name}! Il pulsante rosso non morde, promesso.',
-    '{name} si unisce! Più siamo, più è bello vincere. Per uno solo, ovvio.',
+    'Ciao {name}! Il pulsante rosso non morde, promesso.',
+    '{name} si unisce! Più siamo, più è bello vincere. Da soli, ovvio.',
   ],
   correct: [
     'Grande {name}! Risposta giusta, cervello acceso! 💡',
@@ -49,7 +49,7 @@ export const LINES: Record<SofiaLineKind, string[]> = {
   ],
   correctFast: [
     'WOW {name}, più veloce della mia connessione! ⚡',
-    'Fulmine {name}! Ha risposto prima ancora di pensarci. E ha fatto bene!',
+    'Fulmine {name}! Risposta data prima ancora di pensarci. E indovinata!',
     '{name} in modalità turbo! Giusta e velocissima!',
   ],
   correctStreak: [
@@ -60,13 +60,13 @@ export const LINES: Record<SofiaLineKind, string[]> = {
   wrong: [
     'Ahi ahi {name}… era così vicina! I punti però se ne vanno.',
     'No {name}! Il pulsante giusto era un altro. Capita ai migliori… più o meno.',
-    '{name} ha risposto con coraggio. Il coraggio, purtroppo, non dà punti.',
+    'Risposta coraggiosa, {name}. Il coraggio, purtroppo, non dà punti.',
     'Ops! {name}, la fretta è cattiva consigliera… la domanda riapre!',
   ],
   mute: [
-    '{name} si è prenotato e poi… il vuoto. Che suspense sprecata!',
+    '{name} prenota… e poi il vuoto. Che suspense sprecata!',
     'Ehm, {name}? Il microfono era tuo! Silenzio che costa caro.',
-    '{name} ha fatto la mossa del gambero: prenota e sparisce. Penalità!',
+    '{name} fa la mossa del gambero: prenota e sparisce. Penalità!',
   ],
   nobody: [
     'Nessuno si prenota?! E io che l’avevo scelta così carina… −25 a tutti!',

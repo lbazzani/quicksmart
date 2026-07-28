@@ -4,7 +4,7 @@ Quiz visuale stile test del QI, in tempo reale, mobile-first. Una squadra, un co
 
 ## Modalità
 
-1. **Squadra (multiplayer)** — l'host crea la partita, condivide un codice a 5 lettere (o QR code). I giocatori entrano con nickname + avatar emoji. L'host è anche giocatore e ha i controlli di partita.
+1. **Squadra (multiplayer)** — l'host crea la partita, condivide un codice a 5 lettere (o QR code). I giocatori entrano con nickname + avatar emoji. L'host è anche giocatore e ha i controlli di partita. Si può entrare **anche a partita iniziata**: chi arriva in ritardo parte da zero punti e gioca dal round successivo (quello in corso lo vedrebbe a metà).
 2. **Solo (allenamento)** — stesso motore, un solo giocatore, con timer di decisione: se non ti prenoti entro il tempo massimo vieni penalizzato.
 
 ## Flusso di un round (multiplayer)
