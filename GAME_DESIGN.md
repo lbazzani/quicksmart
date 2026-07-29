@@ -77,6 +77,30 @@ Il payload è **dichiarativo** (JSON) e viene renderizzato client-side in SVG: n
 
 `/` home · `/new` crea partita · `/join` entra con codice · `/g/[code]` lobby → gioco → podio (macchina a stati) · `/solo` allenamento.
 
+### SofAI, la mascotte
+
+Commenta la partita: ingresso in squadra, esito del round, podio. Le battute
+sono pre-scritte (`src/lib/sofia/lines.ts`), quindi compaiono **subito**: il
+gioco non aspetta mai una risposta esterna.
+
+Sul podio la battuta la scrive l'AI (il CLI di Claude, lato server, con
+`SOFIA_AI=1`) ed è marcata con ✦. È l'unico momento affidato all'AI, e la
+ragione è misurata: sul server il CLI risponde in 10-50 secondi, mentre un
+reveal dura 6. Una battuta di round arriverebbe sempre a round finito — e
+verrebbe scartata perché parla di una cosa già passata — occupando intanto
+l'unica linea disponibile e facendo aspettare il podio. Il podio invece la
+battuta la aspetta: la classifica resta sullo schermo, e l'AI fa la cosa che
+solo lei può fare, commentare i nomi e i punti veri di quella partita.
+
+Se l'AI non risponde resta la battuta pre-scritta e in partita non si nota
+nulla: proprio per questo il motivo del fallimento finisce nei log del
+servizio, e il test di produzione verifica che la battuta AI compaia **sullo
+schermo** — un controllo sulla sola API non si accorgeva che il client
+chiudeva lo stream troppo presto.
+
+I nickname arrivano da internet e non entrano mai nel prompt: dentro sono
+`Giocatore1`, `Giocatore2`… e i nomi veri tornano solo dopo la risposta.
+
 ### Tema visivo
 
 Tavolozza "brace": sfondo notte calda (`#16100c`), **arancione** come colore guida con l'ambra a fargli eco e il verde acqua come contrappunto freddo (è il complementare dell'arancione). Niente viola né grigi azzurrini. Due colori restano riservati e non si usano come decorazione: **rosso** per il pulsante BUZZ e gli errori, **verde** per le risposte giuste — se l'arancione invadesse quel territorio, un errore e un elemento d'interfaccia si somiglierebbero.
