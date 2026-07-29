@@ -12,15 +12,16 @@ import type {
   VisualPayload,
 } from '@/lib/types';
 
+/** I colori delle figure. I nomi italiani stanno in src/lib/colors.ts, nello stesso ordine. */
 export const PALETTE = [
-  '#22d3ee', // 0 ciano
-  '#f472b6', // 1 rosa
-  '#a78bfa', // 2 viola
-  '#fbbf24', // 3 ambra
-  '#34d399', // 4 verde
-  '#fb7185', // 5 corallo
-  '#60a5fa', // 6 azzurro
-  '#f97316', // 7 arancio
+  '#f97316', // 0 arancione — il colore guida
+  '#fbbf24', // 1 giallo
+  '#14b8a6', // 2 verde acqua
+  '#f472b6', // 3 rosa
+  '#4ade80', // 4 verde
+  '#ef4444', // 5 rosso
+  '#38bdf8', // 6 azzurro
+  '#f5f0e8', // 7 panna
 ];
 
 function starPoints(cx: number, cy: number, outer: number, inner: number, n = 5): string {

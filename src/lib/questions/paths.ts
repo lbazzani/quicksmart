@@ -66,6 +66,7 @@
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { colorWord } from '../colors';
 import { placeChoices, retry } from './qutils';
 
 // TODO(coordinatore): quando 'paths' entrerà in QuestionType basta `qtype: 'paths'`.
@@ -167,19 +168,19 @@ function pickTarget(rng: Rng): FigInfo {
 }
 
 /** colori delle stelle: ben distinguibili tra loro e dal ciano delle frecce */
-const STAR_COLORS = [1, 2, 3, 4]; // rosa, viola, gialla, verde
-/**
- * Nomi dei colori: PALETTE[3] è #fbbf24 (ambra), ma in tutto il gioco quel
- * colore si chiama "giallo" (COLOR_NAMES in sequence.ts) ed è così che lo
- * chiama una bambina. Restiamo coerenti con il resto del gioco: "gialla".
- */
-const STAR_NAME: Record<number, string> = { 1: 'rosa', 2: 'viola', 3: 'gialla', 4: 'verde' };
-/** colori dei segnaposto (mai il ciano/azzurro delle frecce) */
-const FIG_COLORS = [1, 2, 3, 4, 5, 7];
+/** colori delle stelle: giallo, rosa, verde, rosso — ben distinti dalle frecce */
+const STAR_COLORS = [1, 3, 4, 5];
+/** colori dei segnaposto (mai quelli delle frecce) */
+const FIG_COLORS = [1, 3, 4, 5, 7];
 /** le frecce sono sempre dello stesso colore: non devono distinguersi tra loro */
 const ARROW_COLORS = [0, 6];
 
-const starLabel = (color: number) => `stella ${STAR_NAME[color]}`;
+/**
+ * Il nome del colore arriva da ../colors, l'unico posto in cui i colori hanno
+ * un nome: se la tavolozza cambia, cambia anche il testo della domanda. Una
+ * stella chiamata "viola" e disegnata verde acqua farebbe sbagliare chi ragiona.
+ */
+const starLabel = (color: number) => `stella ${colorWord(color, true)}`;
 
 // ---------------------------------------------------------------------------
 // tavola

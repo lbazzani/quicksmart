@@ -5,17 +5,29 @@
   --font-sans: var(--font-nunito);
 }
 
+/*
+  Tavolozza "brace": arancione come colore guida, ambra a fargli eco, verde
+  acqua come contrappunto freddo (è il complementare dell'arancione, quindi si
+  mettono in risalto a vicenda). Lo sfondo è una notte calda, non blu.
+*/
 :root {
   color-scheme: dark;
+  --qs-orange: #f97316;
+  --qs-orange-soft: #fb923c;
+  --qs-amber: #fbbf24;
+  --qs-teal: #2dd4bf;
+  --qs-red: #ef4444;
+  --qs-night: #16100c;
+  --qs-cream: #f7efe6;
 }
 
 body {
   background:
-    radial-gradient(1100px 500px at 80% -10%, rgba(124, 58, 237, 0.22), transparent 60%),
-    radial-gradient(900px 500px at -10% 30%, rgba(34, 211, 238, 0.13), transparent 55%),
-    radial-gradient(700px 600px at 50% 110%, rgba(244, 114, 182, 0.12), transparent 60%),
-    #0b1020;
-  color: #f1f5f9;
+    radial-gradient(1100px 520px at 78% -12%, rgba(249, 115, 22, 0.26), transparent 62%),
+    radial-gradient(900px 480px at -8% 26%, rgba(251, 191, 36, 0.14), transparent 58%),
+    radial-gradient(760px 620px at 46% 112%, rgba(45, 212, 191, 0.12), transparent 60%),
+    var(--qs-night);
+  color: var(--qs-cream);
   font-family: var(--font-nunito), system-ui, sans-serif;
   min-height: 100dvh;
   -webkit-tap-highlight-color: transparent;
@@ -26,50 +38,51 @@ body {
   font-family: var(--font-baloo), var(--font-nunito), sans-serif;
 }
 
-/* pulsante BUZZ */
+/* pulsante BUZZ: rosso acceso, l'unico elemento che grida "premimi" */
 .buzzer {
   box-shadow:
-    0 0 0 6px rgba(251, 113, 133, 0.25),
-    0 0 40px rgba(251, 113, 133, 0.55),
+    0 0 0 6px rgba(239, 68, 68, 0.22),
+    0 0 42px rgba(239, 68, 68, 0.5),
     inset 0 -8px 18px rgba(0, 0, 0, 0.35),
-    inset 0 6px 14px rgba(255, 255, 255, 0.28);
+    inset 0 6px 14px rgba(255, 255, 255, 0.26);
 }
 .buzzer:active {
   transform: scale(0.94);
   box-shadow:
-    0 0 0 4px rgba(251, 113, 133, 0.3),
-    0 0 24px rgba(251, 113, 133, 0.5),
+    0 0 0 4px rgba(239, 68, 68, 0.28),
+    0 0 26px rgba(239, 68, 68, 0.45),
     inset 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
-.glow-cyan { text-shadow: 0 0 18px rgba(34, 211, 238, 0.65); }
-.glow-pink { text-shadow: 0 0 18px rgba(244, 114, 182, 0.65); }
+.glow-orange { text-shadow: 0 0 20px rgba(249, 115, 22, 0.6); }
+.glow-amber { text-shadow: 0 0 20px rgba(251, 191, 36, 0.55); }
+.glow-teal { text-shadow: 0 0 18px rgba(45, 212, 191, 0.5); }
 
 .card {
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 245, 235, 0.045);
+  border: 1px solid rgba(255, 235, 215, 0.11);
   border-radius: 1.25rem;
   backdrop-filter: blur(8px);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #22d3ee, #818cf8);
-  color: #0b1020;
+  background: linear-gradient(135deg, #fb923c, #f97316 55%, #ea580c);
+  color: #2b1405;
   font-weight: 800;
   border-radius: 1rem;
-  box-shadow: 0 0 24px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 0 26px rgba(249, 115, 22, 0.4);
   transition: transform 0.1s ease, box-shadow 0.2s ease;
 }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.45; box-shadow: none; }
 
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 240, 225, 0.06);
+  border: 1px solid rgba(255, 235, 215, 0.15);
   border-radius: 1rem;
   transition: background 0.15s ease;
 }
-.btn-ghost:active { background: rgba(255, 255, 255, 0.12); }
+.btn-ghost:active { background: rgba(255, 240, 225, 0.13); }
 
 input, select {
   outline: none;

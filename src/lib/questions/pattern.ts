@@ -32,7 +32,7 @@ import type {
   ShapeSpec,
 } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { COLOR_NAMES, tooSimilar } from '../colors';
+import { COLOR_FORMS, tooSimilar } from '../colors';
 import { placeChoices, retry, balancedNumericDistractors } from './qutils';
 
 // ---------------------------------------------------------------------------
@@ -69,26 +69,8 @@ interface ColorInfo extends Agr {
   idx: number; // indice nella PALETTE del renderer
 }
 
-/**
- * Flessioni dei nomi colore. I NOMI arrivano da ../colors (COLOR_NAMES): qui si
- * aggiunge solo l'accordo di genere e numero, così una domanda non chiamerà mai
- * "blu" quello che un'altra chiama "azzurro".
- */
-const INFLECTION: Record<string, [string, string, string, string]> = {
-  ciano: ['ciano', 'ciano', 'ciano', 'ciano'],
-  rosa: ['rosa', 'rosa', 'rosa', 'rosa'],
-  viola: ['viola', 'viola', 'viola', 'viola'],
-  giallo: ['giallo', 'gialla', 'gialli', 'gialle'],
-  verde: ['verde', 'verde', 'verdi', 'verdi'],
-  rosso: ['rosso', 'rossa', 'rossi', 'rosse'],
-  azzurro: ['azzurro', 'azzurra', 'azzurri', 'azzurre'],
-  arancione: ['arancione', 'arancione', 'arancioni', 'arancioni'],
-};
-
-const COLORS: ColorInfo[] = COLOR_NAMES.map((name, idx) => {
-  const [ms, fs, mp, fp] = INFLECTION[name] ?? [name, name, name, name];
-  return { idx, ms, fs, mp, fp };
-});
+/** i nomi e gli accordi dei colori vivono in ../colors: uno solo per tutto il gioco */
+const COLORS: ColorInfo[] = COLOR_FORMS.map((f, idx) => ({ idx, ...f }));
 
 const ORD = ['prima', 'seconda', 'terza', 'quarta', 'quinta'];
 

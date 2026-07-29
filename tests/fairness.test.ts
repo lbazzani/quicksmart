@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../src/lib/rng';
 import { GENERATORS } from '../src/lib/questions';
 import type { CellSpec, Difficulty, Question } from '../src/lib/types';
+import { COLOR_FORMS, COLOR_NAMES } from '../src/lib/colors';
+import { PALETTE } from '../src/components/visuals';
 
 function generate(qtype: keyof typeof GENERATORS, n: number, seed = 4242): Question[] {
   const rng = mulberry32(seed);
@@ -107,6 +109,28 @@ describe('domino — il suggerimento dice la verità', () => {
       }
     }
     expect(controllate).toBeGreaterThan(0);
+  });
+});
+
+describe('i colori si chiamano come sono disegnati', () => {
+  // Cambiare la tavolozza è facile; dimenticare che una domanda chiama "viola"
+  // un colore che ora è verde acqua lo è altrettanto, e chi ragiona bene
+  // sbaglia. I nomi devono venire tutti da src/lib/colors.ts.
+  const fuoriTavolozza = /\b(ciano|viola|corallo|ambra|celeste|blu|magenta|turchese)\b/i;
+
+  it('nessun testo nomina un colore che non è nella tavolozza', () => {
+    for (const qtype of Object.keys(GENERATORS) as (keyof typeof GENERATORS)[]) {
+      for (const q of generate(qtype, 25)) {
+        const testo = [q.prompt, q.explanation, ...q.choices.map((c) => (c.kind === 'text' ? c.text : ''))].join(' ');
+        const trovato = testo.match(fuoriTavolozza);
+        expect(trovato?.[0], `${qtype} nomina "${trovato?.[0]}": ${testo.slice(0, 120)}`).toBeUndefined();
+      }
+    }
+  });
+
+  it('la tavolozza dei nomi e quella dei colori disegnati hanno la stessa lunghezza', () => {
+    expect(COLOR_NAMES.length).toBe(PALETTE.length);
+    expect(COLOR_FORMS.length).toBe(PALETTE.length);
   });
 });
 
