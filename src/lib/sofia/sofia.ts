@@ -53,8 +53,17 @@ interface SofiaRoom {
 // se ci sono altre chiamate in volo. Con i 25s di prima scadeva sempre, e la
 // battuta AI non si vedeva mai — senza che nulla lo segnalasse.
 const AI_TIMEOUT_MS = 60_000;
-/** quanto spesso l'AI commenta un round: vedi la nota in sofiaOnEvent */
-const REVEAL_AI_CHANCE = 0.34;
+/**
+ * Quanto spesso l'AI commenta un round. Zero, e non per prudenza: un reveal
+ * dura 6 secondi e l'AI ne impiega da 10 a 50, quindi la battuta arriverebbe
+ * sempre a round finito e verrebbe scartata perché non più attuale. Chiederla
+ * lo stesso significa solo tenere occupata l'unica linea disponibile e far
+ * aspettare il podio, che invece la battuta la aspetta davvero.
+ * Durante la partita restano le battute pre-scritte, che sono immediate.
+ * Se un giorno il CLI diventasse molto più rapido, basta rialzare questo
+ * numero.
+ */
+const REVEAL_AI_CHANCE = 0;
 const AI_ENABLED = () => process.env.SOFIA_AI === '1';
 /** al massimo 8 giocatori nel prompt: tiene corto il testo e limita la superficie */
 const MAX_STANDINGS = 8;

@@ -45,9 +45,11 @@ export async function api<T = { ok: boolean; error?: string }>(
 /**
  * Quanto lo stream resta aperto dopo la fine della partita: il tempo perché
  * arrivi la battuta AI del podio, non di più (nessuno guarda la classifica per
- * sempre, e ogni stream aperto è una connessione al server).
+ * sempre, e ogni stream aperto è una connessione al server). Deve stare sopra
+ * il timeout dell'AI in sofia.ts, o si chiuderebbe proprio mentre la battuta
+ * sta per arrivare — è successo, con 45 secondi contro una risposta a 59.
  */
-const ENDED_GRACE_MS = 45_000;
+const ENDED_GRACE_MS = 75_000;
 
 /** Connessione SSE con riconnessione automatica + offset orologio server. */
 export function useGame(code: string, playerId: string | null) {
