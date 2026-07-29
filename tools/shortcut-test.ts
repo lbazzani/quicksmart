@@ -95,6 +95,56 @@ const HEURISTICS: Heuristic[] = [
       return null;
     },
   },
+  // Le tre che seguono le hanno trovate i verificatori dopo il primo giro di
+  // correzioni: gli agenti avevano imparato a battere le euristiche note e la
+  // scorciatoia si era spostata su queste. Stanno qui perché non succeda più.
+  {
+    name: 'il numero diverso dagli altri due',
+    pick: (q) => {
+      const v = nums(q);
+      if (v.some((x) => x === null)) return null;
+      const arr = v as number[];
+      for (let i = 0; i < 3; i++) {
+        const others = [0, 1, 2].filter((j) => j !== i);
+        if (arr[others[0]] === arr[others[1]] && arr[i] !== arr[others[0]]) return i;
+      }
+      // variante: la decina diversa (es. 10:20 fra 9:15 e 9:40)
+      const tens = arr.map((x) => Math.floor(x / 10));
+      for (let i = 0; i < 3; i++) {
+        const others = [0, 1, 2].filter((j) => j !== i);
+        if (tens[others[0]] === tens[others[1]] && tens[i] !== tens[others[0]]) return i;
+      }
+      return null;
+    },
+  },
+  {
+    name: 'la più vicina alla media delle altre due',
+    pick: (q) => {
+      const v = nums(q);
+      if (v.some((x) => x === null)) return null;
+      const arr = v as number[];
+      let best = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const others = [0, 1, 2].filter((j) => j !== i);
+        const dist = Math.abs(arr[i] - (arr[others[0]] + arr[others[1]]) / 2);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      return best;
+    },
+  },
+  {
+    name: 'la risposta scritta più lunga',
+    pick: (q) => {
+      if (!q.choices.every((c) => c.kind === 'text')) return null;
+      const lens = q.choices.map((c) => (c.kind === 'text' ? c.text.length : 0));
+      const max = Math.max(...lens);
+      return lens.filter((l) => l === max).length === 1 ? lens.indexOf(max) : null;
+    },
+  },
 ];
 
 interface Row {

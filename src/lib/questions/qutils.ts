@@ -74,16 +74,26 @@ export function balancedNumericDistractors(
     [above, above], // due sopra → risposta più piccola
     [below, below], // due sotto → risposta più grande
   ];
+  // A parità di tutto si preferiscono candidati con lo stesso numero di cifre
+  // della risposta: altrimenti la risposta risulta sistematicamente la più
+  // lunga (o la più corta) e si riconosce senza leggerla.
+  const digits = (v: number) => Math.abs(v).toString().length;
+  const sameLength = (list: number[]) => {
+    const matching = list.filter((v) => digits(v) === digits(correct));
+    return matching.length ? matching : list;
+  };
+
   const order = shuffle(rng, [0, 1, 2]);
   for (const idx of order) {
     const [poolA, poolB] = layouts[idx];
     if (poolA === poolB) {
       if (poolA.length < 2) continue;
-      const picked = shuffle(rng, [...poolA]).slice(0, 2);
+      const preferred = sameLength(poolA);
+      const picked = shuffle(rng, [...(preferred.length >= 2 ? preferred : poolA)]).slice(0, 2);
       return [picked[0], picked[1]];
     }
     if (poolA.length && poolB.length) {
-      return [pick(rng, poolA), pick(rng, poolB)];
+      return [pick(rng, sameLength(poolA)), pick(rng, sameLength(poolB))];
     }
   }
   return null;

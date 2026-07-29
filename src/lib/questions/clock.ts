@@ -20,8 +20,19 @@
 // I distrattori sono errori tipici costruiti ad arte: direzione sbagliata,
 // errore di un'ora esatta, minuti sommati senza riportare l'ora, sottrazione
 // "in colonna" senza prestito, lancetta delle ore considerata ferma sul numero,
-// specchio applicato solo alle ore, scarto dell'orologio rotto applicato una
-// sola volta o nel verso sbagliato. Mai distrattori casuali.
+// specchio applicato solo alle ore o solo ai minuti, scarto dell'orologio rotto
+// applicato una volta sola, nel verso sbagliato o un'ora di troppo, minuti letti
+// su un quadrante invece di essere contati. Mai distrattori casuali.
+//
+// Gli errori plausibili però sono quasi tutti "uno in più" e "uno in meno": presi
+// a coppie mettevano la risposta giusta IN MEZZO alle tre opzioni quasi sempre, e
+// bastava scegliere il numero di mezzo per vincere senza guardare le lancette.
+// Perciò ogni quesito a opzioni testuali offre un elenco LARGO di errori tipici
+// (sopra e sotto la risposta) e ne sceglie due con twoDistractors, che sorteggia
+// la posizione della risposta in classifica. Non si usa il
+// balancedNumericDistractors di qutils perché qui l'ordine che il giocatore legge
+// non è quello dei numeri nudi: "12:05" viene dopo "1:35", e "1 h 5 min" è più
+// lungo di "45 min" pur cominciando con un numero più piccolo.
 
 import type { ChoiceVisual, ClockSpec, Difficulty, Question } from '../types';
 import { chance, pick, randInt, type Rng } from '../rng';
@@ -106,7 +117,8 @@ function randTime(rng: Rng): number {
 /**
  * Sceglie 2 distrattori distinti da una lista di errori tipici, ORDINATA per
  * importanza: il primo candidato valido è sempre presente (così la spiegazione
- * può citarlo con certezza), il secondo varia.
+ * può citarlo con certezza), il secondo varia. Vale per le opzioni DISEGNATE
+ * (quadranti): lì non c'è nessuna classifica di numeri da sfruttare.
  */
 function twoOf<T>(rng: Rng, correct: T, cands: T[]): [T, T] {
   const seen = new Set<T>([correct]);
@@ -122,10 +134,118 @@ function twoOf<T>(rng: Rng, correct: T, cands: T[]): [T, T] {
   return chance(rng, 0.5) ? [first, second] : [second, first];
 }
 
-function textChoices(rng: Rng, correct: string, cands: string[]) {
-  const [a, b] = twoOf(rng, correct, cands);
-  const opt = (text: string): ChoiceVisual => ({ kind: 'text', text });
-  return placeChoices(rng, opt(correct), [opt(a), opt(b)]);
+// ---------------------------------------------------------------------------
+// Opzioni TESTUALI (orari, durate, gradi, minuti)
+//
+// Il problema che questo blocco risolve: gli errori tipici di questo tipo sono
+// quasi tutti "una in più" e "una in meno" (un'ora di troppo, un trattino in
+// meno, lo scarto nel verso sbagliato), quindi la risposta finiva quasi sempre
+// in mezzo alle tre opzioni. Chi lo scopre vince senza guardare l'orologio.
+// Qui gli errori restano gli stessi — cambia il MODO di sceglierne due: la
+// posizione della risposta nella classifica viene sorteggiata a ogni domanda.
+// ---------------------------------------------------------------------------
+
+/** un'opzione testuale: il testo mostrato, il valore per l'ordine, l'errore che rappresenta */
+interface Opt {
+  text: string;
+  /** valore con cui l'opzione si confronta davvero con le altre */
+  v: number;
+  /** frase per la spiegazione: "chi si dimentica lo scarto risponde 5:20" */
+  why: string;
+}
+
+/**
+ * Il numero che si legge PER PRIMO in un'opzione: "3:45" → 3, "1 h 25 min" → 1,
+ * "120°" → 120. È con quello che le tre opzioni si confrontano a colpo d'occhio,
+ * ed è quindi la classifica che conterebbe per chi volesse tirare a indovinare.
+ */
+function lead(text: string): number {
+  const m = text.match(/-?\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+
+/** orario: si ordina per l'ora mostrata (le 12 vengono dopo le 11, come si legge) */
+function optTime(t: number, why = ''): Opt {
+  const h = hourOf(t) === 0 ? 12 : hourOf(t);
+  return { text: fmt(t), v: h * 60 + minOf(t), why };
+}
+
+/** durata: si ordina per minuti totali */
+const optDur = (mins: number, why = ''): Opt => ({ text: fmtDur(mins), v: mins, why });
+
+const optDeg = (deg: number, why = ''): Opt => ({ text: `${deg}°`, v: deg, why });
+
+const optMins = (mins: number, why = ''): Opt => ({ text: `${mins} minuti`, v: mins, why });
+
+/**
+ * Sceglie due distrattori fra gli errori plausibili in modo che la RISPOSTA non
+ * stia sempre nello stesso posto della classifica.
+ *
+ * Due regole:
+ *  1) la posizione della risposta fra le tre opzioni (la più piccola, quella di
+ *     mezzo, la più grande) si SORTEGGIA a ogni domanda; se quella estratta non
+ *     è ottenibile con gli errori disponibili si ripiega su un ESTREMO, mai su
+ *     quella di mezzo — è quella che i distrattori "uno in più / uno in meno"
+ *     regalerebbero già da soli troppo spesso;
+ *  2) fra le coppie che realizzano quella posizione si preferiscono quelle in
+ *     cui anche il PRIMO NUMERO di ogni opzione (quello che salta all'occhio:
+ *     l'ora in "3:45", le ore in "1 h 25 min") racconta la stessa classifica dei
+ *     valori veri, oppure è lo stesso per tutte e tre (e allora non racconta
+ *     niente e si è costretti a leggere l'opzione intera).
+ * A parità si preferisce la coppia che contiene l'errore principale del quesito,
+ * cioè il primo candidato della lista.
+ */
+function twoDistractors(rng: Rng, correct: Opt, cands: Opt[]): [Opt, Opt] {
+  const seen = new Set<string>([correct.text]);
+  const pool: Opt[] = [];
+  for (const c of cands) {
+    if (seen.has(c.text) || c.v === correct.v || !Number.isFinite(c.v)) continue;
+    seen.add(c.text);
+    pool.push(c);
+  }
+
+  const kc = lead(correct.text);
+  const byRank: { pair: [Opt, Opt]; score: number; mute: boolean; primary: boolean }[][] = [[], [], []];
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = i + 1; j < pool.length; j++) {
+      const [a, b] = [pool[i], pool[j]];
+      const rank = (a.v < correct.v ? 1 : 0) + (b.v < correct.v ? 1 : 0);
+      const [ka, kb] = [lead(a.text), lead(b.text)];
+      const leadRank = (ka < kc ? 1 : 0) + (kb < kc ? 1 : 0);
+      const mute = ka === kc && kb === kc; // nessuna classifica a colpo d'occhio
+      const readable = ka !== kc && kb !== kc;
+      const base = mute ? 2 : readable ? (leadRank === rank ? 2 : 0) : 1;
+      byRank[rank].push({ pair: [a, b], score: base, mute, primary: i === 0 || j === 0 });
+    }
+  }
+
+  const filled = [0, 1, 2].filter((r) => byRank[r].length);
+  if (!filled.length) throw new Error('nessuna coppia di distrattori utilizzabile');
+  let r = randInt(rng, 0, 2);
+  if (!byRank[r].length) {
+    const ends = filled.filter((x) => x !== 1);
+    r = ends.length ? pick(rng, ends) : filled[0];
+  }
+  const group = byRank[r];
+  const best = Math.max(...group.map((p) => p.score));
+  const top = group.filter((p) => p.score === best);
+  // fra le coppie migliori si alterna fra quelle che una classifica la mostrano
+  // e quelle che non ne mostrano nessuna (tutte e tre le opzioni cominciano con
+  // lo stesso numero): nemmeno il primo numero diventa così un indizio stabile
+  const kinds = [top.filter((p) => p.mute), top.filter((p) => !p.mute)].filter((k) => k.length);
+  const kind = kinds.length === 2 && chance(rng, 0.5) ? kinds[0] : kinds[kinds.length - 1];
+  // l'errore principale del quesito entra spesso ma non sempre: se entrasse
+  // sempre trascinerebbe con sé anche la sua posizione in classifica
+  const withPrimary = kind.filter((p) => p.primary);
+  return pick(rng, withPrimary.length && chance(rng, 0.5) ? withPrimary : kind).pair;
+}
+
+/** opzioni testuali mescolate + le trappole scelte, da citare nella spiegazione */
+function textOptions(rng: Rng, correct: Opt, cands: Opt[]) {
+  const picked = twoDistractors(rng, correct, cands);
+  const opt = (o: Opt): ChoiceVisual => ({ kind: 'text', text: o.text });
+  const { choices, correctIndex } = placeChoices(rng, opt(correct), [opt(picked[0]), opt(picked[1])]);
+  return { choices, correctIndex, picked, traps: `${picked[0].why}; ${picked[1].why}` };
 }
 
 function clockChoices(rng: Rng, correctT: number, cands: number[]) {
@@ -256,25 +376,54 @@ function d1Hours(rng: Rng): Question {
 
 function d1Elapsed(rng: Rng): Question {
   const sc = pick(rng, SCENARIOS);
-  const m1 = randInt(rng, 0, 11) * 5;
+  // Le durate sotto l'ora ("40 min") pesano più di 1/4 apposta: quando la
+  // risposta contiene le ore ("2 h 15 min") il numero che si legge per primo è
+  // il piccolo numero delle ore, e nessun errore plausibile ha MENO ore della
+  // risposta giusta — le durate corte riportano in pari la classifica.
+  const H = pick(rng, [0, 0, 1, 1, 2, 3]);
+  // Se la risposta sta sotto l'ora serve che sia abbastanza grande da avere due
+  // errori plausibili PIÙ PICCOLI (un trattino in meno, i minuti letti sul
+  // primo orologio): sotto la mezz'ora la risposta finirebbe sempre a essere la
+  // più piccola delle tre. È la stessa cautela di MIN_COUNT_ANSWER in pattern.ts.
+  // con le ore i minuti piccoli sono più frequenti: solo con M < 30 l'errore
+  // "minuti contati dalla parte sbagliata" cade SOPRA la risposta, e la risposta
+  // può capitare anche in fondo alla classifica
+  const M = H === 0 ? pick(rng, [30, 40, 45]) : pick(rng, [0, 10, 10, 15, 15, 20, 20, 25, 25, 30, 40, 45]);
+  // Niente riporto: i minuti da aggiungere non fanno scavalcare l'ora. Il primo
+  // orologio non segna mai l'ora tonda (m1 ≥ 10): i minuti che segna sono uno
+  // degli errori plausibili, e servono sotto la risposta per equilibrare.
+  const m1 = randInt(rng, 2, Math.floor((55 - M) / 5)) * 5;
   const t1 = randInt(rng, 0, 11) * 60 + m1;
-  const H = randInt(rng, 0, 3);
-  // niente riporto: i minuti da aggiungere non fanno scavalcare l'ora
-  const pool = [10, 15, 20, 25, 30, 40, 45, 50].filter((v) => m1 + v <= 55);
-  const small = pool.filter((v) => v >= 15);
-  if (H === 0 && small.length === 0) throw new Error('nessun intervallo comodo');
-  const M = H === 0 ? pick(rng, small) : pick(rng, [0, ...pool]);
   const gap = H * 60 + M;
   const t2 = norm(t1 + gap);
 
-  const cands = [gap + 60]; // un'ora di troppo (errore garantito nelle opzioni)
-  if (gap > 60) cands.push(gap - 60);
-  if (M !== 0 && M !== 30) cands.push(H * 60 + (60 - M)); // conta i minuti dalla parte sbagliata
-  if (M !== 0) cands.push(gap + 5, gap - 5); // un trattino di troppo / in meno
-  const { choices, correctIndex } = textChoices(
+  // errori plausibili, sopra e sotto la risposta: servono entrambi i lati perché
+  // la risposta possa capitare tanto in mezzo quanto agli estremi
+  const cands: Opt[] = [
+    optDur(gap + 60, `chi conta un’ora di troppo arriva a ${fmtDur(gap + 60)}`),
+  ];
+  if (gap > 60) cands.push(optDur(gap - 60, `chi si dimentica un’ora si ferma a ${fmtDur(gap - 60)}`));
+  if (M !== 0 && M !== 30) {
+    const back = H * 60 + (60 - M);
+    cands.push(optDur(back, `chi conta i minuti dalla parte sbagliata (${60 - M} invece di ${M}) dice ${fmtDur(back)}`));
+  }
+  cands.push(optDur(gap + 5, `chi conta un trattino di troppo dice ${fmtDur(gap + 5)}`));
+  cands.push(optDur(gap - 5, `chi conta un trattino in meno dice ${fmtDur(gap - 5)}`));
+  if (M !== 0) {
+    cands.push(optDur((H + 1) * 60, `chi arrotonda all’ora intera dice ${fmtDur((H + 1) * 60)}`));
+  }
+  if (H > 0 && M > 0) {
+    cands.push(optDur(M, `chi guarda solo la lancetta lunga e si scorda le ore dice ${fmtDur(M)}`));
+    cands.push(optDur(H * 60, `chi conta solo le ore intere dice ${fmtDur(H * 60)}`));
+  }
+  // scambia il RISULTATO con una delle due letture: non conta quanti minuti
+  // passano, legge i minuti segnati da uno dei due orologi
+  cands.push(optDur(minOf(t2), `chi legge i minuti dell’orologio di arrivo dice ${fmtDur(minOf(t2))}`));
+  cands.push(optDur(m1, `chi legge i minuti dell’orologio di partenza dice ${fmtDur(m1)}`));
+  const { choices, correctIndex, traps } = textOptions(
     rng,
-    fmtDur(gap),
-    cands.filter((v) => v > 0 && v < MOD).map(fmtDur)
+    optDur(gap),
+    cands.filter((c) => c.v > 0 && c.v < MOD)
   );
 
   let expl = `Il primo orologio segna le ${fmt(t1)}, il secondo le ${fmt(t2)}. `;
@@ -287,7 +436,7 @@ function d1Elapsed(rng: Rng): Question {
   } else {
     expl += `L’ora non cambia: basta contare i minuti, da ${minOf(t1)} a ${minOf(t2)}, cioè ${M} minuti.`;
   }
-  expl += ` Chi conta un’ora di troppo risponde ${fmtDur(gap + 60)}.`;
+  expl += ` Trappole: ${traps}.`;
 
   return {
     qtype: 'clock',
@@ -310,10 +459,18 @@ function d2Mirror(rng: Rng): Question {
   // esclude i casi in cui lo specchio non cambia nulla (12:00 e 6:00)
   if (real === seen) throw new Error('specchio banale');
   const mm = minOf(seen);
-  const cands: string[] = [fmt(seen)]; // legge l'immagine così com'è (errore garantito)
-  if (mm !== 0 && mm !== 30) cands.push(fmt(hourOf(real) * 60 + mm)); // specchia solo le ore
-  cands.push(fmt(real + 60), fmt(real - 60)); // un'ora in più / in meno
-  const { choices, correctIndex } = textChoices(rng, fmt(real), cands);
+  const half = norm(hourOf(seen) * 60 + minOf(real)); // riflette i minuti, non le ore
+  const halfH = norm(hourOf(real) * 60 + mm); // riflette le ore, non i minuti
+  const cands: Opt[] = [
+    optTime(seen, `chi si fida dell’immagine risponde ${fmt(seen)}`),
+    optTime(half, `chi riflette i minuti ma tiene l’ora dell’immagine risponde ${fmt(half)}`),
+    optTime(halfH, `chi riflette le ore ma tiene i minuti dell’immagine risponde ${fmt(halfH)}`),
+    optTime(real + 60, `chi conta le ore all’indietro dal 12 e ne salta una arriva a ${fmt(real + 60)}`),
+    optTime(real - 60, `chi conta le ore all’indietro dal 12 e ne conta una in meno arriva a ${fmt(real - 60)}`),
+    optTime(seen + 60, `chi legge l’immagine e sbaglia anche di un’ora dice ${fmt(seen + 60)}`),
+    optTime(seen - 60, `chi legge l’immagine e sbaglia anche di un’ora dice ${fmt(seen - 60)}`),
+  ];
+  const { choices, correctIndex, traps } = textOptions(rng, optTime(real), cands);
   const clocks = chance(rng, 0.5) ? [mirroredClock(real)] : [mirroredClock(real, 'Allo specchio')];
   const minRule = mm === 0 ? 'i minuti restano a 0' : `i minuti diventano 60 − ${mm} = ${60 - mm}`;
 
@@ -327,8 +484,7 @@ function d2Mirror(rng: Rng): Question {
     explanation:
       `Allo specchio destra e sinistra si scambiano: l’immagine sembra segnare le ${fmt(seen)}, ma per l’ora vera ` +
       `bisogna riflettere di nuovo le lancette. ${minRule[0].toUpperCase()}${minRule.slice(1)} e le ore si contano ` +
-      `all’indietro partendo dal 12: l’ora vera è le ${fmt(real)}. L’errore classico è fidarsi dell’immagine e ` +
-      `rispondere ${fmt(seen)}.`,
+      `all’indietro partendo dal 12: l’ora vera è le ${fmt(real)}. Trappole: ${traps}.`,
   };
 }
 
@@ -343,36 +499,56 @@ function angleQuestion(rng: Rng, difficulty: 2 | 3): Question {
   const m = difficulty === 2 ? pick(rng, [0, 30]) : pick(rng, [10, 20, 40, 50]);
   const t = h * 60 + m;
   const correct = angleAt(t);
-  if (correct < 30) throw new Error('angolo troppo stretto');
+  // Sotto i 90° non esistono DUE angoli più piccoli plausibili (uno spazio in
+  // meno vale 30° e sotto i 15° nessuna opzione è credibile): la risposta
+  // finirebbe sempre a essere la più piccola delle tre e basterebbe scegliere
+  // quella per vincere senza guardare le lancette. Gli angoli stretti si
+  // scartano e la domanda si rigenera.
+  if (correct < 90) throw new Error('angolo troppo stretto per distrattori equilibrati');
 
   // ogni distrattore porta con sé la spiegazione dell'errore che rappresenta
   const stat = staticAngle(t);
-  const cands: { v: number; why: string }[] = [];
+  const cands: Opt[] = [];
   if (stat !== correct) {
-    cands.push({
-      v: stat,
-      why:
+    cands.push(
+      optDeg(
+        stat,
         `la lancetta corta NON sta ferma sul numero — in ${m} minuti si è già spostata di ${0.5 * m}° — ` +
-        `e chi la crede ferma risponde ${stat}°`,
-    });
+          `e chi la crede ferma risponde ${stat}°`
+      )
+    );
   }
-  if (difficulty === 3) {
-    const misread = angleAt((h + 1) * 60 + m); // legge la lancetta corta sul numero successivo
-    cands.push({ v: misread, why: `chi legge la lancetta corta sul numero dopo risponde ${misread}°` });
+  // legge la lancetta corta sul numero prima o su quello dopo (a mezz'ora sta in
+  // mezzo ai due, ed è lì che l'occhio sbaglia)
+  for (const dh of [1, -1]) {
+    const mis = angleAt(((h + dh + 12) % 12) * 60 + m);
+    if (mis !== correct) {
+      cands.push(optDeg(mis, `chi legge la lancetta corta sul numero ${dh > 0 ? 'dopo' : 'prima'} risponde ${mis}°`));
+    }
   }
   if (360 - correct !== correct) {
-    cands.push({ v: 360 - correct, why: `dall’altra parte del quadrante l’angolo misura ${360 - correct}°, ma qui serve il più piccolo` });
+    cands.push(
+      optDeg(360 - correct, `dall’altra parte del quadrante l’angolo misura ${360 - correct}°, ma qui serve il più piccolo`)
+    );
   }
   if (correct + 30 <= 330) {
-    cands.push({ v: correct + 30, why: `chi conta i numeri invece degli spazi sbaglia di un’ora di quadrante e risponde ${correct + 30}°` });
+    cands.push(optDeg(correct + 30, `chi conta i numeri invece degli spazi sbaglia di un’ora di quadrante e risponde ${correct + 30}°`));
+  }
+  if (correct + 60 <= 330) {
+    cands.push(optDeg(correct + 60, `chi si conta due spazi di troppo sul quadrante risponde ${correct + 60}°`));
   }
   if (correct - 30 >= 5) {
-    cands.push({ v: correct - 30, why: `chi conta uno spazio in meno risponde ${correct - 30}°` });
+    cands.push(optDeg(correct - 30, `chi conta uno spazio in meno risponde ${correct - 30}°`));
+  }
+  if (correct - 60 >= 15) {
+    cands.push(optDeg(correct - 60, `chi perde due spazi contando sul quadrante risponde ${correct - 60}°`));
   }
   // angoli troppo sottili non sono opzioni credibili: si scartano
-  const pool = cands.filter((c) => c.v >= 15);
-  const { choices, correctIndex } = textChoices(rng, `${correct}°`, pool.map((c) => `${c.v}°`));
-  const trap = pool[0].why; // twoOf garantisce che il primo candidato sia sempre in gioco
+  const { choices, correctIndex, traps } = textOptions(
+    rng,
+    optDeg(correct),
+    cands.filter((c) => c.v >= 15)
+  );
 
   const hd = 30 * h + 0.5 * m;
   const md = 6 * m;
@@ -391,7 +567,7 @@ function angleQuestion(rng: Rng, difficulty: 2 | 3): Question {
       `mezzo grado al minuto. Alle ${fmt(t)} la lancetta lunga è a ${md}° dal 12 e quella corta a ${hd}°. ` +
       `La differenza è ${raw}°${
         raw > 180 ? `: più di mezzo giro, quindi l’angolo piccolo è 360 − ${raw} = ${correct}°` : ', ed è già il più piccolo'
-      }. Trappola: ${trap}.`,
+      }. Trappole: ${traps}.`,
   };
 }
 
@@ -407,12 +583,18 @@ function d2Broken(rng: Rng): Question {
   const dir = fast ? 1 : -1;
   const trueT = norm(t + n * 60);
   const correctT = norm(trueT + dir * n * g);
-  const cands = [
-    fmt(trueT), // dimentica lo scarto (errore garantito)
-    fmt(norm(trueT + dir * g)), // applica lo scarto una volta sola
-    fmt(norm(trueT - dir * n * g)), // sbaglia il verso dello scarto
+  const cands: Opt[] = [
+    optTime(trueT, `chi si dimentica dello scarto risponde ${fmt(trueT)}`),
+    optTime(norm(trueT + dir * g), `chi applica lo scarto una volta sola invece di ${n} risponde ${fmt(norm(trueT + dir * g))}`),
+    optTime(norm(trueT - dir * n * g), `chi sbaglia il verso dello scarto risponde ${fmt(norm(trueT - dir * n * g))}`),
+    optTime(
+      norm(correctT + dir * g),
+      `chi conta ${n + 1} ore di scarto invece di ${n} (l’errore di chi conta anche l’ora di partenza) risponde ${fmt(correctT + dir * g)}`
+    ),
+    optTime(norm(correctT + 60), `chi conta un’ora di troppo fra le ${n} che passano arriva alle ${fmt(correctT + 60)}`),
+    optTime(norm(correctT - 60), `chi conta un’ora in meno fra le ${n} che passano arriva alle ${fmt(correctT - 60)}`),
   ];
-  const { choices, correctIndex } = textChoices(rng, fmt(correctT), cands);
+  const { choices, correctIndex, traps } = textOptions(rng, optTime(correctT), cands);
   const clocks = chance(rng, 0.5)
     ? [clockOf(t, 'Ora esatta')]
     : [clockOf(t, 'Ora esatta'), unknownClock('Poi')];
@@ -430,7 +612,7 @@ function d2Broken(rng: Rng): Question {
       `In ${n} ore l’errore si accumula: ${n} × ${g} = ${n * g} minuti di ${fast ? 'anticipo' : 'ritardo'}. ` +
       `L’ora giusta fra ${n} ore sarà le ${fmt(trueT)}; l’orologio segnerà ${n * g} minuti ${
         fast ? 'più avanti' : 'più indietro'
-      }, cioè le ${fmt(correctT)}. Chi si dimentica dello scarto risponde ${fmt(trueT)}.`,
+      }, cioè le ${fmt(correctT)}. Trappole: ${traps}.`,
   };
 }
 
@@ -444,21 +626,45 @@ function d2Elapsed(rng: Rng): Question {
   // minuti di partenza tali da far scavalcare l'ora (m1 + M ≥ 60): serve il riporto
   const m1 = randInt(rng, Math.ceil((60 - M) / 5), 11) * 5;
   const t1 = randInt(rng, 0, 11) * 60 + m1;
-  const H = randInt(rng, 0, 3);
+  // come in d1: le durate sotto l'ora tengono in pari la classifica delle opzioni
+  const H = pick(rng, [0, 0, 1, 1, 2, 3]);
   const gap = H * 60 + M;
   const t2 = norm(t1 + gap);
   const m2 = minOf(t2);
 
   // errore classico: sottrazione "in colonna" ore-ore e minuti-minuti, senza prestito
   const naive = (H + 1) * 60 + (60 - M);
-  const cands = [naive, gap + 60];
-  if (gap > 60) cands.push(gap - 60);
-  if (M !== 30) cands.push(H * 60 + (60 - M));
-  const { choices, correctIndex } = textChoices(
+  const cands: Opt[] = [
+    optDur(naive, `chi sottrae in colonna, senza prestito, ottiene ${fmtDur(naive)}`),
+    optDur(gap + 60, `chi conta un’ora di troppo arriva a ${fmtDur(gap + 60)}`),
+  ];
+  if (gap > 60) cands.push(optDur(gap - 60, `chi si dimentica un’ora si ferma a ${fmtDur(gap - 60)}`));
+  if (M !== 30) {
+    const back = H * 60 + (60 - M);
+    cands.push(optDur(back, `chi conta i minuti dalla parte sbagliata (${60 - M} invece di ${M}) dice ${fmtDur(back)}`));
+  }
+  cands.push(optDur((H + 1) * 60, `chi arrotonda all’ora intera dice ${fmtDur((H + 1) * 60)}`));
+  cands.push(optDur(gap + 5, `chi conta un trattino di troppo dice ${fmtDur(gap + 5)}`));
+  cands.push(optDur(gap - 5, `chi conta un trattino in meno dice ${fmtDur(gap - 5)}`));
+  if (H > 0) {
+    cands.push(optDur(M, `chi guarda solo la lancetta lunga e si scorda le ore dice ${fmtDur(M)}`));
+    cands.push(optDur(H * 60, `chi conta solo le ore intere dice ${fmtDur(H * 60)}`));
+  }
+  // scambia il RISULTATO con una delle due letture (i minuti segnati da un
+  // orologio invece di quelli che passano)
+  cands.push(optDur(m2, `chi legge i minuti dell’orologio di arrivo dice ${fmtDur(m2)}`));
+  cands.push(optDur(m1, `chi legge i minuti dell’orologio di partenza dice ${fmtDur(m1)}`));
+  const { choices, correctIndex, picked } = textOptions(
     rng,
-    fmtDur(gap),
-    cands.filter((v) => v > 0 && v < MOD).map(fmtDur)
+    optDur(gap),
+    cands.filter((c) => c.v > 0 && c.v < MOD)
   );
+  // la sottrazione in colonna è LA lezione di questa variante: si spiega sempre,
+  // anche quando fra le opzioni è finito un altro errore
+  const others = picked
+    .filter((o) => o.v !== naive)
+    .map((o) => o.why)
+    .join('; ');
 
   const r = 60 - m1; // minuti che mancano all'ora tonda
   const rest = gap - r;
@@ -478,7 +684,8 @@ function d2Elapsed(rng: Rng): Question {
     explanation:
       `Dalle ${fmt(t1)} alle ${fmt(t2)}. Il trucco è fermarsi all’ora tonda: dalle ${fmt(t1)} alle ${fmt(t1 + r)} ` +
       `passano ${r} minuti;${leg2} in tutto ${fmtDur(gap)}. Chi invece sottrae in colonna ${column} ottiene ` +
-      `${fmtDur(naive)}: sbagliato, perché i minuti non arrivano a 100 ma a 60.`,
+      `${fmtDur(naive)}: sbagliato, perché i minuti non arrivano a 100 ma a 60.` +
+      (others ? ` Altra trappola: ${others}.` : ''),
   };
 }
 
@@ -522,12 +729,15 @@ function d2BigStep(rng: Rng): Question {
   const t = randTime(rng);
   const n = pick(rng, BIG_STEPS);
   const correctT = norm(t + n);
-  const cands = [
-    norm(t + n - 60), // somma i minuti ma dimentica di aggiungere l'ora
-    norm(t + n + 60), // aggiunge due ore invece di una
-    norm(t - n), // gira dalla parte sbagliata
+  const cands: Opt[] = [
+    optTime(norm(t + n - 60), `chi somma i minuti e si dimentica l’ora arriva alle ${fmt(t + n - 60)}`),
+    optTime(norm(t + n + 60), `chi aggiunge due ore invece di una arriva alle ${fmt(t + n + 60)}`),
+    optTime(norm(t - n), `chi gira le lancette dalla parte sbagliata dice ${fmt(t - n)}`),
+    optTime(norm(t + 60), `chi aggiunge l’ora e si scorda i ${n - 60} minuti che restano dice ${fmt(t + 60)}`),
+    optTime(norm(t + n - 5), `chi conta un trattino in meno dice ${fmt(t + n - 5)}`),
+    optTime(norm(t + n + 5), `chi conta un trattino di troppo dice ${fmt(t + n + 5)}`),
   ];
-  const { choices, correctIndex } = textChoices(rng, fmt(correctT), cands.map(fmt));
+  const { choices, correctIndex, traps } = textOptions(rng, optTime(correctT), cands);
 
   return {
     qtype: 'clock',
@@ -538,8 +748,7 @@ function d2BigStep(rng: Rng): Question {
     correctIndex,
     explanation:
       `${n} minuti sono 1 ora e ${n - 60} minuti. Dalle ${fmt(t)} si aggiunge prima l’ora (${fmt(t + 60)}) e poi i ` +
-      `${n - 60} minuti che restano: ${fmt(correctT)}. Chi somma solo i minuti e si dimentica l’ora arriva alle ` +
-      `${fmt(norm(t + n - 60))}.`,
+      `${n - 60} minuti che restano: ${fmt(correctT)}. Trappole: ${traps}.`,
   };
 }
 
@@ -560,22 +769,36 @@ function d3Overlap(rng: Rng): Question {
   }
   const exact = next - t;
   const correctN = Math.round(exact);
-  // finestra "comoda": né appena passata la sovrapposizione né a ridosso
-  if (correctN < 10 || correctN > 55) throw new Error('fuori finestra');
-  // distrattore 1: considera FERMA la lancetta delle ore (fattore 11/12 in meno)
+  // Finestra "comoda": né appena passata la sovrapposizione né a ridosso. Il
+  // tetto è la metà del periodo (720/22 ≈ 32,7 min) perché solo così le lancette
+  // in fila ma OPPOSTE arrivano dopo la sovrapposizione: senza quel distrattore
+  // tutti gli errori tipici starebbero sotto la risposta e basterebbe scegliere
+  // il numero più grande per vincere senza calcolare niente.
+  if (correctN < 12 || correctN > 32) throw new Error('fuori finestra');
+  // considera FERMA la lancetta delle ore (fattore 11/12 in meno)
   const staticN = Math.round((exact * 11) / 12);
-  // distrattore 2: crede che le lancette si sovrappongano ogni ora esatta
-  // (aggiunge 60 alla sovrapposizione precedente invece di 720/11 ≈ 65,45)
+  // crede che le lancette si sovrappongano ogni ora esatta (aggiunge 60 alla
+  // sovrapposizione precedente invece di 720/11 ≈ 65,45)
   const hourlyN = Math.round(exact - MOD / 11 + 60);
-  if (new Set([correctN, staticN, hourlyN]).size !== 3) throw new Error('distrattori coincidenti');
-  const { choices, correctIndex } = placeChoices(
-    rng,
-    { kind: 'text', text: `${correctN} minuti` },
-    [
-      { kind: 'text', text: `${staticN} minuti` },
-      { kind: 'text', text: `${hourlyN} minuti` },
-    ]
-  );
+  // punta al trattino DOPO la lancetta corta: 5 minuti di lancetta lunga in più
+  const markN = staticN + 5;
+  // si ferma quando le lancette sono in fila ma opposte (ogni 720/22 minuti)
+  let opp = MOD;
+  for (let k = 0; k <= 11; k++) {
+    const tk = ((2 * k + 1) * MOD) / 22;
+    if (tk > t + 1e-9) {
+      opp = tk;
+      break;
+    }
+  }
+  const oppN = Math.round(opp - t);
+  const cands: Opt[] = [
+    optMins(staticN, `chi dimentica che anche la lancetta delle ore avanza risponde ${staticN}`),
+    optMins(hourlyN, `chi crede che si sovrappongano a ogni ora esatta risponde ${hourlyN}`),
+    optMins(markN, `chi punta al trattino subito dopo la lancetta corta risponde ${markN}`),
+    optMins(oppN, `chi si ferma quando le lancette sono in fila ma opposte risponde ${oppN}`),
+  ].filter((c) => c.v >= 5 && c.v !== correctN);
+  const { choices, correctIndex, traps } = textOptions(rng, optMins(correctN), cands);
   return {
     qtype: 'clock',
     difficulty: 3,
@@ -586,8 +809,7 @@ function d3Overlap(rng: Rng): Question {
     explanation:
       `Le lancette si sovrappongono 11 volte in 12 ore, cioè ogni 720/11 ≈ 65 minuti e mezzo, non ogni ora. ` +
       `Dopo le ${fmt(t)} la prossima sovrapposizione è verso le ${fmt(Math.round(next))}: mancano circa ${correctN} minuti. ` +
-      `Chi dimentica che anche la lancetta delle ore avanza risponde ${staticN}; chi crede che si sovrappongano ` +
-      `a ogni ora esatta risponde ${hourlyN}.`,
+      `Trappole: ${traps}.`,
   };
 }
 
@@ -601,13 +823,20 @@ function d3Mirror(rng: Rng): Question {
   if (real === seen) throw new Error('specchio banale');
   const n = pick(rng, STEPS);
   const correctT = norm(real + n);
-  const cands = [
-    norm(seen + n), // dimentica lo specchio e somma alla lettura diretta
-    norm(real - n), // specchia bene ma va indietro
-    norm(correctT + 60),
-    norm(correctT - 60),
+  const cands: Opt[] = [
+    optTime(norm(seen + n), `chi si dimentica dello specchio e somma alla lettura diretta arriva alle ${fmt(seen + n)}`),
+    optTime(norm(real - n), `chi riflette bene ma poi va indietro invece che avanti dice ${fmt(real - n)}`),
+    optTime(real, `chi si ferma all’ora vera e non aggiunge i ${n} minuti risponde ${fmt(real)}`),
+    optTime(
+      norm(hourOf(seen) * 60 + minOf(real) + n),
+      `chi riflette i minuti ma tiene l’ora dell’immagine arriva alle ${fmt(hourOf(seen) * 60 + minOf(real) + n)}`
+    ),
+    optTime(norm(correctT + 5), `chi conta un trattino di troppo dice ${fmt(correctT + 5)}`),
+    optTime(norm(correctT - 5), `chi conta un trattino in meno dice ${fmt(correctT - 5)}`),
+    optTime(norm(correctT + 60), `chi sbaglia di un’ora nel contare all’indietro dal 12 dice ${fmt(correctT + 60)}`),
+    optTime(norm(correctT - 60), `chi sbaglia di un’ora nel contare all’indietro dal 12 dice ${fmt(correctT - 60)}`),
   ];
-  const { choices, correctIndex } = textChoices(rng, fmt(correctT), cands.map(fmt));
+  const { choices, correctIndex, traps } = textOptions(rng, optTime(correctT), cands);
   const clocks = chance(rng, 0.5) ? [mirroredClock(real)] : [mirroredClock(real, 'Allo specchio')];
 
   return {
@@ -620,8 +849,7 @@ function d3Mirror(rng: Rng): Question {
     explanation:
       `Due passi. Primo: si riflette l’immagine — sembra segnare le ${fmt(seen)}, quindi l’ora vera è le ` +
       `${fmt(real)} (i minuti diventano 60 meno i minuti, le ore si contano all’indietro dal 12). Secondo: si ` +
-      `aggiungono ${n} minuti, e si arriva alle ${fmt(correctT)}. Chi si dimentica dello specchio ottiene ` +
-      `${fmt(norm(seen + n))}.`,
+      `aggiungono ${n} minuti, e si arriva alle ${fmt(correctT)}. Trappole: ${traps}.`,
   };
 }
 
@@ -631,7 +859,9 @@ function d3Mirror(rng: Rng): Question {
 
 function d3MirrorCompare(rng: Rng): Question {
   const t1 = randTime(rng);
-  const gap = pick(rng, [35, 40, 50, 55, 65, 70, 80, 95, 100, 110, 125, 140, 155, 170]);
+  // gli intervalli sotto l'ora pesano quanto quelli lunghi: una durata con le ore
+  // ha per forza un numero iniziale piccolo e sbilancerebbe la classifica
+  const gap = pick(rng, [25, 35, 40, 45, 50, 55, 65, 70, 80, 95, 100, 110, 125, 140, 155, 170]);
   const t2 = norm(t1 + gap);
   const mirrorFirst = chance(rng, 0.5);
   const reflected = mirrorFirst ? t1 : t2; // il quadrante disegnato allo specchio
@@ -640,14 +870,31 @@ function d3MirrorCompare(rng: Rng): Question {
   const ignored = mirrorFirst ? norm(t2 - mirror(t1)) : norm(mirror(t2) - t1);
   if (ignored === gap || ignored === 0) throw new Error('specchio ininfluente');
 
-  const cands = [ignored, gap + 60];
-  if (gap > 60) cands.push(gap - 60);
+  const Hg = Math.floor(gap / 60);
+  const Mg = gap % 60;
+  const cands: Opt[] = [
+    optDur(ignored, `chi legge lo specchio come un orologio normale calcola ${fmtDur(ignored)}`),
+    optDur(gap + 60, `chi conta un’ora di troppo arriva a ${fmtDur(gap + 60)}`),
+  ];
+  if (gap > 60) cands.push(optDur(gap - 60, `chi si dimentica un’ora si ferma a ${fmtDur(gap - 60)}`));
   // sottrazione "in colonna" senza prestito, quando i minuti scavalcano l'ora
-  if (minOf(t2) < minOf(t1)) cands.push((Math.floor(gap / 60) + 1) * 60 + (60 - (gap % 60)));
-  const { choices, correctIndex } = textChoices(
+  if (minOf(t2) < minOf(t1)) {
+    const naive = (Hg + 1) * 60 + (60 - Mg);
+    cands.push(optDur(naive, `chi sottrae in colonna, senza prestito, ottiene ${fmtDur(naive)}`));
+  }
+  if (Mg !== 0) {
+    cands.push(optDur(gap + 5, `chi conta un trattino di troppo dice ${fmtDur(gap + 5)}`));
+    cands.push(optDur(gap - 5, `chi conta un trattino in meno dice ${fmtDur(gap - 5)}`));
+    cands.push(optDur((Hg + 1) * 60, `chi arrotonda all’ora intera dice ${fmtDur((Hg + 1) * 60)}`));
+    if (Hg > 0) {
+      cands.push(optDur(Mg, `chi guarda solo la lancetta lunga e si scorda le ore dice ${fmtDur(Mg)}`));
+      cands.push(optDur(Hg * 60, `chi conta solo le ore intere dice ${fmtDur(Hg * 60)}`));
+    }
+  }
+  const { choices, correctIndex, traps } = textOptions(
     rng,
-    fmtDur(gap),
-    cands.filter((v) => v > 0 && v < MOD).map(fmtDur)
+    optDur(gap),
+    cands.filter((c) => c.v > 0 && c.v < MOD)
   );
 
   const clocks = mirrorFirst
@@ -666,7 +913,7 @@ function d3MirrorCompare(rng: Rng): Question {
     explanation:
       `L’orologio nello specchio sembra segnare le ${fmt(mirror(reflected))}, ma riflettendo le lancette l’ora vera ` +
       `è le ${fmt(reflected)}. Le due ore vere sono ${fmt(t1)} e ${fmt(t2)}: fra loro passano ${fmtDur(gap)}. ` +
-      `Chi legge lo specchio come un orologio normale calcola ${fmtDur(ignored)}.`,
+      `Trappole: ${traps}.`,
   };
 }
 
@@ -697,12 +944,18 @@ function d3Broken(rng: Rng): Question {
     // l'orologio SEGNA un'ora sbagliata: risalire all'ora vera
     const shown = randTime(rng);
     const realT = norm(shown - dir * n * g);
-    const cands = [
-      norm(shown + dir * n * g), // corregge nel verso sbagliato
-      norm(shown - dir * g), // applica lo scarto una volta sola
-      norm(shown - dir * n * g + 60),
+    const cands: Opt[] = [
+      optTime(norm(shown + dir * n * g), `chi corregge nel verso sbagliato risponde ${fmt(shown + dir * n * g)}`),
+      optTime(norm(shown - dir * g), `chi applica lo scarto una volta sola invece di ${n} risponde ${fmt(shown - dir * g)}`),
+      optTime(shown, `chi si fida di quello che segna il quadrante risponde ${fmt(shown)}`),
+      optTime(
+        norm(realT - dir * g),
+        `chi toglie ${n + 1} ore di scarto invece di ${n} (l’errore di chi conta anche l’ora di partenza) risponde ${fmt(realT - dir * g)}`
+      ),
+      optTime(norm(realT + 60), `chi sbaglia di un’ora nel conto dello scarto dice ${fmt(realT + 60)}`),
+      optTime(norm(realT - 60), `chi sbaglia di un’ora nel conto dello scarto dice ${fmt(realT - 60)}`),
     ];
-    const { choices, correctIndex } = textChoices(rng, fmt(realT), cands.map(fmt));
+    const { choices, correctIndex, traps } = textOptions(rng, optTime(realT), cands);
     return {
       qtype: 'clock',
       difficulty: 3,
@@ -715,7 +968,7 @@ function d3Broken(rng: Rng): Question {
       explanation:
         `In ${n} ore ha accumulato ${n} × ${g} = ${n * g} minuti di ${fast ? 'anticipo' : 'ritardo'}. Segna le ` +
         `${fmt(shown)}, quindi l’ora vera sta ${n * g} minuti ${fast ? 'indietro' : 'avanti'}: sono le ${fmt(realT)}. ` +
-        `Chi corregge nel verso sbagliato risponde ${fmt(norm(shown + dir * n * g))}.`,
+        `Trappole: ${traps}.`,
     };
   }
 
@@ -723,12 +976,18 @@ function d3Broken(rng: Rng): Question {
   const t = randTime(rng);
   const trueT = norm(t + n * 60);
   const correctT = norm(trueT + dir * n * g);
-  const cands = [
-    fmt(trueT), // dimentica lo scarto
-    fmt(norm(trueT + dir * g)), // scarto applicato una volta sola
-    fmt(norm(trueT - dir * n * g)), // verso sbagliato
+  const cands: Opt[] = [
+    optTime(trueT, `chi si ferma all’ora giusta e dimentica lo scarto risponde ${fmt(trueT)}`),
+    optTime(norm(trueT + dir * g), `chi applica lo scarto una volta sola invece di ${n} risponde ${fmt(trueT + dir * g)}`),
+    optTime(norm(trueT - dir * n * g), `chi sbaglia il verso dello scarto risponde ${fmt(trueT - dir * n * g)}`),
+    optTime(
+      norm(correctT + dir * g),
+      `chi conta ${n + 1} ore di scarto invece di ${n} (l’errore di chi conta anche l’ora di partenza) risponde ${fmt(correctT + dir * g)}`
+    ),
+    optTime(norm(correctT + 60), `chi conta un’ora di troppo fra le ${n} che passano arriva alle ${fmt(correctT + 60)}`),
+    optTime(norm(correctT - 60), `chi conta un’ora in meno fra le ${n} che passano arriva alle ${fmt(correctT - 60)}`),
   ];
-  const { choices, correctIndex } = textChoices(rng, fmt(correctT), cands);
+  const { choices, correctIndex, traps } = textOptions(rng, optTime(correctT), cands);
   return {
     qtype: 'clock',
     difficulty: 3,
@@ -740,8 +999,7 @@ function d3Broken(rng: Rng): Question {
     correctIndex,
     explanation:
       `Lo scarto si accumula: ${n} × ${g} = ${n * g} minuti di ${fast ? 'anticipo' : 'ritardo'}. Fra ${n} ore l’ora ` +
-      `giusta sarà le ${fmt(trueT)}, quindi l’orologio segnerà le ${fmt(correctT)}. Chi si ferma all’ora giusta ` +
-      `risponde ${fmt(trueT)}; chi applica lo scarto una volta sola risponde ${fmt(norm(trueT + dir * g))}.`,
+      `giusta sarà le ${fmt(trueT)}, quindi l’orologio segnerà le ${fmt(correctT)}. Trappole: ${traps}.`,
   };
 }
 

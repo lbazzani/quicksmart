@@ -20,6 +20,15 @@
 // dei vicini, operazione sbagliata dell'alternanza, confondere quadrato e
 // doppio, leggere la colonna invece della regola, off-by-one). Mai a caso.
 //
+// Anti-scorciatoia: gli errori tipici di una serie tendono a CIRCONDARE la
+// risposta (uno sotto e uno sopra), e chi sceglie sempre il numero di mezzo
+// vince senza ragionare. Perciò ogni famiglia non consegna due distrattori già
+// scelti ma un elenco di errori plausibili da entrambi i lati (gli errori
+// concettuali della regola, più gli scarti di conto), e `balancedTwo` estrae la
+// coppia facendo ruotare la posizione della risposta: a volte in mezzo, a volte
+// la più piccola, a volte la più grande. Se un lato non ha abbastanza errori
+// credibili la domanda viene scartata e rigenerata.
+//
 // Anti-ambiguità: ogni serie viene rigettata (e rigenerata) se una regola
 // semplice alternativa — differenza costante, differenze delle differenze,
 // rapporto costante, Fibonacci, v = q·prec + b, salti alternati, somma/prodotto
@@ -29,7 +38,7 @@
 
 import type { Difficulty, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
-import { placeChoices, retry } from './qutils';
+import { balancedNumericDistractors, placeChoices, retry } from './qutils';
 
 const MAX = 400;
 
@@ -308,15 +317,64 @@ function floorOf(vals: number[], allowNegative?: boolean): number {
   return Math.min(...vals) > 0 ? 1 : 0;
 }
 
-/** sceglie i primi due candidati validi e distinti fra gli errori tipici */
-function pickDistractors(cands: number[], correct: number, floor: number): [number, number] {
+/**
+ * Errori di CONTO attorno alla risposta: chi ha capito la regola ma sbaglia la
+ * somma finisce a un passo dal risultato. Servono a coprire il lato che gli
+ * errori concettuali lasciano scoperto (spesso stanno tutti sopra o tutti sotto).
+ */
+function slips(correct: number, span = 3): number[] {
   const out: number[] = [];
-  for (const c of cands) {
-    if (!Number.isInteger(c) || c === correct || c < floor || out.includes(c)) continue;
-    out.push(c);
-    if (out.length === 2) return [out[0], out[1]];
+  for (let d = 1; d <= span; d++) out.push(correct - d, correct + d);
+  return out;
+}
+
+interface BalanceOpts {
+  /** valore minimo credibile per un distrattore */
+  floor?: number;
+  /** numeri già scritti nella domanda: offrirli confonderebbe e basta */
+  avoid?: number[];
+  /** se il buco sta FRA due numeri visibili, i distrattori devono starci dentro */
+  lo?: number;
+  hi?: number;
+}
+
+/**
+ * Due distrattori scelti in modo che la risposta finisca a turno in mezzo, in
+ * cima e in fondo alla terna.
+ *
+ * `prefer` sono gli errori concettuali (i più istruttivi): vengono ripescati
+ * dopo il bilanciamento e sostituiti a uno scarto di conto che stia dallo stesso
+ * lato, così la posizione resta quella decisa ma il distrattore è il migliore
+ * disponibile. Lancia se un lato non ha errori credibili a sufficienza: la
+ * domanda va rigenerata invece di ricadere nello schema "risposta in mezzo".
+ */
+function balancedTwo(
+  rng: Rng,
+  correct: number,
+  prefer: number[],
+  filler: number[],
+  opts: BalanceOpts = {}
+): [number, number] {
+  const { floor = 1, avoid = [], lo = -Infinity, hi = Infinity } = opts;
+  const ok = (v: number) =>
+    Number.isInteger(v) && v !== correct && v >= floor && v > lo && v < hi && !avoid.includes(v);
+  const pref = [...new Set(prefer.filter(ok))];
+  const two = balancedNumericDistractors(rng, correct, [...pref, ...filler.filter(ok)], 1);
+  if (!two) throw new Error('distrattori non equilibrabili');
+
+  // gli errori concettuali entrano in ordine di priorità, ognuno al posto di uno
+  // scarto di conto che sta dalla stessa parte (un posto già "concettuale" non
+  // viene più toccato: il primo della lista è il più istruttivo)
+  const out: [number, number] = [two[0], two[1]];
+  for (const p of pref) {
+    if (out.includes(p)) continue;
+    const i = out.findIndex(
+      (v) => !pref.includes(v) && Math.sign(v - correct) === Math.sign(p - correct)
+    );
+    if (i >= 0) out[i] = p;
   }
-  throw new Error('distrattori insufficienti');
+  if (out[0] === out[1]) throw new Error('distrattori non distinti');
+  return chance(rng, 0.5) ? out : [out[1], out[0]];
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +401,9 @@ function rArith(rng: Rng): RuleSeq {
 function rArithDown(rng: Rng): RuleSeq {
   const k = pick(rng, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20]);
   const n = randInt(rng, 5, 7);
-  const end = randInt(rng, 0, 25);
+  // mai sotto il 5 in fondo: quando la discesa finisce lì c'è anche la risposta,
+  // e sotto il 5 non ci sono due distrattori più piccoli credibili
+  const end = randInt(rng, 5, 25);
   const vals = Array.from({ length: n }, (_, i) => end + (n - 1 - i) * k);
   return { vals, rule: `si toglie sempre ${k} (${vals[0]} − ${k} = ${vals[1]}, ${vals[1]} − ${k} = ${vals[2]}, …)` };
 }
@@ -363,8 +423,11 @@ function rGeom(rng: Rng): RuleSeq {
 function rGeomDown(rng: Rng): RuleSeq {
   const r = pick(rng, [2, 2, 3]);
   const n = r === 2 ? randInt(rng, 5, 6) : randInt(rng, 4, 5);
-  const cap = Math.floor(MAX / r ** (n - 1));
-  const s = randInt(rng, 1, Math.max(1, Math.min(12, cap)));
+  const cap = Math.min(12, Math.floor(MAX / r ** (n - 1)));
+  // l'ultimo numero è anche la risposta: se scendesse a 1 o 2 non esisterebbero
+  // due valori più piccoli credibili e la risposta sarebbe sempre la minima
+  if (cap < 4) throw new Error('discesa geometrica troppo corta');
+  const s = randInt(rng, 4, cap);
   const vals = Array.from({ length: n }, (_, i) => s * r ** (n - 1 - i));
   return {
     vals,
@@ -600,15 +663,16 @@ function endSeries(rng: Rng, s: RuleSeq): Built {
   const last = visible[n - 2];
   const prev = visible[n - 3];
   const floor = floorOf(v, s.allowNegative);
-  // prima gli errori tipici della regola, poi quello di chi ripete l'ultimo salto
-  const cands = [...(s.wrong?.(v) ?? []), last + (last - prev)];
-  // in coda gli errori di conto, in ordine variabile
-  cands.push(...shuffle(rng, [correct + 1, correct - 1, last + (last - prev) * 2]));
+  const prevDiff = last - prev;
+  const step = correct - last;
+  // errori tipici della regola, più: ripetere l'ultimo salto, ripeterlo due
+  // volte, fare un passo di troppo (il numero DOPO la risposta)
+  const prefer = [...(s.wrong?.(v) ?? []), last + prevDiff, last + 2 * prevDiff, correct + step];
   return {
     seq: [...visible, '?'],
     prompt: 'Quale numero continua la serie?',
     correct,
-    distractors: pickDistractors(cands, correct, floor),
+    distractors: balancedTwo(rng, correct, prefer, slips(correct), { floor, avoid: visible }),
     explanation: `Regola: ${s.rule}. Quindi dopo ${last} viene ${correct}.`,
     allowNegative: s.allowNegative,
   };
@@ -627,17 +691,21 @@ function middleSeries(rng: Rng, s: RuleSeq): Built {
   const correct = v[p];
   const floor = floorOf(v, s.allowNegative);
   // errori tipici di chi guarda solo i vicini invece della regola
-  const cands: number[] = [];
-  if (p >= 2) cands.push(v[p - 1] + (v[p - 1] - v[p - 2])); // ripete il salto precedente
-  if (p + 2 <= n - 1) cands.push(v[p + 1] - (v[p + 2] - v[p + 1])); // usa il salto successivo, all'indietro
-  cands.push(Math.round((v[p - 1] + v[p + 1]) / 2)); // media dei due vicini
-  shuffle(rng, cands);
-  cands.push(correct + 1, correct - 1, v[p - 1] + 1, v[p + 1] - 1);
+  const prefer: number[] = [];
+  if (p >= 2) prefer.push(v[p - 1] + (v[p - 1] - v[p - 2])); // ripete il salto precedente
+  if (p + 2 <= n - 1) prefer.push(v[p + 1] - (v[p + 2] - v[p + 1])); // usa il salto successivo, all'indietro
+  prefer.push(Math.round((v[p - 1] + v[p + 1]) / 2)); // media dei due vicini
+  // Quando la risposta sta FRA i due vicini, i distrattori devono starci anche
+  // loro: un numero fuori da quell'intervallo si scarta a occhio, senza capire
+  // la regola. Se lo spazio non basta per due errori per parte si rigenera.
+  const between = (correct - v[p - 1]) * (correct - v[p + 1]) < 0;
+  const lo = between ? Math.min(v[p - 1], v[p + 1]) : -Infinity;
+  const hi = between ? Math.max(v[p - 1], v[p + 1]) : Infinity;
   return {
     seq: [...v.slice(0, p), '?', ...v.slice(p + 1)],
     prompt: 'Quale numero manca?',
     correct,
-    distractors: pickDistractors(cands, correct, floor),
+    distractors: balancedTwo(rng, correct, prefer, slips(correct), { floor, avoid: v, lo, hi }),
     explanation: `Regola: ${s.rule}. Al posto del «?» va ${correct}, perché la serie completa è ${v.join(', ')}.`,
     allowNegative: s.allowNegative,
   };
@@ -666,7 +734,9 @@ function pairRulesD1(rng: Rng): PairRule {
       f: (a) => a + k,
       text: `il secondo numero è il primo più ${k}`,
       calc: (a) => `${a} + ${k} = ${a + k}`,
-      wrong: (a, _pa, pb) => [pb + k, a + k + 1, a * 2],
+      // continua la serie dei secondi numeri; raddoppia invece di sommare;
+      // somma il primo numero a sé stesso; toglie k invece di aggiungerlo
+      wrong: (a, _pa, pb) => [pb + k, a * 2, a + a, a - k],
       amax: 40,
     };
   }
@@ -675,7 +745,9 @@ function pairRulesD1(rng: Rng): PairRule {
     f: (a) => a * k,
     text: `il secondo numero è il primo moltiplicato per ${k}`,
     calc: (a) => `${a} × ${k} = ${a * k}`,
-    wrong: (a, _pa, pb) => [a + k, pb + k, a * k + k],
+    // somma invece di moltiplicare; continua la serie dei secondi numeri;
+    // moltiplica per il numero sbagliato (uno in più, uno in meno)
+    wrong: (a, _pa, pb) => [a + k, pb + k, a * (k + 1), a * (k - 1)],
     amax: 30,
   };
 }
@@ -687,7 +759,9 @@ function pairRulesD2(rng: Rng): PairRule {
       f: (a) => a * a,
       text: 'il secondo numero è il quadrato del primo',
       calc: (a) => `${a} × ${a} = ${a * a}`,
-      wrong: (a) => [a * 2, (a + 1) * (a + 1), a * a - 1],
+      // raddoppia invece di elevare al quadrato; quadrato del numero dopo;
+      // quadrato del numero prima
+      wrong: (a) => [a * 2, (a + 1) * (a + 1), (a - 1) * (a - 1)],
       amax: 15,
     };
   }
@@ -696,7 +770,9 @@ function pairRulesD2(rng: Rng): PairRule {
       f: (a) => a * (a + 1),
       text: 'il secondo numero è il primo moltiplicato per il numero successivo',
       calc: (a) => `${a} × ${a + 1} = ${a * (a + 1)}`,
-      wrong: (a) => [a * a, 2 * a + 1, (a + 1) * (a + 2)],
+      // quadrato invece del prodotto; somma invece di prodotto; parte dal
+      // numero successivo
+      wrong: (a) => [a * a, 2 * a + 1, (a + 1) * (a + 2), (a - 1) * a],
       amax: 14,
     };
   }
@@ -706,7 +782,8 @@ function pairRulesD2(rng: Rng): PairRule {
     f: (a) => k * a + m,
     text: `il secondo numero è il primo moltiplicato per ${k} e poi aumentato di ${m}`,
     calc: (a) => `${a} × ${k} + ${m} = ${k * a + m}`,
-    wrong: (a) => [k * a, k * (a + m), a + k + m],
+    // dimentica il «+ m»; somma m prima di moltiplicare; somma tutto
+    wrong: (a) => [k * a, k * (a + m), a + k + m, k * a + m + k],
     amax: 25,
   };
 }
@@ -718,7 +795,8 @@ function pairRulesD3(rng: Rng): PairRule {
       f: (a) => a * a * a,
       text: 'il secondo numero è il cubo del primo',
       calc: (a) => `${a} × ${a} × ${a} = ${a * a * a}`,
-      wrong: (a) => [a * a, a * 3, (a + 1) * (a + 1) * (a + 1)],
+      // si ferma al quadrato; moltiplica per 3; cubo del numero dopo o di quello prima
+      wrong: (a) => [a * a, a * 3, (a + 1) * (a + 1) * (a + 1), (a - 1) * (a - 1) * (a - 1)],
       amax: 7,
     };
   }
@@ -728,7 +806,9 @@ function pairRulesD3(rng: Rng): PairRule {
       f: (a) => a * a + m,
       text: `il secondo numero è il quadrato del primo più ${m}`,
       calc: (a) => `${a} × ${a} + ${m} = ${a * a + m}`,
-      wrong: (a) => [a * a, (a + 1) * (a + 1) + m, a * 2 + m],
+      // dimentica il «+ m»; usa il quadrato del numero dopo; raddoppia invece
+      // di elevare al quadrato; somma m due volte
+      wrong: (a) => [a * a, (a + 1) * (a + 1) + m, a * 2 + m, a * a + 2 * m],
       amax: 15,
     };
   }
@@ -736,7 +816,9 @@ function pairRulesD3(rng: Rng): PairRule {
     f: (a) => a * (a - 1),
     text: 'il secondo numero è il primo moltiplicato per il numero che lo precede',
     calc: (a) => `${a} × ${a - 1} = ${a * (a - 1)}`,
-    wrong: (a) => [a * a, a * (a + 1), a * (a - 1) - 1],
+    // quadrato invece del prodotto; moltiplica per il successivo; scala tutto
+    // di uno; somma invece di moltiplicare
+    wrong: (a) => [a * a, a * (a + 1), (a - 1) * (a - 2), 2 * a - 1],
     amax: 16,
   };
 }
@@ -776,7 +858,9 @@ function pairsFamily(rng: Rng, rule: PairRule, holeAtEnd: boolean): Built {
     seq,
     prompt: holeAtEnd ? "Quale numero completa l'ultima coppia?" : 'Quale numero manca?',
     correct,
-    distractors: pickDistractors(rule.wrong(as[hole], prevA, prevB), correct, 1),
+    distractors: balancedTwo(rng, correct, rule.wrong(as[hole], prevA, prevB), slips(correct), {
+      avoid: bs, // gli altri secondi numeri sono già sotto gli occhi
+    }),
     explanation:
       `I numeri vanno letti a coppie: in ogni coppia ${rule.text} ` +
       `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}). Quindi accanto a ${as[hole]} va ${rule.calc(as[hole])}.`,
@@ -858,16 +942,12 @@ function triFamily(rng: Rng): Built {
     seq.push(i === g ? '?' : cs[i]);
   }
   // distrattori: il risultato di un'altra regola plausibile del catalogo
-  const cands = shuffle(
-    rng,
-    TRI_RULES.filter((r) => r !== rule).map((r) => r.f(as[g], bs[g]))
-  );
-  cands.push(correct + 1, correct - 1);
+  const prefer = TRI_RULES.filter((r) => r !== rule).map((r) => r.f(as[g], bs[g]));
   return {
     seq,
     prompt: "Quale numero completa l'ultimo gruppo?",
     correct,
-    distractors: pickDistractors(cands, correct, 1),
+    distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: cs }),
     explanation:
       `I numeri vanno letti a gruppi di tre: ${rule.text} ` +
       `(${rule.calc(as[0], bs[0])}; ${rule.calc(as[1], bs[1])}). Quindi ${rule.calc(as[g], bs[g])}.`,
@@ -956,17 +1036,17 @@ function parallelSame(rng: Rng, difficulty: Difficulty): Built {
   assertUnique(r2, hole);
   const correct = r2[hole];
   const seq: (number | string)[] = [...r1, '|', ...r2.map((x, i) => (i === hole ? '?' : x))];
-  // errori tipici: copiare il numero sopra; ripetere il salto della riga sopra
-  const cands = [r1[hole], r2[hole - 1] + (r1[hole] - r1[hole - 1]) + 1];
-  if (hole >= 2) cands.push(r2[hole - 1] + (r2[hole - 1] - r2[hole - 2]));
-  if (hole + 1 < n) cands.push(Math.round((r2[hole - 1] + r2[hole + 1]) / 2));
-  shuffle(rng, cands);
-  cands.push(correct + 1, correct - 1);
+  // errori tipici: copiare il numero sopra; portare giù il SALTO della riga
+  // sopra (sbagliato quando i salti non sono uguali, come nelle righe ×2);
+  // ripetere il proprio salto precedente; fare la media dei vicini
+  const prefer = [r1[hole], r2[hole - 1] + (r1[hole] - r1[hole - 1])];
+  if (hole >= 2) prefer.push(r2[hole - 1] + (r2[hole - 1] - r2[hole - 2]));
+  if (hole + 1 < n) prefer.push(Math.round((r2[hole - 1] + r2[hole + 1]) / 2));
   return {
     seq,
     prompt: 'Quale numero completa la seconda riga?',
     correct,
-    distractors: pickDistractors(cands, correct, 1),
+    distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: r2 }),
     explanation:
       `Le due righe (separate dal «|») seguono la stessa regola: ${rule}. ` +
       `La prima riga lo mostra: ${r1.join(', ')}. Nella seconda, al posto del «?» va ${correct}: ${r2.join(', ')}.`,
@@ -998,13 +1078,13 @@ function parallelMap(rng: Rng, rule: PairRule): Built {
   const seq: (number | string)[] = [...as, '|', ...bs.map((b, i) => (i === hole ? '?' : b))];
   const prevA = as[hole === 0 ? 1 : hole - 1];
   const prevB = bs[hole === 0 ? 1 : hole - 1];
-  const cands = rule.wrong(as[hole], prevA, prevB);
-  cands.push(as[hole], correct + 1, correct - 1);
+  // agli errori della regola si aggiunge chi ricopia il numero di sopra
+  const prefer = [...rule.wrong(as[hole], prevA, prevB), as[hole]];
   return {
     seq,
     prompt: 'Quale numero completa la seconda riga?',
     correct,
-    distractors: pickDistractors(cands, correct, 1),
+    distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: bs }),
     explanation:
       `Ogni numero della seconda riga si ottiene da quello che sta sopra: ${rule.text} ` +
       `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}, ${as[2]} → ${bs[2]}). Sotto ${as[hole]} va ${rule.calc(as[hole])}.`,
@@ -1136,15 +1216,19 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
   assertOnlyIntruder(nums, bad);
 
   const correct = nums[bad];
-  // distrattori: i due vicini dell'intruso, dove il "salto strano" si vede
-  const near = [nums[bad - 1], nums[bad + 1], nums[bad + 2], nums[bad - 2], nums[0], nums[nums.length - 1]].filter(
-    (x): x is number => x !== undefined
-  );
+  // Qui i distrattori DEVONO essere altri numeri della fila (la domanda chiede
+  // di indicarne uno). Si preferiscono i vicini dell'intruso — è lì che il
+  // "salto strano" si vede — ma presi ora da sopra, ora da sotto, ora da tutt'e
+  // due i lati: se fossero sempre uno prima e uno dopo, l'intruso sarebbe
+  // sempre il numero di mezzo.
+  const defined = (x: number | undefined): x is number => x !== undefined;
+  const near = [nums[bad - 1], nums[bad + 1], nums[bad - 2], nums[bad + 2]].filter(defined);
+  const rest = nums.filter((_, i) => i !== bad);
   return {
     seq: [...nums],
     prompt: 'Quale numero NON segue la regola?',
     correct,
-    distractors: pickDistractors(near, correct, 1),
+    distractors: balancedTwo(rng, correct, near, rest),
     explanation: `Tutti i numeri sono ${label}, tranne uno: ${why}. L'intruso è ${correct}.`,
     max: 999,
   };
@@ -1157,17 +1241,22 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
 interface EndBuilt {
   visible: number[];
   correct: number;
-  distractors: [number, number];
+  /** errori tipici della regola, dal più istruttivo in giù (non due soli: servono
+   *  candidati sopra E sotto la risposta, altrimenti la posizione è prevedibile) */
+  prefer: number[];
   explanation: string;
 }
 
-function fromEndBuilt(b: EndBuilt): Built {
+function fromEndBuilt(rng: Rng, b: EndBuilt): Built {
   assertUnique([...b.visible, b.correct], b.visible.length);
   return {
     seq: [...b.visible, '?'],
     prompt: 'Quale numero continua la serie?',
     correct: b.correct,
-    distractors: b.distractors,
+    distractors: balancedTwo(rng, b.correct, b.prefer, slips(b.correct), {
+      floor: floorOf([...b.visible, b.correct]),
+      avoid: b.visible,
+    }),
     explanation: b.explanation,
   };
 }
@@ -1182,11 +1271,11 @@ function legacyD1(rng: Rng): Built {
     const visible = Array.from({ length: n }, (_, i) => s + i * k);
     const last = visible[n - 1];
     const correct = last + k;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // salta un passo (applica +k due volte); errore di conto di 1
-      distractors: [last + 2 * k, correct + pick(rng, [-1, 1])],
+      // applica +k due volte (un passo di troppo); aggiunge k−1 invece di k
+      prefer: [last + 2 * k, correct - 1],
       explanation: `Regola: si aggiunge sempre ${k} (${visible[0]} + ${k} = ${visible[1]}, e così via); quindi ${last} + ${k} = ${correct}.`,
     });
   }
@@ -1206,25 +1295,28 @@ function legacyD1(rng: Rng): Built {
     const last = visible[n - 1];
     const prev = visible[n - 2];
     const correct = last * r;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // ripete l'ultima differenza invece di moltiplicare; somma r invece di moltiplicare
-      distractors: [last + (last - prev), last + r],
+      // ripete l'ultima differenza invece di moltiplicare; somma r invece di
+      // moltiplicare; moltiplica per il numero sbagliato (r+1); moltiplica due volte
+      prefer: [last + (last - prev), last + r, last * (r + 1), correct * r],
       explanation: `Regola: ogni numero è il ${r === 2 ? 'doppio' : 'triplo'} del precedente; quindi ${last} × ${r} = ${correct}.`,
     });
   }
   // countdown: −k
   const k = randInt(rng, 2, 9);
   const n = randInt(rng, 5, 6);
-  const correct = randInt(rng, k, 30);
+  // la risposta non scende sotto il 5: più in basso non ci sono due numeri più
+  // piccoli credibili e la risposta finirebbe sempre a fare la minima
+  const correct = randInt(rng, Math.max(k, 5), 30);
   const visible = Array.from({ length: n }, (_, i) => correct + (n - i) * k);
   const last = visible[n - 1];
-  return fromEndBuilt({
+  return fromEndBuilt(rng, {
     visible,
     correct,
-    // salta un passo (toglie 2k); errore di conto di 1
-    distractors: [last - 2 * k, correct + pick(rng, [-1, 1])],
+    // toglie 2k (un passo di troppo); toglie k−1 invece di k
+    prefer: [last - 2 * k, correct + 1],
     explanation: `Regola: si toglie sempre ${k} (${visible[0]} − ${k} = ${visible[1]}, e così via); quindi ${last} − ${k} = ${correct}.`,
   });
 }
@@ -1241,11 +1333,12 @@ function legacyD2(rng: Rng): Built {
     const last = visible[n - 1];
     const step = d0 + n - 1; // salto verso la risposta
     const correct = last + step;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // ripete l'ultimo salto (+step−1); aumenta il salto di 2 invece che di 1
-      distractors: [correct - 1, correct + 1],
+      // ripete l'ultimo salto senza farlo crescere; lo fa crescere di 2 invece
+      // che di 1; salta un passo (fa crescere il salto due volte)
+      prefer: [correct - 1, correct + 1, correct + step + 1],
       explanation: `Regola: i salti crescono di 1 a ogni passo (+${d0}, +${d0 + 1}, +${d0 + 2}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
     });
   }
@@ -1265,13 +1358,15 @@ function legacyD2(rng: Rng): Built {
     const correct = vals[n];
     const last = visible[n - 1];
     const nextAdd = (n - 1) % 2 === 0 ? startAdd : !startAdd;
-    const distractors: [number, number] = nextAdd
-      ? [last * q, last + q] // operazione sbagliata; aggiunge il 2 del "×2" invece di p
-      : [last + p, last * q + p]; // operazione sbagliata; applica entrambe le operazioni
-    return fromEndBuilt({
+    // operazione sbagliata dell'alternanza; applica tutt'e due le operazioni;
+    // usa il 2 del «×2» come addendo
+    const prefer = nextAdd
+      ? [last * q, last * q + p, last + q, correct + p]
+      : [last + p, last * q + p, last * q - p];
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      distractors,
+      prefer,
       explanation: `Regola: la serie alterna «+${p}» e «×${q}». Dopo «${nextAdd ? `×${q}` : `+${p}`}» tocca a «${nextAdd ? `+${p}` : `×${q}`}»: ${last} ${nextAdd ? `+ ${p}` : `× ${q}`} = ${correct}.`,
     });
   }
@@ -1285,11 +1380,12 @@ function legacyD2(rng: Rng): Built {
     const last = visible[n - 1];
     const prev = visible[n - 2];
     const correct = (M + 1) ** 2;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // ripete l'ultima differenza (salto dispari precedente); salto dispari successivo
-      distractors: [last + (last - prev), correct + 2],
+      // ripete l'ultima differenza (il salto dispari precedente); usa il salto
+      // dispari successivo; salta un quadrato; raddoppia l'ultimo numero
+      prefer: [last + (last - prev), correct + 2, (M + 2) ** 2, last * 2],
       explanation: `Regola: sono i quadrati di numeri consecutivi (${m0}² = ${m0 ** 2}, ${m0 + 1}² = ${(m0 + 1) ** 2}, …); il prossimo è ${M + 1}² = ${correct}.`,
     });
   }
@@ -1302,11 +1398,12 @@ function legacyD2(rng: Rng): Built {
   const lastDiff = d[d.length - 1];
   const lastSd = lastDiff - d[d.length - 2];
   const correct = (M + 1) ** 3;
-  return fromEndBuilt({
+  return fromEndBuilt(rng, {
     visible,
     correct,
-    // ripete l'ultima differenza; continua le seconde differenze come costanti
-    distractors: [last + lastDiff, last + lastDiff + lastSd],
+    // ripete l'ultima differenza; continua le seconde differenze come costanti;
+    // salta un cubo; si ferma al quadrato invece del cubo
+    prefer: [last + lastDiff, last + lastDiff + lastSd, (M + 2) ** 3, (M + 1) ** 2],
     explanation: `Regola: sono i cubi di numeri consecutivi (${m0}³ = ${m0 ** 3}, ${m0 + 1}³ = ${(m0 + 1) ** 3}, …); il prossimo è ${M + 1}³ = ${correct}.`,
   });
 }
@@ -1326,11 +1423,12 @@ function legacyD3(rng: Rng): Built {
     const b = [b0, b0 + stepB, b0 + 2 * stepB];
     const visible = [a[0], b[0], a[1], b[1], a[2], b[2]];
     const correct = a0 + 3 * da;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // continua la serie sbagliata (B); usa il passo di B sulla serie A
-      distractors: [b[2] + stepB, a[2] + stepB],
+      // continua la serie sbagliata (B); usa il passo di B sulla serie A;
+      // continua l'ultimo numero visibile invece della serie A; salta un posto
+      prefer: [b[2] + stepB, a[2] + stepB, b[2] + da, correct + da],
       explanation: `Regola: due serie si alternano: il 1º, 3º e 5º numero (${a[0]}, ${a[1]}, ${a[2]}) crescono di ${da}; il 2º, 4º e 6º (${b[0]}, ${b[1]}, ${b[2]}) ${desc ? 'calano' : 'crescono'} di ${db}. Il «?» continua la prima serie: ${a[2]} + ${da} = ${correct}.`,
     });
   }
@@ -1345,11 +1443,13 @@ function legacyD3(rng: Rng): Built {
     const last = visible[n - 1];
     const prev = visible[n - 2];
     const correct = vals[n];
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // ripete l'ultima differenza; raddoppia invece di sommare i due precedenti
-      distractors: [2 * last - prev, 2 * last],
+      // ripete l'ultima differenza; raddoppia invece di sommare i due
+      // precedenti; somma la coppia sbagliata (l'ultimo con il terzultimo);
+      // fa un passo di troppo
+      prefer: [2 * last - prev, 2 * last, last + visible[n - 3], correct + last],
       explanation: `Regola: ogni numero è la somma dei due precedenti (${visible[0]} + ${visible[1]} = ${visible[2]}, …); quindi ${prev} + ${last} = ${correct}.`,
     });
   }
@@ -1364,11 +1464,12 @@ function legacyD3(rng: Rng): Built {
     const last = visible[n - 1];
     const step = d0 + (n - 1) * c;
     const correct = last + step;
-    return fromEndBuilt({
+    return fromEndBuilt(rng, {
       visible,
       correct,
-      // ripete l'ultimo salto (senza accelerare); accelera due volte
-      distractors: [correct - c, correct + c],
+      // ripete l'ultimo salto (senza accelerare); accelera due volte; salta un
+      // passo; accelera di 1 invece che di c
+      prefer: [correct - c, correct + c, correct + step + c, correct - c + 1],
       explanation: `Regola: i salti aumentano di ${c} a ogni passo (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
     });
   }
@@ -1384,11 +1485,12 @@ function legacyD3(rng: Rng): Built {
   const correct = vals[n];
   const sign = b > 0 ? '+' : '−';
   const ab = Math.abs(b);
-  return fromEndBuilt({
+  return fromEndBuilt(rng, {
     visible,
     correct,
-    // dimentica il ±b (raddoppia soltanto); continua con l'ultima differenza
-    distractors: [last * 2, last + (last - prev)],
+    // dimentica il ±b (raddoppia soltanto); continua con l'ultima differenza;
+    // sbaglia il segno del b; fa un passo di troppo
+    prefer: [last * 2, last + (last - prev), last * 2 - b, correct * 2 + b],
     explanation: `Regola: ogni numero è il doppio del precedente ${b > 0 ? `più ${b}` : `meno ${ab}`} (${visible[0]} × 2 ${sign} ${ab} = ${visible[1]}); quindi ${last} × 2 ${sign} ${ab} = ${correct}.`,
   });
 }
@@ -1491,47 +1593,6 @@ function buildD3(rng: Rng): Built {
 }
 
 // ---------------------------------------------------------------------------
-
-export const __debugFamilies: Record<string, (rng: Rng) => Built> = {
-  legacyD1: (r) => legacyD1(r),
-  legacyD2: (r) => legacyD2(r),
-  legacyD3: (r) => legacyD3(r),
-  endArith: (r) => endSeries(r, chance(r, 0.5) ? rArith(r) : rArithDown(r)),
-  endGeomDown: (r) => endSeries(r, rGeomDown(r)),
-  endZigzag: (r) => endSeries(r, rZigzag(r)),
-  endDigitSum: (r) => endSeries(r, rDigitSum(r)),
-  endSquares: (r) => endSeries(r, chance(r, 0.5) ? rSquares(r) : rCubes(r)),
-  endDigitProd: (r) => endSeries(r, rDigitProd(r)),
-  endPeriod3: (r) => endSeries(r, rPeriod3(r)),
-  endPrimes: (r) => endSeries(r, rPrimes(r)),
-  endDown: (r) => endSeries(r, chance(r, 0.5) ? rDownZero(r) : rDownAccel(r)),
-  midArith: (r) => middleSeries(r, rArith(r)),
-  midArithDown: (r) => middleSeries(r, rArithDown(r)),
-  midGeom: (r) => middleSeries(r, rGeom(r)),
-  midGrow: (r) => middleSeries(r, rGrow(r)),
-  midAltOps: (r) => middleSeries(r, rAltOps(r)),
-  midSquares: (r) => middleSeries(r, rSquares(r)),
-  midZigzag: (r) => middleSeries(r, rZigzag(r)),
-  midFib: (r) => middleSeries(r, rFib(r)),
-  midAccel: (r) => middleSeries(r, rAccel(r)),
-  midInter: (r) => middleSeries(r, rInter(r)),
-  midAffine: (r) => middleSeries(r, rAffine(r)),
-  midDownAccel: (r) => middleSeries(r, rDownAccel(r)),
-  pairsD1end: (r) => pairsFamily(r, pairRulesD1(r), true),
-  pairsD1mid: (r) => pairsFamily(r, pairRulesD1(r), false),
-  pairsD2: (r) => pairsFamily(r, pairRulesD2(r), chance(r, 0.65)),
-  pairsD3: (r) => pairsFamily(r, pairRulesD3(r), chance(r, 0.65)),
-  tri: (r) => triFamily(r),
-  intruder1: (r) => intruderFamily(r, 1),
-  intruder2: (r) => intruderFamily(r, 2),
-  intruder3: (r) => intruderFamily(r, 3),
-  parallel1: (r) => parallelSame(r, 1),
-  parallel2: (r) => parallelSame(r, 2),
-  parallel3: (r) => parallelSame(r, 3),
-  mapD1: (r) => parallelMap(r, pairRulesD1(r)),
-  mapD2: (r) => parallelMap(r, pairRulesD2(r)),
-  mapD3: (r) => parallelMap(r, pairRulesD3(r)),
-};
 
 export function genNumseries(rng: Rng, difficulty: Difficulty): Question {
   return retry(() => {

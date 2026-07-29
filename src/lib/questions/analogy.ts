@@ -7,11 +7,21 @@
 // Difficoltà 1: una trasformazione evidente. 2: due trasformazioni combinate.
 // 3: trasformazione relativa sottile (conteggio+rotazione insieme, scambio di
 // colori o di dimensioni tra le due forme della cella).
-// Distrattori costruiti ad arte: copia letterale di B (l'errore classico),
-// trasformazione parziale (solo una delle due), direzione opposta. Mai casuali.
+//
+// Distrattori: sempre errori PLAUSIBILI, mai valori casuali. Tre famiglie —
+// copiare B pari pari; trasformare bene ma tenere la forma o il colore della
+// prima coppia (mezza copia di B); sbagliare una delle trasformazioni
+// (dimenticata, invertita, esagerata) — e la COPPIA di distrattori si compone a
+// rotazione fra ricette che mescolano le famiglie (vedi pickPair).
+// Serviva: finché i distrattori erano sempre gli stessi due tipi (copia di B +
+// trasformazione parziale), le due opzioni sbagliate finivano per somigliarsi
+// fra loro più di quanto somigliassero alla risposta, e "scegli l'opzione
+// diversa dalle altre due" vinceva il 52,8% delle volte a d2 senza guardare la
+// regola (tools/shortcut-test.ts). Ora rende il 29%, cioè quanto il caso.
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
-import { pick, pickN, randInt, type Rng } from '../rng';
+import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { tooSimilar } from '../colors';
 import { normRot, placeChoices, retry } from './qutils';
 
 const ROTATABLE: ShapeName[] = ['triangle', 'arrow', 'moon'];
@@ -71,30 +81,168 @@ function applyAll(m: Model, ts: TransformId[]): Model {
   return ts.reduce(applyOne, m);
 }
 
+// ---------------------------------------------------------------------------
+// Distrattori: errori plausibili, e MAI sempre gli stessi due tipi
+// ---------------------------------------------------------------------------
+
+/** un errore plausibile: il modello sbagliato e il perché (finisce nella spiegazione) */
+interface Slip {
+  m: Model;
+  why: string;
+}
+
 /**
- * Errore plausibile su una singola trasformazione, applicato al modello C di
- * partenza: direzione opposta, un passo in meno/in più, o trasformazione
- * dimenticata. Mai un valore casuale.
+ * Le tre famiglie di errore. Le prime due lasciano intatta la STRUTTURA della
+ * risposta (quante figure, quanto grandi, girate come) e sbagliano l'IDENTITÀ
+ * (forma e colore); la terza fa l'opposto. Somigliano quindi alla risposta —
+ * e fra loro — in modi diversi: è questo che permette di comporre la coppia di
+ * distrattori senza lasciare una regolarità da sfruttare a occhio.
  */
-function wrongSingle(rng: Rng, c: Model, t: TransformId): Model {
+type FamilyId = 'copyB' | 'leak' | 'slip';
+type Pools = Record<FamilyId, Slip[]>;
+
+/** una cella con meno di 1 figura è vuota, con più di 6 non si conta a colpo d'occhio */
+const MIN_COUNT = 1;
+const MAX_COUNT = 6;
+
+/**
+ * Errori plausibili sulla trasformazione `t`, costruiti a partire dalla risposta
+ * giusta `k`: la trasformazione dimenticata, applicata al contrario, o applicata
+ * di troppo. Ogni voce sbaglia UNA cosa sola — è così che arriva alla risposta
+ * sbagliata chi ha capito la regola a metà, e per questo sono i distrattori che
+ * insegnano qualcosa.
+ */
+function slips(c: Model, k: Model, t: TransformId): Slip[] {
   switch (t) {
     case 'rot90':
-      return { ...c, rot: normRot(c.rot - 90) }; // ruota in direzione opposta
+      return [
+        { m: { ...k, rot: normRot(c.rot - 90) }, why: 'ruota dalla parte sbagliata' },
+        { m: { ...k, rot: normRot(c.rot + 180) }, why: 'fa mezzo giro invece di un quarto' },
+        { m: { ...k, rot: c.rot }, why: 'si dimentica di ruotare' },
+      ];
     case 'rot180':
-      return { ...c, rot: normRot(c.rot + 90) }; // fa solo un quarto di giro
+      return [
+        { m: { ...k, rot: normRot(c.rot + 90) }, why: 'fa solo un quarto di giro' },
+        { m: { ...k, rot: normRot(c.rot + 270) }, why: 'gira di tre quarti invece che di mezzo giro' },
+        { m: { ...k, rot: c.rot }, why: 'si dimentica di ruotare' },
+      ];
     case 'double':
-      return { ...c, count: pick(rng, [1, 3]) }; // dimezza, o resta a una in meno (da 2: corretto 4)
+      return [
+        { m: { ...k, count: c.count }, why: 'si dimentica di raddoppiare' },
+        { m: { ...k, count: c.count + 1 }, why: 'aggiunge una figura invece di raddoppiare' },
+        { m: { ...k, count: c.count * 4 }, why: 'raddoppia due volte' },
+      ];
     case 'half':
-      return { ...c, count: pick(rng, [1, 3]) }; // dimezza due volte, o toglie una sola figura (da 4: corretto 2)
+      return [
+        { m: { ...k, count: c.count }, why: 'si dimentica di dimezzare' },
+        { m: { ...k, count: c.count - 1 }, why: 'toglie una figura invece di dimezzare' },
+        { m: { ...k, count: c.count / 4 }, why: 'dimezza due volte' },
+      ];
     case 'add':
-      return c.count === 1 ? { ...c, count: 3 } : { ...c, count: c.count - 1 }; // ne aggiunge due / ne toglie una
+      return [
+        { m: { ...k, count: c.count }, why: 'si dimentica di aggiungere la figura' },
+        { m: { ...k, count: c.count + 2 }, why: 'ne aggiunge due invece di una' },
+        { m: { ...k, count: c.count - 1 }, why: 'ne toglie una invece di aggiungerla' },
+      ];
     case 'grow':
-      return { ...c, size: SIZE_S }; // rimpicciolisce invece di ingrandire
+      return [
+        { m: { ...k, size: c.size }, why: 'si dimentica di ingrandire' },
+        { m: { ...k, size: SIZE_S }, why: 'rimpicciolisce invece di ingrandire' },
+      ];
     case 'shrink':
-      return { ...c, size: SIZE_L }; // ingrandisce invece di rimpicciolire
+      return [
+        { m: { ...k, size: c.size }, why: 'si dimentica di rimpicciolire' },
+        { m: { ...k, size: SIZE_L }, why: 'ingrandisce invece di rimpicciolire' },
+      ];
     case 'fillToggle':
-      return { ...c }; // dimentica la trasformazione (C invariata)
+      return [
+        {
+          m: { ...k, fill: c.fill },
+          why: c.fill === 'solid' ? 'lascia la figura piena com’era' : 'lascia la figura vuota com’era',
+        },
+      ];
   }
+}
+
+/**
+ * Tutti i distrattori plausibili della domanda, di tre famiglie diverse fra loro:
+ *  - la copia letterale di B (l'errore classico dell'analogia: si ripete quello
+ *    che si vede, senza accorgersi che B ha ancora forma e colore di A);
+ *  - la trasformazione giusta ma con un attributo che "sbava" da B alla
+ *    risposta: il colore della prima coppia, oppure la sua forma (mezza copia
+ *    di B, l'errore di chi trasferisce anche l'identità e non solo la regola);
+ *  - una delle trasformazioni sbagliata: dimenticata, invertita, esagerata.
+ * Scartati: i modelli che verrebbero disegnati come la risposta o come la cella
+ * C già visibile (un'opzione uguale a una cella in vista non è un distrattore).
+ */
+function distractorPool(a: Model, b: Model, c: Model, k: Model, ts: TransformId[]): Pools {
+  const groups: Array<[FamilyId, Slip[]]> = [
+    ['copyB', [{ m: b, why: 'copia B pari pari, senza accorgersi che B ha ancora la forma e il colore di A' }]],
+    [
+      'leak',
+      [
+        { m: { ...k, color: a.color }, why: 'trasforma bene ma tiene il colore della prima coppia' },
+        { m: { ...k, shape: a.shape }, why: 'trasforma bene ma tiene la forma della prima coppia' },
+      ],
+    ],
+    ['slip', ts.flatMap((t) => slips(c, k, t))],
+  ];
+  const seen = new Set<string>([JSON.stringify(render(k)), JSON.stringify(render(c))]);
+  const out: Pools = { copyB: [], leak: [], slip: [] };
+  for (const [family, list] of groups) {
+    for (const s of list) {
+      if (!Number.isInteger(s.m.count) || s.m.count < MIN_COUNT || s.m.count > MAX_COUNT) continue;
+      const key = JSON.stringify(render(s.m));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out[family].push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * Sceglie i due distrattori per FAMIGLIE, non pescandoli alla rinfusa.
+ *
+ * È il punto delicato. Finché i due distrattori erano sempre "copia di B" +
+ * "trasformazione a metà", le due opzioni sbagliate finivano per somigliarsi
+ * fra loro (stessa struttura sballata) più di quanto somigliassero alla
+ * risposta, e "scegli l'opzione diversa dalle altre due" vinceva senza
+ * ragionare. Ma il rimedio ovvio — un distrattore che somiglia sempre alla
+ * risposta — ribalta solo il problema: allora è la risposta a stare sempre in
+ * coppia, e conviene scartare quella che si stacca.
+ *
+ * Perciò la coppia si compone a rotazione fra RICETTE che si assomigliano in
+ * modi opposti. Misurate una alla volta con tools/shortcut-test.ts, "scegli
+ * l'opzione diversa dalle altre due" rende: 20% con copia di B + errore di
+ * regola, 50% con copia di B + mezza copia, 8% con due errori di regola, 5% con
+ * mezza copia + errore di regola. Nessuna da sola va bene; i pesi qui sotto
+ * sono quelli che riportano la miscela al livello del caso.
+ *
+ * Le mezze copie di B si offrono quasi sempre INSIEME alla copia intera: messe
+ * una accanto all'altra, la differenza fra le due dice esattamente quale
+ * attributo di A è stato trasferito per sbaglio, ed è il punto della spiegazione.
+ */
+const RECIPES: Array<[FamilyId, FamilyId]> = (
+  [
+    [3, ['copyB', 'slip']], // la coppia classica: la copia di B e un errore di regola
+    [3, ['copyB', 'leak']], // la copia di B e una sua mezza copia (stessa forma, o stesso colore)
+    [3, ['slip', 'slip']], // due modi diversi di sbagliare la stessa regola
+    [1, ['leak', 'slip']], // rara: lima l'ultimo residuo di regolarità
+  ] as Array<[number, [FamilyId, FamilyId]]>
+).flatMap(([n, r]) => Array.from({ length: n }, () => r));
+
+function pickPair(rng: Rng, p: Pools): [Slip, Slip] | null {
+  for (const [f, g] of shuffle(rng, [...RECIPES])) {
+    if (f === g) {
+      if (p[f].length < 2) continue;
+      const [x, y] = pickN(rng, p[f], 2);
+      return [x, y];
+    }
+    if (!p[f].length || !p[g].length) continue;
+    return [pick(rng, p[f]), pick(rng, p[g])];
+  }
+  return null;
 }
 
 function describeT(t: TransformId, a: Model): string {
@@ -118,11 +266,12 @@ function describeT(t: TransformId, a: Model): string {
   }
 }
 
-function explain(ts: TransformId[], a: Model): string {
+function explain(ts: TransformId[], a: Model, whys: [string, string]): string {
   const parts = ts.map((t) => describeT(t, a));
   return (
-    `Da A a B ${parts.join(' e ')}. Il trucco è applicare a C la stessa trasformazione, ` +
-    'senza farsi ingannare dalla copia di B (che ha ancora la forma e il colore di A).'
+    `Da A a B ${parts.join(' e ')}. La stessa trasformazione va applicata a C, che però ha forma e ` +
+    'colore suoi: cambia lo stato, non l’identità. Le altre due opzioni sono gli errori più facili: ' +
+    `c'è chi ${whys[0]} e chi ${whys[1]}.`
   );
 }
 
@@ -130,12 +279,16 @@ function explain(ts: TransformId[], a: Model): string {
  * Costruisce A e C: stessi attributi di partenza (conteggio, rotazione,
  * dimensione, riempimento) ma forma e colore diversi. Questo rende la
  * risposta univoca: qualunque lettura della regola A→B dà lo stesso esito su C.
+ * I due colori non devono somigliarsi (CONFUSABLE in ../colors): fra le opzioni
+ * c'è anche "trasformazione giusta ma con il colore della prima coppia", e una
+ * risposta non si può mai giocare su una sfumatura.
  */
 function makeBase(rng: Rng, ts: TransformId[]): { a: Model; c: Model } {
   const needRot = ts.includes('rot90') || ts.includes('rot180');
   const pool = needRot ? ROTATABLE : PLAIN;
   const [shapeA, shapeC] = pickN(rng, pool, 2);
   const [colA, colC] = pickN(rng, COLORS, 2);
+  if (tooSimilar(colA, colC)) throw new Error('colori delle due coppie troppo simili');
   const count = ts.includes('double') ? 2 : ts.includes('half') ? 4 : ts.includes('add') ? randInt(rng, 1, 3) : 1;
   const rot = needRot ? pick(rng, [0, 90, 180, 270]) : 0;
   const size = ts.includes('grow') || ts.includes('shrink') ? SIZE_M : undefined;
@@ -185,19 +338,24 @@ function assemble(
   };
 }
 
-/** costruisce la domanda per una lista di trasformazioni, con distrattore "errore" dato */
-function buildFromTransforms(
-  rng: Rng,
-  difficulty: Difficulty,
-  ts: TransformId[],
-  wrongOf: (c: Model) => Model
-): Question {
+/** costruisce la domanda per una lista di trasformazioni, con due distrattori pescati dal pool */
+function buildFromTransforms(rng: Rng, difficulty: Difficulty, ts: TransformId[]): Question {
   const { a, c } = makeBase(rng, ts);
   const b = applyAll(a, ts);
   const correct = applyAll(c, ts);
-  const wrong = wrongOf(c);
-  // distrattore 1: copia letterale di B (renderizzata di nuovo: oggetto fresco)
-  return assemble(rng, difficulty, render(a), render(b), render(c), render(correct), [render(b), render(wrong)], explain(ts, a));
+  const pair = pickPair(rng, distractorPool(a, b, c, correct, ts));
+  if (!pair) throw new Error('errori plausibili insufficienti');
+  const [w1, w2] = pair;
+  return assemble(
+    rng,
+    difficulty,
+    render(a),
+    render(b),
+    render(c),
+    render(correct),
+    [render(w1.m), render(w2.m)],
+    explain(ts, a, [w1.why, w2.why])
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +366,7 @@ const SINGLE_POOL: TransformId[] = ['rot90', 'rot180', 'double', 'half', 'add', 
 
 function genEasy(rng: Rng, difficulty: Difficulty): Question {
   const t = pick(rng, SINGLE_POOL);
-  return buildFromTransforms(rng, difficulty, [t], (c) => wrongSingle(rng, c, t));
+  return buildFromTransforms(rng, difficulty, [t]);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +381,7 @@ function genMedium(rng: Rng, difficulty: Difficulty): Question {
   else if (kind === 2) ts = [pick(rng, ['double', 'add'] as const), 'fillToggle'];
   else if (kind === 3) ts = [pick(rng, ['grow', 'shrink'] as const), 'fillToggle'];
   else ts = ['add', pick(rng, ['grow', 'shrink'] as const)];
-  // distrattore "errore": trasformazione parziale (applica solo una delle due)
-  const partial = ts[randInt(rng, 0, 1)];
-  return buildFromTransforms(rng, difficulty, ts, (c) => applyOne(c, partial));
+  return buildFromTransforms(rng, difficulty, ts);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,14 +395,16 @@ function pairCell(s1: ShapeSpec, s2: ShapeSpec): CellSpec {
 /** il conteggio raddoppia (o si dimezza) E ogni figura ruota di 90° */
 function genHardCombo(rng: Rng, difficulty: Difficulty): Question {
   const ts: [TransformId, TransformId] = [pick(rng, ['double', 'half'] as const), 'rot90'];
-  const partial = ts[randInt(rng, 0, 1)];
-  return buildFromTransforms(rng, difficulty, ts, (c) => applyOne(c, partial));
+  return buildFromTransforms(rng, difficulty, ts);
 }
 
 /** le due figure della cella si scambiano i colori (restando al loro posto) */
 function genSwapColor(rng: Rng, difficulty: Difficulty): Question {
   const [s1, s2, s3, s4] = pickN(rng, PLAIN, 4);
   const [c1, c2, c3, c4] = pickN(rng, COLORS, 4);
+  // qui a scambiarsi sono proprio i colori: i due di una stessa coppia non
+  // possono somigliarsi, o lo scambio non si vedrebbe (CONFUSABLE in ../colors)
+  if (tooSimilar(c1, c2) || tooSimilar(c3, c4)) throw new Error('colori da scambiare troppo simili');
   const mk = (shape: ShapeName, color: number): ShapeSpec => ({ shape, color, fillMode: 'solid' });
   const A = pairCell(mk(s1, c1), mk(s2, c2));
   const B = pairCell(mk(s1, c2), mk(s2, c1));

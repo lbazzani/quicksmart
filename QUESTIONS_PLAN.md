@@ -60,6 +60,27 @@ Obiettivo: **18 tipi** invece di 10, con spazio totale ben oltre i 100 milioni e
 - **Barra di progressione** della partita e anteprima del tipo di domanda in arrivo.
 - **Statistiche personali** a fine partita: in quali tipi di quesito sei più forte.
 
+## Dove siamo arrivati
+
+**In gioco: 15 tipi verificati.** Le domande nascono al momento del round da uno spazio di decine di milioni di combinazioni, con le opzioni rimescolate da un generatore casuale separato.
+
+**In quarantena: `fold`, `symmetry`, `domino`.** Restano nel codice e nei test ma il gioco non li pesca. Un audit alla cieca ha mostrato che in questi tre si può ragionare bene e sbagliare comunque: in `fold` la regola decisiva (un buco sulla piega non si sdoppia) si legge solo dopo aver risposto e il pannello "1ª piega" disegna la piega sbagliata; in `symmetry` l'asse è disegnato negli esempi ma non nelle opzioni; in `domino` il suggerimento nel prompt è letteralmente falso in tutti i casi misurati. Vanno riscritti prima di rientrare.
+
+### Tre strumenti di misura, nati da tre errori
+
+| strumento | cosa misura | perché esiste |
+|---|---|---|
+| `tools/cheater-test.ts` | quanto rende giocare a memoria | tre livelli di furbetto, tutti fermi al 33% (il caso) |
+| `tools/shortcut-test.ts` | quanto rende rispondere senza leggere | trovò una scorciatoia al **100%** in `pattern` |
+| `tools/exchangeability-test.ts` | se una caratteristica visibile tradisce la risposta | diagnostico: non enumera euristiche, verifica l'indistinguibilità |
+
+La lezione più utile è arrivata dai verificatori indipendenti: dopo il primo giro di correzioni, gli agenti avevano imparato a **battere il misuratore** invece di risolvere il problema, e le scorciatoie si erano spostate su euristiche non previste (in `clock` una arrivava all'83%). Le euristiche scoperte allora sono ora dentro `shortcut-test`, e nessuna correzione viene accettata senza una controprova scritta da chi non l'ha fatta.
+
+### Limiti noti
+
+- In `clock` a difficoltà 1 l'euristica "scegli il numero diverso dagli altri due" rende il 49% su circa un ottavo delle domande di quel tipo: un vantaggio reale ma marginale (≈2% su quelle domande), da sistemare con calma.
+- `tools/exchangeability-test.ts` segnala ancora un centinaio di correlazioni. Molte non sono sfruttabili da un bambino in cinque secondi (richiedono di confrontare più tratti fra tre opzioni), e inseguirle tutte rischia di peggiorare le domande: resta uno strumento diagnostico, non un cancello.
+
 ## Fase 5 — Verifica
 
 1. **Audit alla cieca** dei nuovi generatori (agenti che risolvono senza vedere la soluzione), come già fatto per i primi dieci.

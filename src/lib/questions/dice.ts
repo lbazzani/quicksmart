@@ -33,7 +33,7 @@
 
 import type { CellSpec, ChoiceVisual, Difficulty, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
-import { placeChoices, retry } from './qutils';
+import { balancedNumericDistractors, placeChoices, retry } from './qutils';
 
 const txt = (n: number | string): ChoiceVisual => ({ kind: 'text', text: String(n) });
 
@@ -119,11 +119,108 @@ function lineGrid(heights: number[], vertical: boolean): number[][] {
   return vertical ? heights.map((h) => [h]) : [heights];
 }
 
-/** due distrattori numerici distinti, ≥1 e diversi dalla risposta corretta */
-function pickTwo(rng: Rng, candidates: number[], correct: number): [number, number] {
-  const uniq = [...new Set(shuffle(rng, candidates).filter((v) => v >= 1 && v !== correct))];
-  if (uniq.length < 2) throw new Error('distrattori insufficienti');
-  return [uniq[0], uniq[1]];
+// ---------------------------------------------------------------------------
+// Distrattori numerici
+// ---------------------------------------------------------------------------
+
+/**
+ * Distanza minima fra la risposta e ogni distrattore. Chi ha capito il compito
+ * e perde il conto di UNO non deve trovare la propria svista fra le opzioni:
+ * sarebbe una punizione per la manina, non per il ragionamento.
+ */
+const GAP = 2;
+
+/** sviste di conteggio plausibili, sopra e sotto (mai a distanza 1) */
+function slips(correct: number): number[] {
+  const ds = correct >= 12 ? [2, 3, 4, 5, 6] : [2, 3, 4];
+  return ds.flatMap((d) => [correct - d, correct + d]);
+}
+
+/**
+ * Due distrattori numerici per un quesito che si risolve contando.
+ *
+ * `prefer` sono gli errori CONCETTUALI del quesito (contare le pile invece dei
+ * cubi, dimenticare la sottrazione, la regola del 7, saltare una tessera…):
+ * restano la prima scelta, perché sono quelli che insegnano qualcosa.
+ *
+ * Il punto delicato è la POSIZIONE della risposta nella terna. Gli errori
+ * naturali di questi quesiti sono quasi tutti dallo stesso lato — "quanti cubi
+ * in tutto" ha i distrattori uno sopra e uno sotto (risposta di mezzo), "quante
+ * pile" li ha tutti sopra (risposta più piccola), "quanti in più" pure — e chi
+ * se ne accorge vince senza guardare il disegno. Perciò il pool contiene errori
+ * plausibili DA ENTRAMBI I LATI e balancedNumericDistractors fa ruotare la
+ * posizione ordinale della risposta: a volte in mezzo, a volte la più piccola,
+ * a volte la più grande.
+ */
+function numChoices(
+  rng: Rng,
+  correct: number,
+  prefer: number[],
+  opts: { min?: number; max?: number } = {}
+): [number, number] {
+  const min = opts.min ?? 2;
+  const max = opts.max ?? Number.MAX_SAFE_INTEGER;
+  const usable = (v: number) =>
+    Number.isInteger(v) && v >= min && v <= max && Math.abs(v - correct) >= GAP;
+  const pool = [...prefer, ...slips(correct)].filter(usable);
+  const out = balancedNumericDistractors(rng, correct, pool, GAP);
+  if (!out) throw new Error('distrattori numerici sbilanciati');
+
+  // a parità di lato l'errore concettuale batte la svista generica
+  for (const p of prefer.filter(usable)) {
+    if (out.includes(p)) continue;
+    const i = out.findIndex((v) => v !== p && Math.sign(v - correct) === Math.sign(p - correct));
+    if (i >= 0) out[i] = p;
+  }
+
+  // Anche i due DISTRATTORI devono distare almeno GAP fra loro. Se no nasce una
+  // scorciatoia nuova di zecca: la risposta è a 2 da entrambi, quindi appena i
+  // due distrattori sono numeri consecutivi basta scartare la coppia e scegliere
+  // il terzo numero — senza guardare il disegno. Il rattoppo cambia UNO dei due
+  // valori restando dalla stessa parte della risposta, così la posizione
+  // ordinale scelta da balancedNumericDistractors non si sposta (rigenerare
+  // avrebbe rimesso in mezzo la risposta, che è il difetto di partenza).
+  if (Math.abs(out[0] - out[1]) < GAP) {
+    const sameSide = (keep: number, drop: number) =>
+      pool.filter(
+        (v) =>
+          v !== keep &&
+          Math.sign(v - correct) === Math.sign(drop - correct) &&
+          Math.abs(v - keep) >= GAP
+      );
+    const alt = sameSide(out[0], out[1]);
+    if (alt.length) out[1] = pick(rng, alt);
+    else {
+      const alt0 = sameSide(out[1], out[0]);
+      if (!alt0.length) throw new Error('i due distrattori sono per forza consecutivi');
+      out[0] = pick(rng, alt0);
+    }
+  }
+
+  // La stessa scorciatoia vista dall'occhio invece che dal ragionamento: se i
+  // due distrattori si somigliano fra loro (stesso numero di cifre) e la
+  // risposta no, la terza opzione si stacca e si sceglie senza contare. Si
+  // prova a scambiarne uno con un candidato che abbia le cifre della risposta,
+  // sempre dalla stessa parte: se non esiste si lascia com'è, perché
+  // rigenerare rimetterebbe la risposta in mezzo — cioè il difetto di partenza.
+  const digits = (v: number) => String(v).length;
+  if (digits(out[0]) !== digits(correct) && digits(out[1]) !== digits(correct)) {
+    for (const i of [0, 1] as const) {
+      const keep = out[1 - i];
+      const alt = pool.filter(
+        (v) =>
+          v !== keep &&
+          digits(v) === digits(correct) &&
+          Math.sign(v - correct) === Math.sign(out[i] - correct) &&
+          Math.abs(v - keep) >= GAP
+      );
+      if (alt.length) {
+        out[i] = pick(rng, alt);
+        break;
+      }
+    }
+  }
+  return [out[0], out[1]];
 }
 
 /** "(2+1+3) + (1+2+2)" — le altezze riga per riga, per la spiegazione */
@@ -147,11 +244,24 @@ const NOTE_BLOCK =
 const NOTE_LINE =
   `Il trucco: ogni pila vale quanti cubi è alta, non uno solo. Conta le pile una per una e somma.`;
 
+/**
+ * Sotto questa soglia non esistono due valori PIÙ PICCOLI plausibili (il minimo
+ * offribile è 2 e la distanza minima è 2): la risposta finirebbe sempre a essere
+ * la più grande delle tre e basterebbe scegliere quella per vincere senza
+ * contare niente.
+ */
+const MIN_CUBES = 6;
+
 function countQuestion(rng: Rng, difficulty: Difficulty, grid: number[][], note = NOTE_BLOCK): Question {
   const sum = gridSum(grid);
-  // errore tipico: contare solo le colonne che si vedono (una per pila)
-  const visibleCols = grid.flat().filter((h) => h > 0).length;
-  const [dA, dB] = pickTwo(rng, [sum - 1, sum + 1, sum - 2, sum + 2, visibleCols], sum);
+  if (sum < MIN_CUBES) throw new Error('troppi pochi cubi per distrattori equilibrati');
+  const heights = grid.flat();
+  const piles = heights.filter((h) => h > 0).length;
+  const maxH = Math.max(...heights);
+  // errori tipici: una pila = un cubo (si contano le colonne che si vedono);
+  // saltare una pila alta perché sta dietro, o contarla due volte; credere che
+  // tutte le pile siano alte come la più alta
+  const [dA, dB] = numChoices(rng, sum, [piles, sum - maxH, sum + maxH, maxH * piles]);
   const { choices, correctIndex } = placeChoices(rng, txt(sum), [txt(dA), txt(dB)]);
   return {
     qtype: 'dice' as const,
@@ -168,6 +278,9 @@ function countQuestion(rng: Rng, difficulty: Difficulty, grid: number[][], note 
 // B: cubi mancanti per completare il parallelepipedo (d3)
 // ---------------------------------------------------------------------------
 
+/** come MIN_CUBES: sotto il 6 la risposta sarebbe sempre la più grande delle tre */
+const MIN_MISSING = 6;
+
 function missingQuestion(rng: Rng, grid: number[][]): Question {
   const sum = gridSum(grid);
   const maxH = Math.max(...grid.flat());
@@ -175,14 +288,24 @@ function missingQuestion(rng: Rng, grid: number[][]): Question {
   const cols = grid[0].length;
   const box = maxH * rows * cols;
   const missing = box - sum;
-  // errori tipici: rispondere con i cubi presenti, oppure sbagliare il conto di poco
-  const [dA, dB] = pickTwo(rng, [sum, missing - 1, missing + 1, missing + 2, missing - 2], missing);
+  if (missing < MIN_MISSING) throw new Error('troppi pochi cubi mancanti per distrattori equilibrati');
+  const holes = grid.flat().filter((h) => h === 0).length;
+  // errori tipici: rispondere con i cubi presenti o con il solido intero;
+  // dimenticare che anche i posti vuoti della base vanno riempiti fino in cima;
+  // sbagliare di un piano l'altezza del solido da completare
+  const [dA, dB] = numChoices(rng, missing, [
+    sum,
+    box,
+    missing - holes * maxH,
+    missing - rows * cols,
+    missing + rows * cols,
+  ]);
   const { choices, correctIndex } = placeChoices(rng, txt(missing), [txt(dA), txt(dB)]);
   const wall = rows === 1 || cols === 1;
   const what = wall
     ? `il muro (una fila di ${rows * cols} colonne, alto quanto la colonna più alta)`
     : `il parallelepipedo (base ${rows}×${cols}, alto quanto la colonna più alta)`;
-  const empty = grid.flat().filter((h) => h === 0).length;
+  const empty = holes;
   return {
     qtype: 'dice' as const,
     difficulty: 3,
@@ -194,7 +317,11 @@ function missingQuestion(rng: Rng, grid: number[][]): Question {
       `Completo, ${wall ? 'il muro' : 'il parallelepipedo'} sarebbe ${rows}×${cols}×${maxH} = ${box} cubi. ` +
       `Adesso ce ne sono ${sumText(grid)} = ${sum}, quindi ne mancano ${box} − ${sum} = ${missing}. ` +
       (empty > 0 ? `Occhio ai ${empty === 1 ? 'posto vuoto' : `${empty} posti vuoti`} della base: ${empty === 1 ? 'anche quello va riempito' : 'vanno riempiti anche quelli'} fino in cima. ` : '') +
-      `Il trucco: la domanda chiede i cubi mancanti, non quelli presenti (${sum}).`,
+      // se per caso i cubi presenti sono tanti quanti i mancanti la "trappola"
+      // non esiste: dirlo lo stesso confonderebbe e basta
+      (sum === missing
+        ? `Curiosità: qui i cubi che mancano sono esattamente quanti quelli che ci sono già.`
+        : `Il trucco: la domanda chiede i cubi mancanti, non quelli presenti (${sum}).`),
   };
 }
 
@@ -202,14 +329,23 @@ function missingQuestion(rng: Rng, grid: number[][]): Question {
 // E: quanti cubi toccano il tavolo (= quante pile)
 // ---------------------------------------------------------------------------
 
+/**
+ * Le pile devono essere almeno 6: con meno non esistono due numeri più piccoli
+ * plausibili e distanti fra loro, e "scegli il più piccolo" vincerebbe sempre
+ * (era al 68%).
+ */
+const MIN_PILES = 6;
+
 function touchQuestion(rng: Rng, difficulty: Difficulty, grid: number[][]): Question {
   const heights = grid.flat();
   const piles = heights.filter((h) => h > 0).length;
   const cubes = total(heights);
-  const cells = grid.length * grid[0].length;
-  // errori tipici: contare TUTTI i cubi, contare le caselle della base
-  // (comprese quelle vuote), contare i cubi che stanno sopra gli altri
-  const [dA, dB] = pickTwo(rng, [cubes, cells, cubes - piles, piles + 1, Math.max(...heights)], piles);
+  const maxH = Math.max(...heights);
+  if (piles < MIN_PILES) throw new Error('troppe poche pile per distrattori equilibrati');
+  // errori tipici: contare TUTTI i cubi, contare quelli appoggiati sopra un
+  // altro cubo (il complemento), scambiare "quante pile" con "quanto è alta la
+  // più alta"
+  const [dA, dB] = numChoices(rng, piles, [cubes, cubes - piles, maxH]);
   const { choices, correctIndex } = placeChoices(rng, txt(piles), [txt(dA), txt(dB)]);
   return {
     qtype: 'dice' as const,
@@ -243,8 +379,12 @@ function facesQuestion(rng: Rng, difficulty: Difficulty, heights: number[], vert
   const cubes = total(heights);
   const towers = heights.length;
   const faces = 2 * cubes + towers; // 2·h + 1 per torre
-  // errori tipici: 3 facce per ogni cubo, dimenticare i coperchi, contare i cubi
-  const [dA, dB] = pickTwo(rng, [3 * cubes, 2 * cubes, faces + 1, faces - 1, cubes], faces);
+  // "3 facce per cubo" deve restare un errore ben visibile: se i cubi sono
+  // pochi più delle torri quel numero cade a ridosso della risposta
+  if (cubes < towers + 2) throw new Error('torri troppo basse: il 3·cubi non è distinguibile');
+  // errori tipici: 3 facce per ogni cubo (giusto solo a cubi staccati),
+  // dimenticare i coperchi (2 per cubo), contare i cubi invece delle facce
+  const [dA, dB] = numChoices(rng, faces, [3 * cubes, 2 * cubes, cubes]);
   const { choices, correctIndex } = placeChoices(rng, txt(faces), [txt(dA), txt(dB)]);
   const perTower = heights.map((h) => `2×${h}+1 = ${2 * h + 1}`).join(', ');
   return {
@@ -286,23 +426,46 @@ function partition(rng: Rng, sum: number, n: number, min: number, max: number): 
 }
 
 /**
+ * Differenza minima fra i due gruppi quando la domanda chiede "quanti in più".
+ * Con una differenza di 1-3 (com'era) tutti gli errori plausibili stanno SOPRA
+ * la risposta — i due totali, la differenza sbagliata di poco — e "scegli il
+ * numero più piccolo" vinceva il 100% delle volte. Da 5 in su esistono anche
+ * errori più piccoli: "ho saltato una pila del gruppo che ne ha di più".
+ */
+const MIN_GROUP_DIFF = 6;
+
+/**
  * Due gruppi con LO STESSO numero di pile: quello che ha più cubi non ha la
  * pila più alta. Così chi conta le pile risponde "pari" e chi guarda la torre
  * più alta sbaglia gruppo: bisogna contare i cubi davvero.
  */
-function buildGroups(rng: Rng, n: number, tallMax: number, diffMax: number) {
-  const tall = randInt(rng, n === 2 ? 4 : 3, tallMax);
+function buildGroups(rng: Rng, n: number, tallMax: number, diffMin: number, diffMax: number) {
+  // Con la pila più alta (tall) nel gruppo perdente e le altre sue pile a 1-2
+  // cubi, il vincitore può stare al massimo n·(tall−1) cubi: nel caso migliore
+  // la differenza arriva a (n−1)·tall − 2n + 1. Se la torre è troppo bassa la
+  // differenza richiesta non ci sta e si finirebbe a rigenerare all'infinito.
+  const minTall = Math.max(n === 2 ? 4 : 3, Math.ceil((diffMin + 2 * n - 1) / (n - 1)));
+  if (minTall > tallMax) throw new Error('gruppi non costruibili');
+  const tall = randInt(rng, minTall, tallMax);
   const loser = shuffle(rng, [tall, ...Array.from({ length: n - 1 }, () => randInt(rng, 1, 2))]);
   const loserSum = total(loser);
   const room = n * (tall - 1) - loserSum; // quanto può stare sopra il perdente
-  if (room < 1) throw new Error('gruppi non costruibili');
-  const diff = randInt(rng, 1, Math.min(diffMax, room));
+  if (room < diffMin) throw new Error('gruppi non costruibili');
+  const diff = randInt(rng, diffMin, Math.min(diffMax, room));
   const winner = shuffle(rng, partition(rng, loserSum + diff, n, 1, tall - 1));
   return { winner, loser, winnerSum: loserSum + diff, loserSum, diff, tall, n };
 }
 
-function groupsQuestion(rng: Rng, difficulty: Difficulty, form: 'which' | 'diff', n: number, tallMax: number, diffMax: number): Question {
-  const g = buildGroups(rng, n, tallMax, diffMax);
+function groupsQuestion(
+  rng: Rng,
+  difficulty: Difficulty,
+  form: 'which' | 'diff',
+  n: number,
+  tallMax: number,
+  diffMin: number,
+  diffMax: number
+): Question {
+  const g = buildGroups(rng, n, tallMax, diffMin, diffMax);
   const vertical = chance(rng, 0.5);
   const winnerFirst = chance(rng, 0.5);
   const first = winnerFirst ? g.winner : g.loser;
@@ -336,11 +499,15 @@ function groupsQuestion(rng: Rng, difficulty: Difficulty, form: 'which' | 'diff'
     };
   }
 
-  const [dA, dB] = pickTwo(
-    rng,
-    [g.winnerSum, g.loserSum, g.diff + 1, g.diff + 2, g.winnerSum + g.loserSum],
-    g.diff
-  );
+  // errori tipici: dimenticare la sottrazione (il totale di uno dei due gruppi);
+  // saltare una pila del vincitore (differenza troppo piccola) o del perdente
+  // (differenza troppo grande)
+  const [dA, dB] = numChoices(rng, g.diff, [
+    g.winnerSum,
+    ...g.winner.map((h) => g.diff - h),
+    g.loserSum,
+    ...g.loser.map((h) => g.diff + h),
+  ]);
   const { choices, correctIndex } = placeChoices(rng, txt(g.diff), [txt(dA), txt(dB)]);
   return {
     qtype: 'dice' as const,
@@ -478,8 +645,17 @@ function netGeneralQuestion(
 
   if (form === 'sum') {
     const answer = 21 - x - opp;
-    // errori tipici: dimenticare di togliere anche l'opposta; usare la regola del 7
-    const [dA, dB] = pickTwo(rng, [21 - x, 14, answer + 1, answer - 1, 21 - opp], answer);
+    const touching = faces.filter((v) => v !== x && v !== opp);
+    // errori tipici: togliere solo la faccia chiesta (o solo la sua opposta);
+    // usare la regola del 7 (21 − 7 = 14); sommare tre facce su quattro, o
+    // sommarne una due volte
+    const [dA, dB] = numChoices(rng, answer, [
+      21 - x,
+      14,
+      ...touching.map((f) => answer - f),
+      21 - opp,
+      ...touching.map((f) => answer + f),
+    ]);
     const { choices, correctIndex } = placeChoices(rng, txt(answer), [txt(dA), txt(dB)]);
     return {
       qtype: 'dice' as const,
@@ -547,17 +723,30 @@ function dotCell(n: number, color: number): CellSpec {
 const dotChoice = (n: number, color: number): ChoiceVisual => ({ kind: 'cell', cell: dotCell(n, color) });
 const UNKNOWN_CELL: CellSpec = { shapes: [], unknown: true };
 
+/**
+ * Massimo di pallini su una tessera. Il renderer li dispone su 3 colonne, quindi
+ * fino a 11 restano 4 righe da 3: a 72px (la misura delle opzioni) sono ancora
+ * pallini contabili. Serve tutto questo spazio perché intorno alla risposta
+ * ci stiano due tessere più ricche E due più povere, tutte staccate fra loro.
+ */
+const MAX_DOTS = 11;
+
+/** somma minima delle tessere: sotto non ci sono due valori più piccoli plausibili */
+const MIN_DOTS_SUM = 8;
+
 /** d1: somma dei pallini di 3 tessere */
 function tilesSumQuestion(rng: Rng, counts: number[]): Question {
   const color = randInt(rng, 0, 7);
   const sum = total(counts);
-  // errori tipici: dimenticare una tessera, contare male di uno, contare le tessere
-  const [dA, dB] = pickTwo(
-    rng,
-    [sum - counts[counts.length - 1], sum - counts[0], sum + 1, sum - 1, counts.length],
-    sum
-  );
+  if (sum < MIN_DOTS_SUM) throw new Error('somma troppo piccola per distrattori equilibrati');
+  // errori tipici: saltare una tessera (una in meno), oppure contarne una due
+  // volte tornando indietro con l'occhio (una in più)
+  const [dA, dB] = numChoices(rng, sum, [
+    ...counts.map((n) => sum - n),
+    ...counts.map((n) => sum + n),
+  ]);
   const { choices, correctIndex } = placeChoices(rng, txt(sum), [txt(dA), txt(dB)]);
+  const smallest = Math.min(...counts);
   return {
     qtype: 'dice' as const,
     difficulty: 1,
@@ -567,9 +756,12 @@ function tilesSumQuestion(rng: Rng, counts: number[]): Question {
     correctIndex,
     explanation:
       `Conta i pallini tessera per tessera e somma: ${counts.join(' + ')} = ${sum}. ` +
-      `Il trucco: nessuna tessera va saltata, nemmeno quella con un pallino solo.`,
+      `Il trucco: nessuna tessera va saltata (nemmeno quella da ${smallest}) e nessuna va contata due volte.`,
   };
 }
+
+/** la tessera coperta deve valere almeno 6: sotto, la risposta è sempre la più piccola */
+const MIN_HIDDEN_TILE = 6;
 
 /** d2: una tessera è coperta e si conosce il totale */
 function tilesMissingQuestion(rng: Rng, visible: number[], hidden: number, at: number): Question {
@@ -579,8 +771,15 @@ function tilesMissingQuestion(rng: Rng, visible: number[], hidden: number, at: n
   const counts = [...visible];
   counts.splice(at, 0, hidden);
   const row = counts.map((n, i) => (i === at ? UNKNOWN_CELL : dotCell(n, color)));
-  // errori tipici: rispondere col totale, con la somma di quelle scoperte, sbagliare di uno
-  const [dA, dB] = pickTwo(rng, [sum, seen, hidden + 1, hidden - 1, sum - visible[0]], hidden);
+  if (hidden < MIN_HIDDEN_TILE) throw new Error('tessera coperta troppo piccola per distrattori equilibrati');
+  // errori tipici: rispondere col totale o con la somma delle scoperte;
+  // sottrarre una sola tessera invece di tutte; sottrarne una due volte
+  const [dA, dB] = numChoices(rng, hidden, [
+    sum,
+    seen,
+    ...visible.map((v) => hidden - v),
+    ...visible.map((v) => sum - v),
+  ]);
   const { choices, correctIndex } = placeChoices(rng, txt(hidden), [txt(dA), txt(dB)]);
   return {
     qtype: 'dice' as const,
@@ -607,13 +806,24 @@ function tilesRowsQuestion(rng: Rng, top: number[], bottom: number[], at: number
     top.map((n) => dotCell(n, color)),
     row2.map((n, i) => (i === at ? UNKNOWN_CELL : dotCell(n, color))),
   ];
-  // errori tipici: pareggiare colonna per colonna invece della fila intera; contare male di uno
+  // Qui le opzioni sono TESSERE, non numeri, ma le scorciatoie sono le stesse e
+  // anzi più visibili: "scegli quella con meno pallini" pagava il 48%, e due
+  // tessere da 6 e 7 pallini si somigliano abbastanza da far spiccare la terza
+  // ("scegli quella diversa dalle altre due"). La quantità di pallini passa
+  // quindi dallo stesso bilanciamento dei numeri, distanza fra i distrattori
+  // compresa: nessuna coppia di opzioni si somiglia.
+  // Errori tipici: pareggiare colonna per colonna invece della fila intera;
+  // dimenticare una tessera di sopra (ne servono di meno) o una di sotto (di più).
   const colWise = top[at];
-  const near = hidden + (hidden >= 6 ? -1 : 1);
-  if (colWise === hidden || near === hidden || colWise === near) throw new Error('distrattori non distinti');
+  const [dA, dB] = numChoices(
+    rng,
+    hidden,
+    [colWise, ...top.map((v) => hidden - v), ...bottom.map((v) => hidden + v)],
+    { min: 1, max: MAX_DOTS }
+  );
   const { choices, correctIndex } = placeChoices(rng, dotChoice(hidden, color), [
-    dotChoice(colWise, color),
-    dotChoice(near, color),
+    dotChoice(dA, color),
+    dotChoice(dB, color),
   ]);
   return {
     qtype: 'dice' as const,
@@ -635,8 +845,16 @@ function hiddenFacesQuestion(rng: Rng, visible: number[]): Question {
   const seen = total(visible);
   const answer = 21 - seen;
   const opposites = visible.map((v) => 7 - v);
-  // errori tipici: rispondere con la somma visibile, col totale 21, con un solo 7
-  const [dA, dB] = pickTwo(rng, [seen, 21, answer + 1, answer - 1, 7], answer);
+  // errori tipici: rispondere con la somma delle facce viste, col totale 21
+  // (dimenticando di sottrarre), con un solo 7; sommare due facce nascoste su
+  // tre, oppure contarne una due volte
+  const [dA, dB] = numChoices(rng, answer, [
+    seen,
+    21,
+    ...opposites.map((o) => answer - o),
+    7,
+    ...opposites.map((o) => answer + o),
+  ]);
   const { choices, correctIndex } = placeChoices(rng, txt(answer), [txt(dA), txt(dB)]);
   return {
     qtype: 'dice' as const,
@@ -652,7 +870,9 @@ function hiddenFacesQuestion(rng: Rng, visible: number[]): Question {
       `7−${visible[1]} = ${opposites[1]} e 7−${visible[2]} = ${opposites[2]}, che sommate fanno ${answer}. ` +
       `Più veloce ancora: tutte e sei le facce insieme fanno 1+2+3+4+5+6 = 21, e quelle che vedi ne ` +
       `prendono ${visible.join('+')} = ${seen}, quindi alle nascoste restano 21 − ${seen} = ${answer}. ` +
-      `Il trucco: la somma delle tre facce visibili (${seen}) è la risposta sbagliata più tentatrice.`,
+      (dA === seen || dB === seen
+        ? `Il trucco: la somma delle tre facce visibili (${seen}) è la risposta sbagliata più tentatrice.`
+        : `Il trucco: le tre facce nascoste vanno sommate tutte e tre, e nessuna va contata due volte.`),
   };
 }
 
@@ -672,34 +892,40 @@ function genD1(rng: Rng): Question {
     ])
   ) {
     case 'count-block': {
-      // blocco 2×2: si risolve contando con calma
-      const grid = makeReadableGrid(rng, 2, 2, 1, pick(rng, [2, 3, 4]));
+      // blocco 2×2 o 2×3: si risolve contando con calma
+      const [rows, cols] = pick(rng, [[2, 2], [2, 3], [3, 2]] as const);
+      const grid = makeReadableGrid(rng, rows, cols, 1, pick(rng, [2, 3, 4]), (g) => gridSum(g) >= MIN_CUBES);
       return countQuestion(rng, 1, grid);
     }
     case 'count-line': {
-      const n = pick(rng, [3, 5]);
+      const n = pick(rng, [3, 4, 5]);
       const heights = Array.from({ length: n }, () => randInt(rng, 1, 3));
       return countQuestion(rng, 1, lineGrid(heights, chance(rng, 0.5)), NOTE_LINE);
     }
     case 'touch': {
-      const [rows, cols] = pick(rng, [[2, 2], [2, 3], [3, 2]] as const);
-      const grid = makeReadableGrid(rng, rows, cols, 0, 3, (g) => {
-        const hs = g.flat();
-        const piles = hs.filter((h) => h > 0).length;
-        return piles >= 2 && piles < hs.length && hs.some((h) => h > 1) && distinctPiles(g);
-      });
-      return touchQuestion(rng, 1, grid);
+      // Fila di pile con due buchi. Serve una base LUNGA: distinctPiles() vieta
+      // due pile sulla stessa diagonale, e in un blocco 2×3 le pile distinte non
+      // arriverebbero mai a MIN_PILES.
+      const piles = randInt(rng, MIN_PILES, 8);
+      const heights = shuffle(rng, [
+        ...Array.from({ length: piles }, () => randInt(rng, 1, 3)),
+        0,
+        0,
+      ]);
+      return touchQuestion(rng, 1, lineGrid(heights, chance(rng, 0.5)));
     }
     case 'faces': {
-      const heights = chance(rng, 0.3)
-        ? [randInt(rng, 2, 6)]
+      // una torre sola è l'ingresso più facile, ma di torri singole ne esistono
+      // pochissime: va tenuta rara o le domande si ripetono
+      const heights = chance(rng, 0.18)
+        ? [randInt(rng, 3, 7)]
         : [randInt(rng, 2, 6), randInt(rng, 1, 6)];
       return facesQuestion(rng, 1, shuffle(rng, heights), chance(rng, 0.5));
     }
     case 'tiles':
-      return tilesSumQuestion(rng, Array.from({ length: 3 }, () => randInt(rng, 1, 6)));
+      return tilesSumQuestion(rng, Array.from({ length: pick(rng, [3, 4]) }, () => randInt(rng, 1, 6)));
     default:
-      return groupsQuestion(rng, 1, 'which', pick(rng, [2, 3]), 6, 3);
+      return groupsQuestion(rng, 1, 'which', pick(rng, [2, 3]), 6, 1, 3);
   }
 }
 
@@ -716,8 +942,9 @@ function genD2(rng: Rng): Question {
     ])
   ) {
     case 'count-hidden': {
-      // 3×3 con almeno una colonna dietro più bassa di quella davanti
-      const grid = makeReadableGrid(rng, 3, 3, 1, 3, hasHiddenColumn);
+      // base piena con almeno una colonna dietro più bassa di quella davanti
+      const [rows, cols] = pick(rng, [[3, 3], [3, 4], [4, 3], [2, 4], [4, 2]] as const);
+      const grid = makeReadableGrid(rng, rows, cols, 1, 3, hasHiddenColumn);
       return countQuestion(rng, 2, grid);
     }
     case 'net-cross':
@@ -732,14 +959,19 @@ function genD2(rng: Rng): Question {
         false
       );
     case 'groups-which':
-      return groupsQuestion(rng, 2, 'which', pick(rng, [2, 3]), 6, 3);
+      return groupsQuestion(rng, 2, 'which', pick(rng, [2, 3]), 6, 1, 3);
     case 'groups-diff':
-      return groupsQuestion(rng, 2, 'diff', pick(rng, [2, 3]), 6, 3);
-    case 'faces':
-      return facesQuestion(rng, 2, [randInt(rng, 2, 6), randInt(rng, 1, 6)], chance(rng, 0.5));
+      // la differenza deve valere almeno MIN_GROUP_DIFF, altrimenti sotto di lei
+      // non esistono due errori plausibili e la risposta è sempre la più piccola
+      return groupsQuestion(rng, 2, 'diff', pick(rng, [3, 4]), 6, MIN_GROUP_DIFF, 7);
+    case 'faces': {
+      const heights = [randInt(rng, 2, 6), randInt(rng, 1, 6)];
+      if (chance(rng, 0.35)) heights.push(randInt(rng, 1, 4));
+      return facesQuestion(rng, 2, shuffle(rng, heights), chance(rng, 0.5));
+    }
     default: {
-      const visible = Array.from({ length: 3 }, () => randInt(rng, 1, 6));
-      return tilesMissingQuestion(rng, visible, randInt(rng, 1, 6), randInt(rng, 0, 3));
+      const visible = Array.from({ length: 3 }, () => randInt(rng, 2, 8));
+      return tilesMissingQuestion(rng, visible, randInt(rng, MIN_HIDDEN_TILE, MAX_DOTS), randInt(rng, 0, 3));
     }
   }
 }
@@ -768,7 +1000,7 @@ function genD3(rng: Rng): Question {
         return (
           maxH >= 3 &&
           hs.filter((h) => h > 0).length >= 3 &&
-          maxH * rows * cols - gridSum(g) >= 2 &&
+          maxH * rows * cols - gridSum(g) >= MIN_MISSING &&
           distinctPiles(g)
         );
       });
@@ -793,7 +1025,7 @@ function genD3(rng: Rng): Question {
       );
     }
     case 'groups-diff':
-      return groupsQuestion(rng, 3, 'diff', 3, 5, 4);
+      return groupsQuestion(rng, 3, 'diff', pick(rng, [3, 4]), 6, MIN_GROUP_DIFF, 8);
     case 'faces':
       return facesQuestion(
         rng,
@@ -803,7 +1035,12 @@ function genD3(rng: Rng): Question {
       );
     case 'tiles-rows': {
       const top = Array.from({ length: 3 }, () => randInt(rng, 2, 6));
-      const hidden = randInt(rng, 1, 6);
+      // La tessera coperta sta fra 5 e 7 pallini: sotto il 5 non esistono due
+      // tessere più POVERE staccate fra loro (si scende sotto un pallino), sopra
+      // il 7 non ce ne stanno due più ricche entro MAX_DOTS — e in un caso o
+      // nell'altro la risposta sarebbe sempre la più magra o sempre la più
+      // grassa delle tre (era "scegli quella con meno pallini", 48%).
+      const hidden = randInt(rng, 5, 7);
       const rest = total(top) - hidden;
       if (rest < 2 || rest > 12) throw new Error('fila inferiore non costruibile');
       const bottom = partition(rng, rest, 2, 1, 6);

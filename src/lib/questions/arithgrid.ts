@@ -5,12 +5,22 @@
 // d2: 3 equazioni con sottrazione, valori ricavabili in catena (3 simboli).
 // d3: moltiplicazione mista (es. cerchio x quadrato) e ultima riga che combina
 //     le tre forme con precedenza degli operatori (prima la moltiplicazione).
-// Distrattori costruiti ad arte: valutazione da sinistra a destra (d3),
-// scambio dei valori di due simboli, errore di conto di ±1/±2. Mai a caso.
+// Distrattori costruiti ad arte: valutazione da sinistra a destra (d3), scambio
+// dei valori di due simboli, risultato di una riga scambiato per il valore del
+// simbolo nuovo, addendo dimenticato o contato due volte, tavola pitagorica
+// sbagliata di una riga, errore di conto di ±1/±2/±3. Mai a caso.
+//
+// Anti-scorciatoia: gli errori naturali di questo tipo stanno quasi tutti da UN
+// SOLO lato (chi legge da sinistra a destra sbaglia sempre in eccesso, chi
+// dimentica un pezzo sempre in difetto), e presi a coppie "uno sopra, uno sotto"
+// mettevano la risposta giusta in mezzo quasi sempre. Ora la coppia si sceglie
+// con balancedNumericDistractors, che alterna le tre disposizioni possibili
+// (risposta in mezzo / più piccola / più grande) pescando da un elenco di errori
+// plausibili abbastanza ricco da averne su entrambi i lati.
 
 import type { Difficulty, Question, ShapeName, ShapeSpec } from '../types';
-import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { placeChoices, retry } from './qutils';
+import { chance, pick, pickN, shuffle, type Rng } from '../rng';
+import { balancedNumericDistractors, placeChoices, retry } from './qutils';
 
 type Op = '+' | '-' | 'x';
 
@@ -82,18 +92,45 @@ function valText(terms: Sym[], ops: Op[]): string {
   return terms.map((t, i) => (i ? ` ${ops[i - 1]} ` : '') + t.value).join('');
 }
 
-/** primi 2 candidati validi: interi positivi, distinti, diversi dalla corretta */
-function twoDistractors(correct: number, candidates: number[]): [number, number] {
-  const seen = new Set<number>([correct]);
-  const out: number[] = [];
-  for (const c of candidates) {
-    if (Number.isInteger(c) && c > 0 && !seen.has(c)) {
-      seen.add(c);
-      out.push(c);
-      if (out.length === 2) return [out[0], out[1]];
-    }
+/**
+ * Risposta minima. Sotto il 4 non esistono due interi positivi più piccoli
+ * della risposta: la risposta sarebbe per forza la più piccola delle tre e
+ * basterebbe scegliere quella per vincere senza calcolare niente. Si tiene 6
+ * per lasciare spazio anche agli errori "in difetto" (un addendo dimenticato,
+ * la moltiplicazione senza l'addizione), che sono i più istruttivi.
+ */
+const MIN_ANSWER = 6;
+
+/**
+ * Due distrattori: prima gli errori CONCETTUALI del quesito (quelli che una
+ * bambina fa davvero), poi gli scarti di conto ±1/±2/±3 come riempitivo.
+ *
+ * Gli scarti servono a due cose: sono errori plausibili di per sé, e
+ * garantiscono che ci siano sempre almeno tre candidati sopra e tre sotto la
+ * risposta — così le tre disposizioni di balancedNumericDistractors restano
+ * tutte praticabili e la risposta finisce in mezzo solo un terzo delle volte.
+ * Poi ogni posto viene riempito, quando si può, con un errore concettuale dello
+ * stesso lato: la posizione ordinale non cambia, la didattica sì.
+ */
+function chooseDistractors(rng: Rng, correct: number, prefer: number[]): [number, number] {
+  if (correct < MIN_ANSWER) throw new Error('risposta troppo piccola per distrattori equilibrati');
+  const usable = (v: number) => Number.isInteger(v) && v > 0 && v !== correct;
+  const concept = [...new Set(prefer.filter(usable))];
+  const slips = [1, 2, 3].flatMap((d) => [correct - d, correct + d]).filter(usable);
+
+  const chosen = balancedNumericDistractors(rng, correct, [...concept, ...slips]);
+  if (!chosen) throw new Error('distrattori insufficienti');
+
+  const out = [...chosen];
+  const isConcept = new Set(concept);
+  for (const p of shuffle(rng, [...concept])) {
+    if (out.includes(p)) continue;
+    const i = out.findIndex(
+      (v) => !isConcept.has(v) && Math.sign(v - correct) === Math.sign(p - correct)
+    );
+    if (i >= 0) out[i] = p;
   }
-  throw new Error('distrattori insufficienti');
+  return [out[0], out[1]];
 }
 
 function finish(
@@ -132,20 +169,30 @@ function makeD1(rng: Rng): Question {
     ? { terms: [A, B], ops: ['+'], result: va + vb }
     : { terms: [B, A], ops: ['+'], result: va + vb };
 
-  // ultima riga: solo addizioni, mai identica alle righe date
+  // ultima riga: solo addizioni, mai identica alle righe date.
+  // Le somme sotto MIN_ANSWER si scartano: non avrebbero due valori plausibili
+  // più piccoli e la risposta sarebbe sempre la minima delle tre.
   const variants: Sym[][] = [[B, B], [B, B, B], [A, B, B], [B, A, B]];
-  const qTerms = variants[randInt(rng, 0, 3)];
+  const usable = variants.filter((v) => v.reduce((s, t) => s + t.value, 0) >= MIN_ANSWER);
+  if (!usable.length) throw new Error('nessuna riga finale abbastanza grande');
+  const qTerms = pick(rng, usable);
   const qOps = Array(qTerms.length - 1).fill('+') as Op[];
   const correct = qTerms.reduce((s, t) => s + t.value, 0);
 
-  // distrattori: valori di A e B scambiati; errore di conto ±1/±2
+  // errori plausibili, in eccesso e in difetto:
+  // - i valori di A e B scambiati fra loro;
+  // - il risultato di una riga preso per il valore del simbolo (B = 5 + 3 = 8
+  //   invece di B = 8 - 5, A = 12 invece di A = 12 : 3);
+  // - un addendo dimenticato oppure contato due volte.
   const swapped = qTerms.reduce((s, t) => s + (t === A ? vb : va), 0);
-  const off = pick(rng, [1, 2]);
-  const off2 = 3 - off;
-  const dists = twoDistractors(correct, [
-    ...shuffle(rng, [swapped, correct + off, correct - off]),
-    correct + off2,
-    correct - off2,
+  const rawB = qTerms.reduce((s, t) => s + (t === B ? eq2.result : t.value), 0);
+  const rawA = qTerms.reduce((s, t) => s + (t === A ? eq1.result : t.value), 0);
+  const dists = chooseDistractors(rng, correct, [
+    swapped,
+    rawB,
+    rawA,
+    ...qTerms.map((t) => correct - t.value),
+    ...qTerms.map((t) => correct + t.value),
   ]);
 
   const explanation =
@@ -187,14 +234,20 @@ function makeD2(rng: Rng): Question {
   if (va > vc) opts3.push({ terms: [A, C], ops: ['-'], result: va - vc, deduce: `${C.name} = ${va} - ${va - vc} = ${vc}` });
   const eq3 = pick(rng, opts3);
 
-  // ultima riga: tutti e tre i simboli, un più e un meno, mai valori intermedi negativi
+  // ultima riga: tutti e tre i simboli, un più e un meno, mai valori intermedi
+  // negativi e risultato mai sotto MIN_ANSWER (servono due errori plausibili
+  // anche più piccoli della risposta, altrimenti la risposta è sempre la minima)
   const qOps = pick(rng, [['+', '-'], ['-', '+']]) as [Op, Op];
+  const evalWith = (v: number[], ops: [Op, Op]) =>
+    ops[0] === '+' ? v[0] + v[1] - v[2] : v[0] - v[1] + v[2];
+  const evalRow = (v: number[]) => evalWith(v, qOps);
   const perms: [Sym, Sym, Sym][] = [
     [A, B, C], [A, C, B], [B, A, C], [B, C, A], [C, A, B], [C, B, A],
   ];
-  const valid = perms.filter(([x, y, z]) =>
-    qOps[0] === '+' ? x.value + y.value - z.value >= 1 : x.value - y.value >= 1
-  );
+  const valid = perms.filter(([x, y, z]) => {
+    const v = [x.value, y.value, z.value];
+    return (qOps[0] === '+' || v[0] - v[1] >= 1) && evalRow(v) >= MIN_ANSWER;
+  });
   // anti-scorciatoia: nessun segmento dell'ultima riga deve ricopiare
   // un'equazione data (es. "pentagono - croce" già risolta alla riga 3)
   const subPairs: [Sym, Sym][] = [[eq2.terms[0], eq2.terms[1]]];
@@ -210,25 +263,33 @@ function makeD2(rng: Rng): Question {
   });
   if (noShortcut.length === 0) throw new Error('nessuna riga finale valida');
   const [X, Y, Z] = pick(rng, noShortcut);
-  const evalRow = (v: number[]) => (qOps[0] === '+' ? v[0] + v[1] - v[2] : v[0] - v[1] + v[2]);
-  const correct = evalRow([X.value, Y.value, Z.value]);
-
-  // distrattori: scambio dei valori di due simboli nell'ultima riga; ±1/±2
   const qv = [X.value, Y.value, Z.value];
-  const swapVals = ([[0, 1], [0, 2], [1, 2]] as const)
-    .map(([i, j]) => {
-      const w = [...qv];
-      [w[i], w[j]] = [w[j], w[i]];
-      return evalRow(w);
-    })
-    .filter((v) => v !== correct && v > 0);
-  const swapPick = swapVals.length ? pick(rng, swapVals) : correct + 3;
-  const off = pick(rng, [1, 2]);
-  const off2 = 3 - off;
-  const dists = twoDistractors(correct, [
-    ...shuffle(rng, [swapPick, correct + off, correct - off]),
-    correct + off2,
-    correct - off2,
+  const correct = evalRow(qv);
+
+  // errori plausibili, in eccesso e in difetto:
+  // - i valori di due simboli scambiati fra loro;
+  // - i segni letti al contrario, oppure il meno ignorato del tutto;
+  // - la riga lasciata a metà (si è fermata al secondo simbolo);
+  // - il risultato di una riga preso per il valore del simbolo nuovo, senza
+  //   invertire l'operazione (l'errore di catena più comune).
+  const swapVals = ([[0, 1], [0, 2], [1, 2]] as const).map(([i, j]) => {
+    const w = [...qv];
+    [w[i], w[j]] = [w[j], w[i]];
+    return evalRow(w);
+  });
+  const flipped = evalWith(qv, qOps[0] === '+' ? ['-', '+'] : ['+', '-']);
+  const allPlus = qv[0] + qv[1] + qv[2];
+  const halfRow = qOps[0] === '+' ? qv[0] + qv[1] : qv[0] - qv[1];
+  const raw = (S: Sym, result: number) =>
+    evalRow([X, Y, Z].map((t, i) => (t === S ? result : qv[i])));
+  const dists = chooseDistractors(rng, correct, [
+    ...swapVals,
+    flipped,
+    allPlus,
+    halfRow,
+    raw(A, eq1.result),
+    raw(B, eq2.result),
+    raw(C, eq3.result),
   ]);
 
   const explanation =
@@ -283,13 +344,23 @@ function makeD3(rng: Rng): Question {
   const leftToRight = (X.value + Y.value) * Z.value;
   const swapped = Y.value + X.value * Z.value; // X e Y scambiati
 
-  const off = pick(rng, [1, 2]);
-  const off2 = 3 - off;
-  const dists = twoDistractors(correct, [
-    leftToRight, // il distrattore firma: chi ignora la precedenza
-    ...shuffle(rng, [swapped, correct + off, correct - off]),
-    correct + off2,
-    correct - off2,
+  // Gli errori di questo quesito non stanno tutti dalla stessa parte, e proprio
+  // per questo la risposta non è sempre la più piccola delle tre:
+  // - IN ECCESSO: chi legge da sinistra a destra (il distrattore firma) e chi
+  //   scambia X con Y;
+  // - IN DIFETTO: chi calcola solo la moltiplicazione e dimentica di aggiungere
+  //   X, e chi somma tutto invece di moltiplicare;
+  // - DA ENTRAMBI I LATI: chi sbaglia di una riga o di una colonna la tavola
+  //   pitagorica (Y x Z diventa (Y±1) x Z oppure Y x (Z±1)).
+  const dists = chooseDistractors(rng, correct, [
+    leftToRight,
+    swapped,
+    Y.value * Z.value,
+    X.value + Y.value + Z.value,
+    correct - Y.value,
+    correct + Y.value,
+    correct - Z.value,
+    correct + Z.value,
   ]);
 
   const explanation =
@@ -299,7 +370,10 @@ function makeD3(rng: Rng): Question {
     `Nell'ultima riga la moltiplicazione si calcola PRIMA dell'addizione: ` +
     `${Y.name} x ${Z.name} = ${Y.value} x ${Z.value} = ${Y.value * Z.value}, ` +
     `poi ${X.value} + ${Y.value * Z.value} = ${correct}. ` +
-    `Leggendo da sinistra a destra verrebbe ${leftToRight}: è la trappola!`;
+    (dists.includes(leftToRight)
+      ? `Leggendo da sinistra a destra verrebbe ${leftToRight}: è la trappola!`
+      : `Leggendo da sinistra a destra verrebbe ${leftToRight}, un numero diverso: ` +
+        `l'ordine delle operazioni cambia il risultato.`);
 
   const rows = [
     payloadRow(eq1.terms, eq1.ops, eq1.result),

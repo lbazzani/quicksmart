@@ -12,11 +12,17 @@
 // passo di troppo, verso opposto, attributo copiato dalla cella vicina), mai a
 // caso; sono deduplicati anche a livello VISIVO (rotazioni equivalenti per
 // simmetria della forma), così le tre opzioni non si somigliano mai.
+// Quando la fila fa variare UNA SOLA grandezza misurabile (lati del poligono,
+// dimensione, numero di figure, rotazione) i due distrattori naturali sarebbero
+// "un passo indietro" e "un passo di troppo": si somigliano fra loro e la
+// risposta resta sempre in mezzo. Per quel caso c'è l'ASSE ORDINALE (più sotto):
+// il ventaglio di errori plausibili si allarga a due passi, e la posizione della
+// risposta nella classifica cambia di volta in volta.
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
 import { COLOR_NAMES } from '../colors';
-import { normRot, placeChoices, retry } from './qutils';
+import { balancedNumericDistractors, normRot, placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
 
@@ -28,6 +34,8 @@ const CYCLE: ShapeName[] = ['circle', 'square', 'triangle', 'star', 'heart', 'cr
 const SIDES: ShapeName[] = ['triangle', 'square', 'pentagon', 'hexagon'];
 const NSIDES: Partial<Record<ShapeName, number>> = { triangle: 3, square: 4, pentagon: 5, hexagon: 6 };
 const STEPS = [45, 90, 135];
+/** orientamenti di partenza: la fila non comincia sempre "dritta" */
+const START = [0, 45, 90, 135, 180, 225, 270, 315];
 const DEFAULT_LEN = 5; // 4 celle visibili + 1 incognita in fondo
 
 /** angolo di simmetria: due rotazioni che differiscono di questo valore sono INDISTINGUIBILI */
@@ -324,9 +332,26 @@ function candidates(r: SeqRules): CellSpec[] {
       }
       if (src.shapes.length !== correct.shapes.length) out.push(withCount(correct, src.shapes.length));
     }
+    if (r.sides) {
+      // scala dei lati: sbagliare gradino di uno è l'errore più comune, ma
+      // saltarne due (o ripartire da capo) è altrettanto tipico — e serve ad
+      // avere gradini sia sopra sia sotto la risposta
+      const s0 = correct.shapes[0];
+      for (const sh of SIDES) if (sh !== s0.shape) out.push(withAttr(correct, 'shape', { ...s0, shape: sh }));
+    }
     if (r.countStart !== undefined) {
+      // "ne ho contata una in meno/in più" e "ho saltato un passo" (due in meno/in più)
       const n = correct.shapes.length;
-      out.push(withCount(correct, n + 1), withCount(correct, n - 1));
+      const maxN = r.row ? 6 : 9;
+      for (const d of [-2, -1, 1, 2]) {
+        const m = n + d;
+        if (m >= 1 && m <= maxN) out.push(withCount(correct, m));
+      }
+    }
+    if (r.sizeStart !== undefined && !r.sizes) {
+      // "ha saltato un passo di crescita" in avanti e all'indietro
+      if (hole - 2 >= 0) out.push(cellAt(r, hole - 2));
+      out.push(cellAt(r, hole + 2));
     }
     if (r.rotStep !== undefined) {
       // verso opposto
@@ -344,6 +369,91 @@ function candidates(r: SeqRules): CellSpec[] {
   }
   // niente celle vuote né affollate: restano leggibili anche in miniatura
   return out.filter((c) => c.shapes.length > 0 && c.shapes.length <= 10);
+}
+
+// ---------------------------------------------------------------------------
+// L'asse ordinale
+// ---------------------------------------------------------------------------
+//
+// Se la fila fa variare una sola grandezza misurabile, le tre opzioni si
+// dispongono su una classifica (meno lati → più lati, più piccolo → più grande,
+// meno figure → più figure, meno ruotato → più ruotato). Prendendo sempre "un
+// passo indietro" e "un passo di troppo" la risposta finisce sempre a metà
+// classifica e i due distrattori si somigliano fra loro: chi se ne accorge
+// sceglie l'opzione che si stacca dalle altre e vince senza guardare la regola.
+// Qui la scelta passa da balancedNumericDistractors, che a rotazione mette la
+// risposta in mezzo, in cima o in fondo alla classifica. I distrattori restano
+// gli stessi errori plausibili di prima: cambia solo QUALI due si offrono.
+
+type AxisKind = 'sides' | 'size' | 'count' | 'rot';
+
+/** distanza minima fra due valori dell'asse perché si distinguano a colpo d'occhio */
+const AXIS_GAP: Record<AxisKind, number> = { sides: 1, size: 8, count: 1, rot: 1 };
+
+/** elenco delle regole che cambiano davvero da una cella all'altra */
+function varying(r: SeqRules): string[] {
+  if (r.pair) return ['pair'];
+  const v: string[] = [];
+  if (r.sides) v.push('sides');
+  else if (r.shapes.length > 1) v.push('shape');
+  if (r.rotStep !== undefined) v.push('rot');
+  if (r.countStart !== undefined && (r.countStep ?? 1) !== 0) v.push('count');
+  if (r.sizes) {
+    if (r.sizes.length > 1) v.push('sizeCycle');
+  } else if (r.sizeStart !== undefined && (r.sizeStep ?? 0) !== 0) v.push('size');
+  if (r.colors && r.colors.length > 1) v.push('color');
+  if (r.fills && r.fills.length > 1) v.push('fill');
+  return v;
+}
+
+/**
+ * L'asse su cui bilanciare, se la fila ha UNA sola regola ed è misurabile.
+ * Con due regole in gioco i distrattori nascono già diversi fra loro (uno sbaglia
+ * una regola, l'altro l'altra) e la classifica non è più una sola: lì basta
+ * pescare dal ventaglio.
+ */
+function axisOf(r: SeqRules): AxisKind | null {
+  const v = varying(r);
+  if (v.length !== 1) return null;
+  const k = v[0];
+  return k === 'sides' || k === 'size' || k === 'count' || k === 'rot' ? (k as AxisKind) : null;
+}
+
+function axisValue(kind: AxisKind, c: CellSpec): number {
+  const s = c.shapes[0];
+  if (kind === 'sides') return NSIDES[s.shape] ?? 0;
+  if (kind === 'size') return Math.round((s.size ?? 0.8) * 100);
+  if (kind === 'count') return c.shapes.length;
+  return normRot(s.rot ?? 0);
+}
+
+/**
+ * Due distrattori presi dal ventaglio `pool` in modo che la risposta non occupi
+ * sempre lo stesso posto in classifica. Null se il ventaglio non basta: chi
+ * chiama rigenera la domanda.
+ */
+function pickOnAxis(rng: Rng, kind: AxisKind, correct: CellSpec, pool: CellSpec[]): [CellSpec, CellSpec] | null {
+  const byValue = new Map<number, CellSpec[]>();
+  for (const c of pool) {
+    const v = axisValue(kind, c);
+    const list = byValue.get(v);
+    if (list) list.push(c);
+    else byValue.set(v, [c]);
+  }
+  const chosen = balancedNumericDistractors(rng, axisValue(kind, correct), [...byValue.keys()], AXIS_GAP[kind]);
+  if (!chosen) return null;
+  return [pick(rng, byValue.get(chosen[0]) as CellSpec[]), pick(rng, byValue.get(chosen[1]) as CellSpec[])];
+}
+
+/**
+ * L'altra scorciatoia delle sequenze: "scegli la figura che non ho già visto
+ * nella fila". Succede quando tutti e due i distrattori sono copie di celle
+ * visibili (tipico di chi sbaglia il passo all'indietro: quella figura sta già
+ * lì) mentre la risposta è l'unica mai vista. Se il ventaglio contiene errori
+ * plausibili mai visti, almeno uno dei due distrattori dev'essere fra quelli.
+ */
+function novelOk(shown: Set<string>, correct: CellSpec, ds: readonly CellSpec[]): boolean {
+  return shown.has(visualKey(correct)) || ds.some((c) => !shown.has(visualKey(c)));
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +594,7 @@ const D1: Fam[] = [
   // rotazione a passo fisso, in senso orario o antiorario
   (rng) => ({
     shapes: [pick(rng, ROTATABLE)],
-    rotStart: pick(rng, [0, 45, 90, 135]),
+    rotStart: pick(rng, START),
     rotStep: pick(rng, STEPS) * (chance(rng, 0.5) ? 1 : -1),
     colors: [randInt(rng, 0, 7)],
     len: pick(rng, [4, 5]),
@@ -558,13 +668,13 @@ const D1: Fam[] = [
 
 const D2: Fam[] = [
   // rotazione + ciclo di colori
-  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: 0, rotStep: pick(rng, STEPS), colors: pickColors(rng, 2), ...deco(rng, false) }),
+  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: pick(rng, START), rotStep: pick(rng, STEPS), colors: pickColors(rng, 2), ...deco(rng, false) }),
   // forme alternate + numero crescente
   (rng) => ({ shapes: pickN(rng, PLAIN, 2), countStart: 1, countStep: 1, colors: [randInt(rng, 0, 7)], ...deco(rng) }),
   // rotazione + dimensione crescente
   (rng) => ({
     shapes: [pick(rng, ROTATABLE)],
-    rotStart: 0,
+    rotStart: pick(rng, START),
     rotStep: pick(rng, STEPS) * (chance(rng, 0.5) ? 1 : -1),
     sizeStart: 0.35,
     sizeStep: pick(rng, [0.1, 0.14]),
@@ -574,7 +684,7 @@ const D2: Fam[] = [
   // rotazione + pieno/vuoto
   (rng) => ({
     shapes: [pick(rng, ROTATABLE)],
-    rotStart: pick(rng, [0, 45]),
+    rotStart: pick(rng, START),
     rotStep: 45,
     rotAccel: 0,
     colors: [randInt(rng, 0, 7)],
@@ -603,12 +713,12 @@ const D2: Fam[] = [
       [135, -90],
       [-90, 45],
     ] as const);
-    return { shapes: [pick(rng, ROTATABLE)], rotStart: 0, rotStep: s, rotAlt: alt, colors: [randInt(rng, 0, 7)], ...deco(rng, false) };
+    return { shapes: [pick(rng, ROTATABLE)], rotStart: pick(rng, START), rotStep: s, rotAlt: alt, colors: [randInt(rng, 0, 7)], ...deco(rng, false) };
   },
   // (f) ciclo di riempimenti di 3 + numero crescente
   (rng) => ({ shapes: [pick(rng, PLAIN)], countStart: 1, countStep: 1, fills: fills3(rng), colors: [randInt(rng, 0, 7)], ...decoSize(rng) }),
   // rotazione + dimensione che oscilla
-  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: 0, rotStep: pick(rng, [45, 90, -45, -90]), sizes: [0.9, 0.55], colors: [randInt(rng, 0, 7)], ...decoFill(rng, false) }),
+  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: pick(rng, START), rotStep: pick(rng, [45, 90, -45, -90]), sizes: [0.9, 0.55], colors: [randInt(rng, 0, 7)], ...decoFill(rng, false) }),
   // forme alternate + ciclo di 3 colori (sfasati)
   (rng) => ({ shapes: pickN(rng, CYCLE, 2), colors: pickColors(rng, 3), ...deco(rng) }),
   // ciclo di 3 forme in fila, numero crescente
@@ -619,11 +729,11 @@ const D2: Fam[] = [
 
 const D3: Fam[] = [
   // rotazione accelerata
-  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: 0, rotStep: 45, rotAccel: 45, colors: [randInt(rng, 0, 7)], ...deco(rng, false) }),
+  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: pick(rng, START), rotStep: 45, rotAccel: 45, colors: [randInt(rng, 0, 7)], ...deco(rng, false) }),
   // rotazione + ciclo di 3 colori + pieno/vuoto
   (rng) => ({
     shapes: [pick(rng, ROTATABLE)],
-    rotStart: 0,
+    rotStart: pick(rng, START),
     rotStep: pick(rng, [45, 90, -45, -90]),
     rotAccel: 0,
     colors: pickColors(rng, 3),
@@ -635,13 +745,13 @@ const D3: Fam[] = [
   // ciclo di 3 forme + pieno/vuoto (sfasati: motivo lungo 6)
   (rng) => ({ shapes: pickN(rng, CYCLE, 3), colors: [randInt(rng, 0, 7)], fills: shuffle(rng, ['solid', 'outline'] as Fill[]), ...decoSize(rng) }),
   // ciclo di 3 forme che ruotano
-  (rng) => ({ shapes: shuffle(rng, [...ROTATABLE]), rotStart: 0, rotStep: pick(rng, [45, 90, -45, -90]), colors: [randInt(rng, 0, 7)], ...deco(rng, false) }),
+  (rng) => ({ shapes: shuffle(rng, [...ROTATABLE]), rotStart: pick(rng, START), rotStep: pick(rng, [45, 90, -45, -90]), colors: [randInt(rng, 0, 7)], ...deco(rng, false) }),
   // scala dei lati + ciclo di 3 colori + pieno/vuoto
   (rng) => sidesRules(rng, { colors: pickColors(rng, 3), fills: shuffle(rng, ['solid', 'outline'] as Fill[]), ...decoSize(rng) }),
   // rotazione a verso alternato + numero crescente
   (rng) => ({
     shapes: [pick(rng, ROTATABLE)],
-    rotStart: 0,
+    rotStart: pick(rng, START),
     rotStep: pick(rng, [90, 135]),
     rotAlt: pick(rng, [-45, -90]),
     countStart: 1,
@@ -651,14 +761,14 @@ const D3: Fam[] = [
     ...deco(rng, false),
   }),
   // rotazione accelerata + ciclo di 3 colori
-  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: 0, rotStep: pick(rng, [45, 90]), rotAccel: 45, colors: pickColors(rng, 3), ...decoSize(rng) }),
+  (rng) => ({ shapes: [pick(rng, ROTATABLE)], rotStart: pick(rng, START), rotStep: pick(rng, [45, 90]), rotAccel: 45, colors: pickColors(rng, 3), ...decoSize(rng) }),
   // coppia che si scambia di posto E ruota
   (rng) => {
     const [a, b] = pickN(rng, ROTATABLE, 2);
     const [ca, cb] = pickColors(rng, 2);
     return {
       shapes: [a],
-      rotStart: 0,
+      rotStart: pick(rng, START),
       rotStep: pick(rng, [45, 90, -45, -90]),
       pair: { a, b, ca, cb, mode: 'pos' as const, colorsFixed: chance(rng, 0.5), rot: true },
     };
@@ -677,7 +787,7 @@ const D3: Fam[] = [
     const [ca, cb] = pickColors(rng, 2);
     return {
       shapes: [a],
-      rotStart: 0,
+      rotStart: pick(rng, START),
       rotStep: pick(rng, [45, 90, -45, -90]),
       pair: { a, b, ca, cb, mode: pick(rng, ['color', 'fill'] as const), rot: true },
     };
@@ -716,7 +826,20 @@ export function genSequence(rng: Rng, difficulty: Difficulty): Question {
       pool.push(c);
     }
     if (pool.length < 2) throw new Error('distrattori insufficienti');
-    const [d1, d2] = pickN(rng, pool, 2);
+    // una sola regola in gioco → la risposta non deve stare sempre a metà
+    // classifica (né staccarsi sempre dalle altre due): la scelta passa dall'asse
+    const axis = axisOf(rules);
+    const draw = (): [CellSpec, CellSpec] | null =>
+      axis ? pickOnAxis(rng, axis, correct, pool) : (pickN(rng, pool, 2) as [CellSpec, CellSpec]);
+    let picked = draw();
+    if (!picked) throw new Error('asse non bilanciabile');
+    // ...e la risposta non deve essere l'unica figura mai vista nella fila
+    const shown = new Set<string>(row.filter((c) => !c.unknown).map(visualKey));
+    for (let t = 0; t < 8 && !novelOk(shown, correct, picked); t++) {
+      const alt = draw();
+      if (alt && novelOk(shown, correct, alt)) picked = alt;
+    }
+    const [d1, d2] = picked;
     if (tooClose(d1, d2)) throw new Error('distrattori indistinguibili');
     // le celle visibili devono essere leggibili una per una
     for (let i = 0; i < row.length; i++)
