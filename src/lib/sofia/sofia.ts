@@ -46,7 +46,7 @@ interface SofiaRoom {
   roundIndex: number;
 }
 
-const AI_TIMEOUT_MS = 25_000;
+const AI_TIMEOUT_MS = 60_000;
 const AI_ENABLED = () => process.env.SOFIA_AI === '1';
 /** al massimo 8 giocatori nel prompt: tiene corto il testo e limita la superficie */
 const MAX_STANDINGS = 8;
@@ -279,7 +279,9 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
   if (!prompt) return;
   room.sofiaBusy = true;
   try {
+    const t0 = Date.now();
     const text = deAlias(await askClaude(prompt), alias);
+    console.warn(`[SofAI] AI ok (${ctx.kind}) in ${Date.now() - t0}ms`);
     // sostituisce solo se nel frattempo non è uscita una battuta più recente
     if (room.sofia && (room.sofia.seq === seq || ctx.kind === 'podium')) {
       room.sofia = { text, mood: room.sofia.mood, roundIndex: room.sofia.roundIndex, ai: true, seq: ++room.sofiaSeq };
