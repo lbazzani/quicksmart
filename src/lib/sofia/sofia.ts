@@ -46,6 +46,7 @@ interface SofiaRoom {
   /** interrompe la chiamata AI in volo: la usa il podio per passare avanti */
   sofiaKill?: () => void;
   roundIndex: number;
+  players: Map<string, { connections: number }>;
 }
 
 // Misurato sul server: il CLI risponde in 10-12s quando è libero e in 30-50s
@@ -129,6 +130,18 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
     return head + `${what}. Classifica: ${top}.`;
   }
   if (ctx.kind === 'podium') {
+    // Con una persona sola (allenamento in solitaria) non esiste "chi è in
+    // fondo alla classifica": chiedendolo lo stesso, il modello risponde
+    // chiedendo la classifica completa invece di fare la battuta, e quella
+    // richiesta finiva dritta sul podio.
+    if (ctx.standings.length < 2) {
+      const solo = ctx.standings[0];
+      return (
+        head +
+        `l'allenamento in solitaria è finito, ${nameOf(solo?.nickname)} ha chiuso con ${Math.round(solo?.score ?? 0)} punti. ` +
+        `Commenta il risultato: non c'è nessun altro in classifica, quindi non paragonare a nessuno.`
+      );
+    }
     const list = ctx.standings
       .slice(0, MAX_STANDINGS)
       .map((s, i) => `${i + 1}° ${nameOf(s.nickname)} ${Math.round(s.score)}`)
@@ -143,6 +156,10 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
 
 /** lunghezza massima della battuta mostrata in UI */
 const MAX_TEXT = 160;
+
+/** il modello chiede informazioni invece di fare la battuta */
+const CHIEDE_CHIARIMENTI =
+  /\b(mi serve|mi servono|non ho (il |abbastanza )?(contesto|informazioni)|puoi (dirmi|fornirmi)|potrebbe fornir|mi mancano|fammi sapere|per favore forniscimi)\b/i;
 
 /**
  * Rimette i nickname veri al posto degli alias nella battuta generata.
@@ -258,6 +275,9 @@ function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promis
       if (done) return;
       clearTimeout(timer);
       const text = out.trim().replaceAll('\n', ' ').replace(/^["«]|["»]$/g, '').slice(0, MAX_TEXT);
+      // A volte il modello non fa la battuta: chiede altre informazioni. Non è
+      // un testo da mostrare a fine partita, meglio la battuta pre-scritta.
+      if (CHIEDE_CHIARIMENTI.test(text)) return reject(new Error(`risposta non utilizzabile: ${text.slice(0, 80)}`));
       if (text.length >= 4) return resolve(text);
       reject(new Error(`uscita ${code} senza testo utile — stderr: ${err.trim().slice(0, 300) || '(vuoto)'}`));
     });
@@ -278,6 +298,12 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
 
   if (!AI_ENABLED()) return;
   if (!aiPrompt(ctx, aliasMap(ctx))) return; // welcome/join: nessuna chiamata AI
+
+  // Una partita che nessuno sta guardando continua ad andare avanti da sola
+  // fino allo sweep (2 ore). Generare battute per una stanza vuota non serve a
+  // nessuno e ruba tempo alle partite vere: il CLI è una risorsa sola, e con
+  // più chiamate in volo passa da 10 a 50 secondi di risposta.
+  if (![...room.players.values()].some((p) => p.connections > 0)) return;
 
   // Quanto ci mette davvero l'AI (misurato in produzione): 10-12 secondi
   // quando è libera, 30-50 se ci sono altre chiamate in volo. Un round ne dura
