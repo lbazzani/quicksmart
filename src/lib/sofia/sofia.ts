@@ -46,7 +46,12 @@ interface SofiaRoom {
   roundIndex: number;
 }
 
+// Misurato sul server: il CLI risponde in 10-12s quando è libero e in 30-50s
+// se ci sono altre chiamate in volo. Con i 25s di prima scadeva sempre, e la
+// battuta AI non si vedeva mai — senza che nulla lo segnalasse.
 const AI_TIMEOUT_MS = 60_000;
+/** quanto spesso l'AI commenta un round: vedi la nota in sofiaOnEvent */
+const REVEAL_AI_CHANCE = 0.34;
 const AI_ENABLED = () => process.env.SOFIA_AI === '1';
 /** al massimo 8 giocatori nel prompt: tiene corto il testo e limita la superficie */
 const MAX_STANDINGS = 8;
@@ -264,10 +269,20 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
 
   if (!AI_ENABLED()) return;
   if (!aiPrompt(ctx, aliasMap(ctx))) return; // welcome/join: nessuna chiamata AI
+
+  // Quanto ci mette davvero l'AI (misurato in produzione): 10-12 secondi
+  // quando è libera, 30-50 se ci sono altre chiamate in volo. Un round ne dura
+  // circa 25 e il reveal appena 6: una battuta di round chiesta adesso arriva
+  // quasi sempre a giochi fatti e viene scartata perché non è più attuale.
+  // Quindi se ne chiede una ogni tanto — quando arriva in tempo è un bel colpo
+  // — e per il resto si tiene la linea libera per il podio, che è il momento
+  // in cui la battuta si legge con calma ed è l'ultima cosa che resta.
+  if (ctx.kind === 'reveal' && Math.random() > REVEAL_AI_CHANCE) return;
+
   if (room.sofiaBusy) {
-    // una chiamata AI alla volta: tieni da parte SOLO l'evento più recente
-    // (il podio non va mai perso: è l'ultimo commento della partita)
-    room.sofiaPending = { ctx, seq };
+    // Una chiamata alla volta. Un commento di round che aspetta il suo turno
+    // sarebbe vecchio due volte: si lascia perdere. Il podio invece aspetta.
+    if (ctx.kind === 'podium') room.sofiaPending = { ctx, seq };
     return;
   }
   await runAi(room, ctx, seq, onUpdate);
