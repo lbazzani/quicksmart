@@ -157,13 +157,13 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   } else if (n === 1 && cell.layout !== 'row' && cell.layout !== 'grid') {
     content = <Shape spec={cell.shapes[0]} />;
   } else if (cell.layout === 'row') {
-    // le forme in fila non scendono sotto il 45% della cella: con 3 elementi
-    // dividere per n le rendeva illeggibili sui telefoni
-    const s = Math.max(100 / n, 45);
-    const total = s * n;
-    const ox = (100 - total) / 2;
+    // Le forme in fila devono starci TUTTE INTERE: il viewBox è 0..100 e quello
+    // che sborda viene tagliato via. Con tre elementi un minimo di larghezza le
+    // faceva uscire dal riquadro, amputando le due esterne di oltre un terzo.
+    // Per la leggibilità si ingrandisce la cella (vedi ChoiceView), non le forme.
+    const s = 100 / n;
     content = cell.shapes.map((sp, i) => (
-      <g key={i} transform={`translate(${ox + i * s} ${(100 - s) / 2}) scale(${s / 100})`}>
+      <g key={i} transform={`translate(${i * s} ${(100 - s) / 2}) scale(${s / 100})`}>
         <Shape spec={sp} />
       </g>
     ));
@@ -544,8 +544,12 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
 /** Renderer di una singola opzione di risposta. */
 export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
   switch (choice.kind) {
-    case 'cell':
-      return <Cell cell={choice.cell} size={72} />;
+    case 'cell': {
+      // una fila di tre forme in una cella da 72px le rende minuscole: la cella
+      // cresce, così ogni forma resta leggibile e per intero
+      const affollata = choice.cell.layout === 'row' && choice.cell.shapes.length >= 3;
+      return <Cell cell={choice.cell} size={affollata ? 96 : 72} />;
+    }
     case 'clock':
       return <Clock clock={choice.clock} size={76} />;
     case 'domino':

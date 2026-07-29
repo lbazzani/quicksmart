@@ -44,19 +44,16 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
 };
 
 /**
- * Tipi in quarantena: generano domande corrette ma la loro RESA non è ancora
- * all'altezza, e un audit alla cieca ha mostrato che si può ragionare bene e
- * sbagliare comunque. Restano nel codice e nei test, ma il gioco non li pesca
- * finché la resa non è sistemata (vedi QUESTIONS_PLAN.md).
+ * Tipi sospesi dal gioco: restano nel codice e nei test, ma non vengono pescati.
  *
- * - fold: la regola "un buco sulla piega non si sdoppia" non è mai detta prima
- *   di rispondere, e il pannello "1ª piega" disegna la piega sbagliata;
- * - symmetry: l'asse di simmetria è disegnato negli esempi ma non nelle opzioni;
- * - domino: in una famiglia di regole il suggerimento nel prompt ("ogni tessera
- *   nasce girando quella prima di lei") è letteralmente falso, e chi lo segue
- *   alla lettera sceglie il distrattore. Un gioco non può mentire al giocatore.
+ * Ci si finisce per un motivo solo: un audit alla cieca ha mostrato che si può
+ * ragionare bene e sbagliare comunque. Ci sono passati `fold`, `symmetry` e
+ * `domino`; sono rientrati dopo che la regola decisiva è stata portata nel
+ * prompt, l'asse di simmetria disegnato anche sulle opzioni e i suggerimenti
+ * resi veri. Le condizioni del loro rientro sono custodite da
+ * tests/fairness.test.ts.
  */
-export const QUARANTINED: QuestionType[] = ['fold', 'symmetry', 'domino'];
+export const QUARANTINED: QuestionType[] = [];
 
 /** tutti i tipi esistenti, inclusi quelli in quarantena (per test e audit) */
 export const ALL_QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];

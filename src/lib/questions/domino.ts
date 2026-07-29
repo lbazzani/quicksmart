@@ -143,7 +143,11 @@ const FAMILY_HINT: Record<Family, string> = {
   // aggiungere un numero (1|6 → 6|1 → 2|0). Senza quelle parole chi prova solo
   // mosse "pure" non trova nessuna tessera che torna.
   alt: 'si alternano due mosse: girare la tessera, aggiungere lo stesso numero alle due metà, o tutte e due',
-  sum2: 'ogni tessera si ricava sommando le due metà di quella prima',
+  // Dire solo "sommando le due metà" è vero ma INCOMPLETO: metà della tessera
+  // nuova è la somma, l'altra metà ricopia una metà di quella prima. Senza
+  // questa seconda parte chi applica il suggerimento alla lettera trova un solo
+  // numero e resta indeciso fra due tessere.
+  sum2: 'ogni tessera ha una metà che è la somma delle due metà di quella prima, e l’altra metà copiata da lei',
   prev2: 'ogni tessera nasce dalle DUE tessere prima di lei',
 };
 

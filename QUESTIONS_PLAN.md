@@ -62,9 +62,13 @@ Obiettivo: **18 tipi** invece di 10, con spazio totale ben oltre i 100 milioni e
 
 ## Dove siamo arrivati
 
-**In gioco: 15 tipi verificati.** Le domande nascono al momento del round da uno spazio di decine di milioni di combinazioni, con le opzioni rimescolate da un generatore casuale separato.
+**In gioco: tutti e 18 i tipi.** Le domande nascono al momento del round da uno spazio di **25 milioni** di combinazioni, con le opzioni rimescolate da un generatore casuale separato da quello delle domande.
 
-**In quarantena: `fold`, `symmetry`, `domino`.** Restano nel codice e nei test ma il gioco non li pesca. Un audit alla cieca ha mostrato che in questi tre si può ragionare bene e sbagliare comunque: in `fold` la regola decisiva (un buco sulla piega non si sdoppia) si legge solo dopo aver risposto e il pannello "1ª piega" disegna la piega sbagliata; in `symmetry` l'asse è disegnato negli esempi ma non nelle opzioni; in `domino` il suggerimento nel prompt è letteralmente falso in tutti i casi misurati. Vanno riscritti prima di rientrare.
+Tre tipi — `fold`, `symmetry`, `domino` — sono stati **sospesi e poi riammessi**. Erano finiti fuori per un motivo solo: un audit alla cieca aveva mostrato che si poteva ragionare bene e sbagliare comunque. In `fold` la regola decisiva (un buco fatto sulla piega non si sdoppia) si leggeva solo dopo aver risposto, e il pannello "1ª piega" disegnava la piega successiva; in `symmetry` l'asse era disegnato negli esempi ma non nelle opzioni, cioè dove si giudica; in `domino` il suggerimento («ogni tessera nasce girando quella prima di lei») era letteralmente falso e portava dritto al distrattore.
+
+Sono rientrati dopo che la regola è stata portata nel prompt, l'asse disegnato anche sulle opzioni e i suggerimenti resi veri: il nuovo audit ha dato **36 risposte su 36**, con tutte le regole dichiarate prima di rispondere. Le condizioni del rientro sono ora custodite da `tests/fairness.test.ts`, che fallisce se qualcuno le rimuove.
+
+Lo stesso audit ha scovato un difetto che avevo introdotto io nel renderer: una fila di tre forme sforava il riquadro e l'SVG ne tagliava oltre un terzo. Le forme ora stanno intere; per la leggibilità cresce la cella, non la figura.
 
 ### Tre strumenti di misura, nati da tre errori
 
@@ -73,6 +77,7 @@ Obiettivo: **18 tipi** invece di 10, con spazio totale ben oltre i 100 milioni e
 | `tools/cheater-test.ts` | quanto rende giocare a memoria | tre livelli di furbetto, tutti fermi al 33% (il caso) |
 | `tools/shortcut-test.ts` | quanto rende rispondere senza leggere | trovò una scorciatoia al **100%** in `pattern` |
 | `tools/exchangeability-test.ts` | se una caratteristica visibile tradisce la risposta | diagnostico: non enumera euristiche, verifica l'indistinguibilità |
+| `tests/fairness.test.ts` | il patto con chi gioca | tutto ciò che serve è dichiarato prima; il gioco non dice mai il falso |
 
 La lezione più utile è arrivata dai verificatori indipendenti: dopo il primo giro di correzioni, gli agenti avevano imparato a **battere il misuratore** invece di risolvere il problema, e le scorciatoie si erano spostate su euristiche non previste (in `clock` una arrivava all'83%). Le euristiche scoperte allora sono ora dentro `shortcut-test`, e nessuna correzione viene accettata senza una controprova scritta da chi non l'ha fatta.
 
