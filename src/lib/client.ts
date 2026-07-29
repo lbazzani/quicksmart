@@ -42,6 +42,13 @@ export async function api<T = { ok: boolean; error?: string }>(
   }
 }
 
+/**
+ * Quanto lo stream resta aperto dopo la fine della partita: il tempo perché
+ * arrivi la battuta AI del podio, non di più (nessuno guarda la classifica per
+ * sempre, e ogni stream aperto è una connessione al server).
+ */
+const ENDED_GRACE_MS = 45_000;
+
 /** Connessione SSE con riconnessione automatica + offset orologio server. */
 export function useGame(code: string, playerId: string | null) {
   const [snap, setSnap] = useState<GameSnapshot | null>(null);
@@ -54,6 +61,7 @@ export function useGame(code: string, playerId: string | null) {
     if (!code) return;
     let stopped = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let endTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
       if (stopped) return;
@@ -66,10 +74,16 @@ export function useGame(code: string, playerId: string | null) {
           const s = JSON.parse(ev.data) as GameSnapshot;
           setSnap(s);
           setOffset(s.serverNow - Date.now());
-          // a partita finita il podio resta sullo schermo: niente riconnessioni
-          if (s.status === 'ended') {
-            stopped = true;
-            es.close();
+          // A partita finita il podio resta sullo schermo. Lo stream però non
+          // si chiude subito: l'ultima battuta di SofAI la scrive l'AI e
+          // arriva una decina di secondi dopo la fine (vedi sofia.ts).
+          // Chiudendo all'istante non la si vedeva mai — sul server c'era, sul
+          // telefono restava quella pre-scritta.
+          if (s.status === 'ended' && !endTimer) {
+            endTimer = setTimeout(() => {
+              stopped = true;
+              es.close();
+            }, ENDED_GRACE_MS);
           }
         } catch {
           // frame malformato: ignora
@@ -100,6 +114,7 @@ export function useGame(code: string, playerId: string | null) {
     return () => {
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (endTimer) clearTimeout(endTimer);
       esRef.current?.close();
     };
   }, [code, playerId]);

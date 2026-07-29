@@ -151,7 +151,18 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
   await anna.getByRole('button', { name: /Termina partita\?/ }).click();
   s = await waitState(code, (x) => x.status === 'ended');
   await expect(anna.getByText('Classifica finale')).toBeVisible();
-  await anna.waitForTimeout(2500); // podio + eventuale battuta AI
+
+  // La battuta del podio la scrive l'AI, e ci mette una decina di secondi: è
+  // il momento che il gioco aspetta apposta (vedi sofia.ts). Se non arriva,
+  // in partita non si nota nulla — resta quella pre-scritta — ed è proprio
+  // per questo che il test deve accorgersene al posto nostro.
+  s = await waitState(code, (x) => x.sofia?.ai === true, 60_000);
+  expect(s.sofia!.text.length).toBeGreaterThan(4);
+  // e soprattutto: deve arrivare FINO ALLO SCHERMO. Il client chiudeva lo
+  // stream appena la partita finiva, quindi la battuta esisteva sul server e
+  // sul telefono restava quella pre-scritta: un controllo solo sull'API non
+  // se ne sarebbe accorto.
+  await expect(anna.getByText(s.sofia!.text, { exact: false })).toBeVisible({ timeout: 15_000 });
   await anna.screenshot({ path: `${SHOTS}/05-podio.png` });
 
   // la classifica è ordinata e i punteggi sono coerenti con le statistiche
