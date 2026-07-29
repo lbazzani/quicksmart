@@ -8,10 +8,11 @@ import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import type { GameSnapshot, PlayerPublic } from '@/lib/types';
 import { T } from '@/lib/i18n';
-import { api, loadIdentity, useGame, type Identity } from '@/lib/client';
+import { api, loadIdentity, useCountdownTicks, useGame, type Identity } from '@/lib/client';
 import { REOPEN_WINDOW_MS } from '@/lib/scoring';
 import { QuestionView, ChoiceView } from '@/components/visuals';
 import { TimerRing } from '@/components/TimerRing';
+import { Buzzer } from '@/components/Buzzer';
 import { SofaiBubble } from '@/components/SofaiBubble';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
 import { isMuted, setMuted, sfx, unlockAudio } from '@/lib/sounds';
@@ -77,12 +78,18 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
       if (snap.phase === 'reveal') {
         const out = snap.current?.outcome;
         if (out === 'correct') {
-          sfx.correct();
+          // la serie di risposte giuste vale un suono suo: il moltiplicatore
+          // era l'unica cosa importante del gioco che non si sentiva
+          const streak = snap.players.find((p) => p.id === snap.current?.buzzerId)?.streak ?? 0;
+          if (streak >= 3) sfx.streak();
+          else sfx.correct();
           if (snap.current?.buzzerId === identity.playerId) fireConfetti(false);
         } else if (out === 'nobody' || out === 'timeout') sfx.nobody();
         else sfx.wrong();
       }
     }
+    // qualcuno entra in squadra: in lobby si guarda il codice, non lo schermo
+    if (snap.status === 'lobby' && snap.players.length > prev.players.length) sfx.join();
     if (snap.status === 'ended' && prev.status !== 'ended') {
       sfx.fanfare();
       if (snap.players[0]?.id === identity.playerId) fireConfetti(true);
@@ -295,6 +302,11 @@ function Play({
   // ha fatto sbagliare nessuno
   const reopened = (cur?.errors ?? 0) > 0;
 
+  // il conto alla rovescia si sente, non solo si vede: negli ultimi secondi
+  // del tempo per prenotarsi e di quello per rispondere
+  useCountdownTicks(cur?.buzzDeadline, offset, snap.phase === 'buzz' && !lockedMe);
+  useCountdownTicks(cur?.answerDeadline, offset, snap.phase === 'answer' && iAmBuzzer);
+
   async function doBuzz() {
     if (buzzing || lockedMe) return;
     setBuzzing(true);
@@ -375,7 +387,17 @@ function Play({
           key={`q${snap.roundIndex}`}
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="card flex flex-col items-center gap-3 px-3 py-4"
+          // una scrollata secca quando la domanda finisce senza che nessuno
+          // l'abbia presa: si capiva solo leggendo, e in quel momento non
+          // legge nessuno
+          // Mentre si decide se prenotarsi la card si prende lo spazio libero:
+          // prima restava un buco fra la domanda e il pulsante, e la figura
+          // era piccola in cima. Quando invece compaiono le tre opzioni lo
+          // spazio serve a loro — vanno confrontate, e schiacciate in fondo
+          // allo schermo non si confrontano.
+          className={`card flex flex-col items-center justify-center gap-3 px-3 py-4 ${
+            snap.phase === 'buzz' ? 'flex-1' : ''
+          } ${snap.phase === 'reveal' && cur.outcome === 'exhausted' ? 'scossa' : ''}`}
         >
           {cur.special === 'twin' && (
             <motion.span
@@ -440,8 +462,10 @@ function Play({
         </div>
       )}
 
-      {/* zona azione */}
-      <div className="mt-auto flex flex-col items-center gap-3 pb-3">
+      {/* zona azione: in basso quando c'è da premere il buzzer (il pollice sta
+          lì), subito sotto le opzioni quando invece c'è da scegliere — dirlo
+          in fondo allo schermo, lontano da quello che si tocca, non aiuta */}
+      <div className={`flex flex-col items-center gap-3 pb-3 ${snap.phase === 'buzz' ? 'mt-auto' : 'mt-3'}`}>
         {snap.phase === 'buzz' && (
           <>
             <AnimatePresence>
@@ -463,16 +487,14 @@ function Play({
                 <p className="py-6 text-center font-bold text-stone-400">🚫 {T.game.lockedOut}</p>
               )
             ) : (
-              <motion.button
-                initial={{ scale: 0.7, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                whileTap={{ scale: 0.92 }}
-                onClick={doBuzz}
+              <Buzzer
+                endsAt={cur.buzzDeadline ?? 0}
+                durationMs={reopened ? REOPEN_WINDOW_MS : snap.settings.buzzWindowMs}
+                offset={offset}
                 disabled={buzzing}
-                className="buzzer h-36 w-36 rounded-full bg-gradient-to-b from-rose-400 to-rose-600 font-display text-2xl font-extrabold text-white"
-              >
-                {T.game.buzz}
-              </motion.button>
+                onBuzz={doBuzz}
+                label={T.game.buzz}
+              />
             )}
             {!lockedMe && <p className="text-xs text-stone-500">{T.game.buzzHint}</p>}
           </>

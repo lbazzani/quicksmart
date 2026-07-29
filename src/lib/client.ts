@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GameSnapshot } from './types';
+import { sfx } from './sounds';
 
 export interface Identity {
   playerId: string;
@@ -50,6 +51,38 @@ export async function api<T = { ok: boolean; error?: string }>(
  * sta per arrivare — è successo, con 45 secondi contro una risposta a 59.
  */
 const ENDED_GRACE_MS = 75_000;
+
+/**
+ * Ticchetta gli ultimi secondi prima di una scadenza.
+ *
+ * Il countdown si vedeva soltanto: in un gioco dove si corre a premere, il
+ * suono arriva prima dello sguardo. Negli ultimi due secondi raddoppia, così
+ * la fretta si sente crescere invece di comparire all'improvviso.
+ */
+export function useCountdownTicks(endsAt: number | undefined, offset: number, attivo: boolean) {
+  useEffect(() => {
+    if (!attivo || !endsAt) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const passo = () => {
+      const restano = endsAt - (Date.now() + offset);
+      if (restano <= 0) return;
+      if (restano <= TICK_DA_MS) {
+        sfx.tick();
+        timer = setTimeout(passo, restano <= 2000 ? 500 : 1000);
+      } else {
+        // dormi fino all'inizio del conto alla rovescia sonoro
+        timer = setTimeout(passo, restano - TICK_DA_MS);
+      }
+    };
+    passo();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [endsAt, offset, attivo]);
+}
+
+/** da quanti millisecondi dalla fine si comincia a ticchettare */
+const TICK_DA_MS = 5000;
 
 /** Connessione SSE con riconnessione automatica + offset orologio server. */
 export function useGame(code: string, playerId: string | null) {

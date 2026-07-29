@@ -82,6 +82,15 @@ export const sfx = {
     tone(392, 0, 0.2, 'triangle', 0.1);
     tone(311, 0.2, 0.35, 'triangle', 0.1);
   },
+  /** serie di risposte giuste: sale, invece di risolversi come "correct" */
+  streak: () => {
+    [523, 659, 784, 988, 1175].forEach((f, i) => tone(f, i * 0.075, 0.16, 'triangle', 0.13));
+  },
+  /** qualcuno entra in squadra */
+  join: () => {
+    tone(587, 0, 0.1, 'sine', 0.09);
+    tone(880, 0.08, 0.16, 'sine', 0.09);
+  },
   fanfare: () => {
     [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.14, 0.22, 'triangle', 0.13));
   },

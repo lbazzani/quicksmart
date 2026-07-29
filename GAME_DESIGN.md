@@ -122,7 +122,19 @@ I nickname arrivano da internet e non entrano mai nel prompt: dentro sono
 
 Tavolozza "brace": sfondo notte calda (`#16100c`), **arancione** come colore guida con l'ambra a fargli eco e il verde acqua come contrappunto freddo (è il complementare dell'arancione). Niente viola né grigi azzurrini. Due colori restano riservati e non si usano come decorazione: **rosso** per il pulsante BUZZ e gli errori, **verde** per le risposte giuste — se l'arancione invadesse quel territorio, un errore e un elemento d'interfaccia si somiglierebbero.
 
-L'"arredo" delle figure (cornici, `?`, aste delle bilance, tessere) è un grigio caldo neutro: i colori della tavolozza portano significato, perché le domande li nominano a voce. Timer circolari, pulsante BUZZ gigante, transizioni motion, numeri che contano, confetti sulla vittoria. Font display per i numeri.
+L'"arredo" delle figure (cornici, `?`, aste delle bilance, tessere) è un grigio caldo neutro: i colori della tavolozza portano significato, perché le domande li nominano a voce. Timer circolari, transizioni motion, numeri che contano, confetti sulla vittoria. Font display per i numeri.
+
+**Il pulsante BUZZ** ha dietro un'onda che si allarga, e il suo ritmo è il tempo che resta: lenta all'inizio, veloce sul finale. Nell'ultimo quarto i bordi dello schermo pulsano di rosso, così la fretta si sente anche mentre si guarda la figura. A muoversi è solo l'onda, mai il pulsante: un bersaglio che pulsa è un bersaglio che si sposta mentre lo si punta (Playwright si rifiutava proprio di cliccarlo, «element is not stable» — quello che dà fastidio a un test automatico dà fastidio anche a un dito).
+
+**Lo spazio** cambia con la fase. Finché si decide se prenotarsi la domanda si prende tutto lo spazio libero e il pulsante sta in basso, dove c'è il pollice. Quando compaiono le tre opzioni lo spazio passa a loro — vanno confrontate — e l'istruzione si sposta lì accanto invece di restare in fondo allo schermo.
+
+Chi ha chiesto al sistema meno animazioni (`prefers-reduced-motion`) non vede l'onda né i bordi che respirano.
+
+### Suoni
+
+Sintetizzati con WebAudio (`src/lib/sounds.ts`): nessun file da scaricare. Countdown, via, buzz, risposta giusta, errore, nessuna prenotazione, fanfara del podio; più il **ticchettio** negli ultimi cinque secondi — sia del tempo per prenotarsi sia di quello per rispondere — che raddoppia negli ultimi due, un **suono che sale** quando la serie di risposte giuste arriva a tre (il moltiplicatore era l'unica cosa importante che non si sentiva) e un **trillo** quando qualcuno entra in squadra, perché in lobby si guarda il codice e non lo schermo.
+
+L'audio si sblocca al primo tocco (su iOS l'`AudioContext` parte solo dentro un gesto) e si spegne dal pulsante in alto a destra, con la scelta ricordata.
 
 ## Test
 
