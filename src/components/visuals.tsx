@@ -24,6 +24,22 @@ export const PALETTE = [
   '#f5f0e8', // 7 panna
 ];
 
+/**
+ * L'"arredo" delle figure: cornici, punti interrogativi, aste delle bilance,
+ * tessere del domino, segni di operazione. Deve restare NEUTRO e caldo — i
+ * colori di PALETTE portano significato (le domande li nominano a voce), quindi
+ * qui dentro non entrano mai. Prima era una scala grigio-blu che sul fondo
+ * bruno sembrava azzurrina.
+ */
+const INK = {
+  dark: '#231a14', // inchiostro sui fondi chiari: pallini di dadi e domino
+  tile: '#f7efe6', // avorio delle tessere e dei dadi
+  line: '#a89b90', // aste, bordi, lancette secondarie
+  faint: '#8a7d70', // tratteggio e "?" delle celle da indovinare
+  label: '#cabcae', // segni (= + → ↴) ed etichette
+  focus: '#fbbf24', // l'unico accento: "l'esempio da guardare"
+} as const;
+
 function starPoints(cx: number, cy: number, outer: number, inner: number, n = 5): string {
   const pts: string[] = [];
   for (let i = 0; i < n * 2; i++) {
@@ -151,7 +167,7 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   let content: React.ReactNode;
   if (cell.unknown || n === 0) {
     content = (
-      <text x={50} y={66} textAnchor="middle" fontSize={48} fontWeight={800} fill="#94a3b8">
+      <text x={50} y={66} textAnchor="middle" fontSize={48} fontWeight={800} fill={INK.faint}>
         ?
       </text>
     );
@@ -197,10 +213,10 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
           cell.dim
             ? 'rgba(255,255,255,0.015)'
             : cell.highlight
-              ? 'rgba(34,211,238,0.12)'
+              ? 'rgba(251,191,36,0.12)'
               : 'rgba(255,255,255,0.04)'
         }
-        stroke={cell.highlight ? '#22d3ee' : cell.unknown ? '#64748b' : 'rgba(255,255,255,0.14)'}
+        stroke={cell.highlight ? INK.focus : cell.unknown ? INK.faint : 'rgba(255,255,255,0.14)'}
         strokeWidth={2}
         strokeDasharray={cell.unknown ? '7 6' : undefined}
       />
@@ -211,7 +227,7 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   if (!cell.label) return svg;
   return (
     <div className="flex flex-col items-center gap-0.5">
-      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{cell.label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">{cell.label}</span>
       {svg}
     </div>
   );
@@ -222,14 +238,14 @@ export function Domino({ tile, size = 62 }: { tile: DominoTile; size?: number })
   if (tile.unknown) {
     return (
       <svg viewBox="0 0 100 52" width={size * 1.9} height={size} className="shrink-0">
-        <rect x={2} y={2} width={96} height={48} rx={8} fill="rgba(255,255,255,0.04)" stroke="#64748b" strokeWidth={2.5} strokeDasharray="7 6" />
-        <text x={50} y={38} textAnchor="middle" fontSize={30} fontWeight={800} fill="#94a3b8">?</text>
+        <rect x={2} y={2} width={96} height={48} rx={8} fill="rgba(255,255,255,0.04)" stroke={INK.faint} strokeWidth={2.5} strokeDasharray="7 6" />
+        <text x={50} y={38} textAnchor="middle" fontSize={30} fontWeight={800} fill={INK.faint}>?</text>
       </svg>
     );
   }
   const pips = (n: number, dx: number) =>
     (PIP_POS[n] ?? []).map(([x, y], i) => (
-      <circle key={i} cx={dx + x * 0.42} cy={4 + y * 0.44} r={4} fill="#0b1020" />
+      <circle key={i} cx={dx + x * 0.42} cy={4 + y * 0.44} r={4} fill={INK.dark} />
     ));
   return (
     <svg viewBox="0 0 100 52" width={size * 1.9} height={size} className="shrink-0">
@@ -239,11 +255,11 @@ export function Domino({ tile, size = 62 }: { tile: DominoTile; size?: number })
         width={96}
         height={48}
         rx={8}
-        fill={tile.highlight ? '#a5f3fc' : '#f8fafc'}
-        stroke={tile.highlight ? '#22d3ee' : '#94a3b8'}
+        fill={tile.highlight ? '#fdf0cf' : INK.tile}
+        stroke={tile.highlight ? INK.focus : INK.line}
         strokeWidth={2.5}
       />
-      <line x1={50} y1={7} x2={50} y2={45} stroke="#94a3b8" strokeWidth={2} />
+      <line x1={50} y1={7} x2={50} y2={45} stroke={INK.line} strokeWidth={2} />
       {pips(tile.a, 5)}
       {pips(tile.b, 53)}
     </svg>
@@ -263,7 +279,7 @@ export function Clock({ clock, size = 110 }: { clock: ClockSpec; size?: number }
         y1={50 - r1 * Math.cos(a)}
         x2={50 + 42 * Math.sin(a)}
         y2={50 - 42 * Math.cos(a)}
-        stroke="#cbd5e1"
+        stroke={INK.label}
         strokeWidth={i % 3 === 0 ? 3 : 1.6}
         strokeLinecap="round"
       />
@@ -274,20 +290,20 @@ export function Clock({ clock, size = 110 }: { clock: ClockSpec; size?: number }
       <svg viewBox="0 0 100 100" width={size} height={size}>
         {clock.unknown ? (
           <>
-            <circle cx={50} cy={50} r={46} fill="rgba(255,255,255,0.04)" stroke="#64748b" strokeWidth={2.5} strokeDasharray="7 6" />
-            <text x={50} y={64} textAnchor="middle" fontSize={40} fontWeight={800} fill="#94a3b8">?</text>
+            <circle cx={50} cy={50} r={46} fill="rgba(255,255,255,0.04)" stroke={INK.faint} strokeWidth={2.5} strokeDasharray="7 6" />
+            <text x={50} y={64} textAnchor="middle" fontSize={40} fontWeight={800} fill={INK.faint}>?</text>
           </>
         ) : (
           <g transform={clock.mirrored ? 'translate(100 0) scale(-1 1)' : undefined}>
-            <circle cx={50} cy={50} r={46} fill="#0f1a33" stroke="#22d3ee" strokeWidth={2.5} />
+            <circle cx={50} cy={50} r={46} fill="#241a13" stroke={INK.focus} strokeWidth={2.5} />
             {ticks}
-            <line x1={50} y1={50} x2={50 + 22 * Math.sin((hourAngle * Math.PI) / 180)} y2={50 - 22 * Math.cos((hourAngle * Math.PI) / 180)} stroke="#f8fafc" strokeWidth={5} strokeLinecap="round" />
+            <line x1={50} y1={50} x2={50 + 22 * Math.sin((hourAngle * Math.PI) / 180)} y2={50 - 22 * Math.cos((hourAngle * Math.PI) / 180)} stroke={INK.tile} strokeWidth={5} strokeLinecap="round" />
             <line x1={50} y1={50} x2={50 + 34 * Math.sin((minAngle * Math.PI) / 180)} y2={50 - 34 * Math.cos((minAngle * Math.PI) / 180)} stroke="#f472b6" strokeWidth={3} strokeLinecap="round" />
-            <circle cx={50} cy={50} r={3.5} fill="#f8fafc" />
+            <circle cx={50} cy={50} r={3.5} fill={INK.tile} />
           </g>
         )}
       </svg>
-      {clock.label && <span className="text-xs text-slate-400">{clock.label}</span>}
+      {clock.label && <span className="text-xs text-stone-400">{clock.label}</span>}
       {clock.mirrored && !clock.unknown && <span className="text-lg">🪞</span>}
     </div>
   );
@@ -321,10 +337,10 @@ function DiceStack({ grid }: { grid: number[][] }) {
   return (
     <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} width={Math.min(300, vbW * 2.2)} className="mx-auto">
       {cubes.map(({ x, y, key }) => (
-        <g key={key} stroke="#0b1020" strokeWidth={1.2} strokeLinejoin="round">
-          <polygon points={`${x},${y - hh} ${x + w},${y} ${x},${y + hh} ${x - w},${y}`} fill="#67e8f9" />
-          <polygon points={`${x - w},${y} ${x},${y + hh} ${x},${y + hh + v} ${x - w},${y + v}`} fill="#0891b2" />
-          <polygon points={`${x + w},${y} ${x},${y + hh} ${x},${y + hh + v} ${x + w},${y + v}`} fill="#22d3ee" />
+        <g key={key} stroke={INK.dark} strokeWidth={1.2} strokeLinejoin="round">
+          <polygon points={`${x},${y - hh} ${x + w},${y} ${x},${y + hh} ${x - w},${y}`} fill="#fcd34d" />
+          <polygon points={`${x - w},${y} ${x},${y + hh} ${x},${y + hh + v} ${x - w},${y + v}`} fill="#b45309" />
+          <polygon points={`${x + w},${y} ${x},${y + hh} ${x},${y + hh + v} ${x + w},${y + v}`} fill="#f59e0b" />
         </g>
       ))}
     </svg>
@@ -343,9 +359,9 @@ const PIP_POS: Record<number, [number, number][]> = {
 export function PipFace({ n, size = 56, accent = false }: { n: number; size?: number; accent?: boolean }) {
   return (
     <svg viewBox="0 0 100 100" width={size} height={size}>
-      <rect x={4} y={4} width={92} height={92} rx={16} fill={accent ? 'rgba(244,114,182,0.15)' : '#f8fafc'} stroke={accent ? '#f472b6' : '#94a3b8'} strokeWidth={3} />
+      <rect x={4} y={4} width={92} height={92} rx={16} fill={accent ? 'rgba(244,114,182,0.15)' : INK.tile} stroke={accent ? '#f472b6' : INK.line} strokeWidth={3} />
       {(PIP_POS[n] ?? []).map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={9} fill={accent ? '#f472b6' : '#0b1020'} />
+        <circle key={i} cx={x} cy={y} r={9} fill={accent ? '#f472b6' : INK.dark} />
       ))}
     </svg>
   );
@@ -373,7 +389,7 @@ function PanShapes({ items }: { items: CountedShapes[] }) {
       {items.map((it, i) => (
         <div key={i} className="flex items-center">
           {/* con più gruppi sullo stesso piatto il "+" evita di leggerli come un unico blocco */}
-          {i > 0 && <span className="px-0.5 text-sm font-bold text-slate-300">+</span>}
+          {i > 0 && <span className="px-0.5 text-sm font-bold text-stone-300">+</span>}
           {it.count <= 3 ? (
             Array.from({ length: it.count }, (_, k) => (
               <svg key={k} viewBox="0 0 100 100" width={26} height={26}>
@@ -381,7 +397,7 @@ function PanShapes({ items }: { items: CountedShapes[] }) {
               </svg>
             ))
           ) : (
-            <span className="flex items-center text-sm font-bold text-slate-200">
+            <span className="flex items-center text-sm font-bold text-stone-200">
               {it.count}×
               <svg viewBox="0 0 100 100" width={26} height={26}>
                 <Shape spec={{ shape: it.shape, color: it.color }} />
@@ -403,12 +419,12 @@ function BalanceScales({ scales }: { scales: { left: CountedShapes[]; right: Cou
           <div key={i} className="relative h-[104px] w-[290px]">
             {/* fulcro */}
             <svg viewBox="0 0 290 104" width={290} height={104} className="absolute inset-0">
-              <polygon points="145,58 132,96 158,96" fill="#475569" />
-              <rect x={98} y={96} width={94} height={5} rx={2.5} fill="#475569" />
+              <polygon points="145,58 132,96 158,96" fill="#6b5d52" />
+              <rect x={98} y={96} width={94} height={5} rx={2.5} fill="#6b5d52" />
               <g transform={`rotate(${angle} 145 56)`}>
-                <rect x={25} y={53} width={240} height={6} rx={3} fill="#94a3b8" />
-                <line x1={45} y1={56} x2={45} y2={72} stroke="#94a3b8" strokeWidth={3} />
-                <line x1={245} y1={56} x2={245} y2={72} stroke="#94a3b8" strokeWidth={3} />
+                <rect x={25} y={53} width={240} height={6} rx={3} fill={INK.line} />
+                <line x1={45} y1={56} x2={45} y2={72} stroke={INK.line} strokeWidth={3} />
+                <line x1={245} y1={56} x2={245} y2={72} stroke={INK.line} strokeWidth={3} />
               </g>
             </svg>
             {/* piatti (in HTML per contenere le forme) */}
@@ -438,7 +454,7 @@ function EquationRows({ rows }: { rows: { items: (ShapeSpec | string)[]; result:
         <div key={i} className="flex items-center gap-1.5 rounded-2xl border border-white/10 bg-white/5 px-4 py-1.5">
           {row.items.map((it, k) =>
             typeof it === 'string' ? (
-              <span key={k} className="font-display text-2xl font-bold text-slate-300">
+              <span key={k} className="font-display text-2xl font-bold text-stone-300">
                 {it === 'x' ? '×' : it}
               </span>
             ) : (
@@ -447,8 +463,8 @@ function EquationRows({ rows }: { rows: { items: (ShapeSpec | string)[]; result:
               </svg>
             )
           )}
-          <span className="font-display text-2xl font-bold text-slate-300">=</span>
-          <span className={`font-display text-2xl font-extrabold ${row.result === '?' ? 'text-cyan-300' : 'text-slate-100'}`}>
+          <span className="font-display text-2xl font-bold text-stone-300">=</span>
+          <span className={`font-display text-2xl font-extrabold ${row.result === '?' ? 'text-amber-300' : 'text-stone-100'}`}>
             {row.result}
           </span>
         </div>
@@ -475,7 +491,7 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
               {row.map((cell, ci) => (
                 <div key={ci} className="flex items-center gap-1.5">
                   {ci > 0 && (payload.arrows || payload.analogy) && (
-                    <span className="font-display text-xl text-slate-500">{payload.analogy ? '➜' : '→'}</span>
+                    <span className="font-display text-xl text-stone-500">{payload.analogy ? '➜' : '→'}</span>
                   )}
                   <Cell cell={cell} size={cellSize} />
                 </div>
@@ -483,7 +499,7 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
               {/* la sequenza continua sulla riga sotto: senza questo segno le
                   righe si leggono come una matrice invece che come una catena */}
               {payload.wrapSequence && ri < payload.rows.length - 1 && (
-                <span className="font-display text-xl text-slate-500">↴</span>
+                <span className="font-display text-xl text-stone-500">↴</span>
               )}
             </div>
           ))}
@@ -512,8 +528,8 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
               key={i}
               className={`font-display min-w-12 rounded-xl border px-3 py-2 text-center text-2xl font-extrabold ${
                 n === '?'
-                  ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300'
-                  : 'border-white/15 bg-white/5 text-slate-100'
+                  ? 'border-amber-400 bg-amber-400/10 text-amber-300'
+                  : 'border-white/15 bg-white/5 text-stone-100'
               }`}
             >
               {n}

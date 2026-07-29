@@ -2,7 +2,7 @@
 // Pagina di gioco: lobby → countdown → buzz → answer → reveal → … → podio.
 // Lo stato autoritativo arriva via SSE; qui solo rendering + azioni.
 
-import { use, useEffect, useMemo, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
@@ -23,14 +23,20 @@ export default function GamePage({ params }: { params: Promise<{ code: string }>
   const router = useRouter();
   const [identity, setIdentity] = useState<Identity | null | 'loading'>('loading');
 
+  // localStorage esiste solo nel browser: l'identità va letta dopo il montaggio
+  // e non durante il render, o server e client renderizzerebbero cose diverse.
   useEffect(() => {
     const id = loadIdentity(code);
-    if (!id) router.replace(`/join?code=${code}`);
-    else setIdentity(id);
+    if (!id) {
+      router.replace(`/join?code=${code}`);
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lettura client-only al montaggio
+    setIdentity(id);
   }, [code, router]);
 
   if (identity === 'loading' || identity === null) {
-    return <Center><p className="text-slate-400">{T.errors.reconnecting}</p></Center>;
+    return <Center><p className="text-stone-400">{T.errors.reconnecting}</p></Center>;
   }
   return <Game code={code.toUpperCase()} identity={identity} />;
 }
@@ -45,6 +51,8 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
   const startedRef = useRef(false);
   const prevRef = useRef<GameSnapshot | null>(null);
 
+  // idem: la preferenza audio sta in localStorage
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- lettura client-only al montaggio
   useEffect(() => setMutedState(isMuted()), []);
 
   // la modalità solo parte da sola
@@ -91,15 +99,15 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
       </Center>
     );
   }
-  if (!snap) return <Center><p className="animate-pulse text-slate-400">{T.errors.reconnecting}</p></Center>;
+  if (!snap) return <Center><p className="animate-pulse text-stone-400">{T.errors.reconnecting}</p></Center>;
 
   const me = snap.players.find((p) => p.id === identity.playerId);
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 py-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-display text-lg font-extrabold text-slate-300">
-          <span className="text-cyan-300">Quick</span><span className="text-pink-400">Smart</span> ⚡
+        <span className="font-display text-lg font-extrabold text-stone-300">
+          <span className="text-orange-400">Quick</span><span className="text-amber-300">Smart</span> ⚡
         </span>
         <div className="flex items-center gap-2">
           {snap.status === 'playing' && me?.isHost && snap.mode === 'team' && <EndButton code={code} identity={identity} />}
@@ -170,21 +178,25 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
     <div className="flex flex-1 flex-col gap-5">
       <div className="text-center">
         <h1 className="font-display text-3xl font-extrabold">{snap.name}</h1>
-        <p className="text-sm text-slate-400">{T.lobby.waiting}</p>
+        <p className="text-sm text-stone-400">{T.lobby.waiting}</p>
       </div>
 
       <button onClick={copy} className="card mx-auto flex flex-col items-center gap-1 px-8 py-4 active:scale-95">
-        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">{T.lobby.shareCode}</span>
-        <span className="font-display text-5xl font-extrabold tracking-[0.3em] text-cyan-300 glow-cyan">{code}</span>
-        <span className="text-xs text-slate-400">{copied ? T.lobby.copied : '👆 tocca per copiare'}</span>
+        <span className="text-xs font-bold uppercase tracking-wide text-stone-400">{T.lobby.shareCode}</span>
+        <span className="font-display text-5xl font-extrabold tracking-[0.3em] text-orange-300 glow-orange">{code}</span>
+        <span className="text-xs text-stone-400">{copied ? T.lobby.copied : '👆 tocca per copiare'}</span>
       </button>
 
       {snap.joinUrl && (
         <div className="mx-auto flex flex-col items-center gap-1.5">
-          <span className="text-xs font-bold text-slate-400">{T.lobby.scanQr}</span>
+          <span className="text-xs font-bold text-stone-400">{T.lobby.scanQr}</span>
+          {/* PNG generato al volo dalla nostra route, diverso per ogni partita:
+              next/image lo passerebbe a un ottimizzatore che non ha nulla da
+              ottimizzare, e un QR ricompresso si legge peggio. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`/api/qr?code=${code}`}
-            alt="QR"
+            alt={`QR per entrare nella partita ${code}`}
             width={150}
             height={150}
             className="rounded-xl border-4 border-white/80"
@@ -193,8 +205,8 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
       )}
 
       <div className="card px-4 py-3">
-        <p className="mb-2 text-sm font-bold text-slate-300">
-          {T.lobby.players} <span className="text-cyan-300">{snap.players.length}</span>
+        <p className="mb-2 text-sm font-bold text-stone-300">
+          {T.lobby.players} <span className="text-orange-300">{snap.players.length}</span>
         </p>
         <div className="flex flex-wrap gap-2">
           <AnimatePresence>
@@ -208,7 +220,7 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
                 <span className="text-xl">{p.avatar}</span>
                 {p.nickname}
                 {p.isHost && ' 👑'}
-                <span className={`h-2 w-2 rounded-full ${p.connected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                <span className={`h-2 w-2 rounded-full ${p.connected ? 'bg-emerald-400' : 'bg-stone-500'}`} />
               </motion.span>
             ))}
           </AnimatePresence>
@@ -238,7 +250,7 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
             </button>
           </>
         ) : (
-          <p className="animate-pulse text-center text-sm text-slate-400">{T.lobby.waiting}</p>
+          <p className="animate-pulse text-center text-sm text-stone-400">{T.lobby.waiting}</p>
         )}
       </div>
     </div>
@@ -267,7 +279,11 @@ function Play({
   const [buzzing, setBuzzing] = useState(false);
   const [chosen, setChosen] = useState<number | null>(null);
 
+  // a ogni cambio di round/fase la scelta e il buzz ripartono da zero. Un
+  // `key` sul componente li azzererebbe da solo, ma rimonterebbe anche le
+  // animazioni di entrata a metà transizione.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset deliberato al cambio di round
     setChosen(null);
     setBuzzing(false);
   }, [snap.roundIndex, snap.phase]);
@@ -316,7 +332,7 @@ function Play({
             {T.game.round} {snap.roundIndex + 1}
             {snap.settings.roundsTotal ? ` ${T.game.of} ${snap.settings.roundsTotal}` : ''}
           </span>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-stone-400">
             {T.qtypes[cur.qtype]} · {'★'.repeat(cur.difficulty)}{'☆'.repeat(3 - cur.difficulty)}
           </span>
         </div>
@@ -325,10 +341,10 @@ function Play({
             key={cur.value}
             initial={{ scale: 1.4 }}
             animate={{ scale: 1 }}
-            className={`font-display text-2xl font-extrabold ${reopened ? 'text-amber-300' : 'text-cyan-300'}`}
+            className={`font-display text-2xl font-extrabold ${reopened ? 'text-teal-300' : 'text-amber-300'}`}
           >
             {cur.value}
-            <span className="ml-1 text-xs font-bold text-slate-400">pt</span>
+            <span className="ml-1 text-xs font-bold text-stone-400">pt</span>
           </motion.span>
           {snap.phase === 'buzz' && cur.buzzDeadline && (
             <TimerRing
@@ -339,7 +355,7 @@ function Play({
             />
           )}
           {snap.phase === 'answer' && cur.answerDeadline && (
-            <TimerRing endsAt={cur.answerDeadline} durationMs={snap.settings.answerMs} offset={offset} size={54} stroke="#f472b6" />
+            <TimerRing endsAt={cur.answerDeadline} durationMs={snap.settings.answerMs} offset={offset} size={54} stroke="#fbbf24" />
           )}
         </div>
       </div>
@@ -365,7 +381,7 @@ function Play({
             <motion.span
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="rounded-full bg-fuchsia-500/20 px-3 py-1 text-xs font-extrabold text-fuchsia-300 ring-1 ring-fuchsia-400/50"
+              className="rounded-full bg-amber-400/20 px-3 py-1 text-xs font-extrabold text-amber-200 ring-1 ring-amber-300/50"
             >
               👯 {T.game.twinRound}
             </motion.span>
@@ -374,7 +390,7 @@ function Play({
             <motion.span
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="rounded-full bg-amber-400/20 px-3 py-1 text-xs font-extrabold text-amber-300 ring-1 ring-amber-300/50"
+              className="rounded-full bg-orange-500/25 px-3 py-1 text-xs font-extrabold text-orange-200 ring-1 ring-orange-400/60"
             >
               ⚡ {T.game.lampoRound}
             </motion.span>
@@ -382,7 +398,7 @@ function Play({
           <p className="text-center font-display text-lg font-bold leading-tight">{cur.prompt}</p>
           <QuestionView payload={cur.payload} />
           {reopened && snap.phase === 'buzz' && (
-            <span className="rounded-full bg-amber-400/15 px-3 py-1 text-xs font-extrabold text-amber-300">
+            <span className="rounded-full bg-teal-400/15 px-3 py-1 text-xs font-extrabold text-teal-200">
               🔁 {T.game.reopened}
             </span>
           )}
@@ -408,11 +424,11 @@ function Play({
                     : isWrongPick
                       ? 'border-rose-400 bg-rose-400/15'
                       : chosen === i
-                        ? 'border-cyan-300 bg-cyan-300/10'
+                        ? 'border-orange-300 bg-orange-300/10'
                         : 'border-white/12 bg-white/5'
                 } ${active ? '' : 'opacity-95'} ${snap.phase === 'answer' && !iAmBuzzer ? 'opacity-55' : ''}`}
               >
-                <span className="absolute left-1.5 top-1 font-display text-xs font-extrabold text-slate-400">
+                <span className="absolute left-1.5 top-1 font-display text-xs font-extrabold text-stone-400">
                   {CHOICE_LABELS[i]}
                 </span>
                 <ChoiceView choice={c} />
@@ -442,9 +458,9 @@ function Play({
             </AnimatePresence>
             {lockedMe ? (
               me.joinedAtRound === snap.roundIndex ? (
-                <p className="py-6 text-center font-bold text-cyan-300">👋 {T.game.joinedLate}</p>
+                <p className="py-6 text-center font-bold text-teal-300">👋 {T.game.joinedLate}</p>
               ) : (
-                <p className="py-6 text-center font-bold text-slate-400">🚫 {T.game.lockedOut}</p>
+                <p className="py-6 text-center font-bold text-stone-400">🚫 {T.game.lockedOut}</p>
               )
             ) : (
               <motion.button
@@ -458,7 +474,7 @@ function Play({
                 {T.game.buzz}
               </motion.button>
             )}
-            {!lockedMe && <p className="text-xs text-slate-500">{T.game.buzzHint}</p>}
+            {!lockedMe && <p className="text-xs text-stone-500">{T.game.buzzHint}</p>}
           </>
         )}
 
@@ -466,16 +482,16 @@ function Play({
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center gap-2 rounded-full bg-pink-400/15 px-5 py-2.5"
+            className="flex items-center gap-2 rounded-full bg-amber-400/15 px-5 py-2.5"
           >
             <span className="animate-pulse text-2xl">✋</span>
-            <span className="font-bold text-pink-300">
+            <span className="font-bold text-amber-200">
               {buzzer.avatar} {buzzer.nickname} {T.game.answering}
             </span>
           </motion.div>
         )}
         {snap.phase === 'answer' && iAmBuzzer && (
-          <p className="font-display text-lg font-extrabold text-cyan-300">⚡ {T.game.youAnswer}</p>
+          <p className="font-display text-lg font-extrabold text-orange-300">⚡ {T.game.youAnswer}</p>
         )}
 
         {snap.phase === 'reveal' && <Reveal snap={snap} meId={me.id} offset={offset} />}
@@ -506,7 +522,7 @@ function Countdown({ endsAt, offset }: { endsAt: number; offset: number }) {
         key={n}
         initial={{ scale: 2.4, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="font-display text-8xl font-extrabold text-cyan-300 glow-cyan"
+        className="font-display text-8xl font-extrabold text-orange-400 glow-orange"
       >
         {n > 0 ? n : 'VIA!'}
       </motion.span>
@@ -532,15 +548,15 @@ function ScoreStrip({
           key={p.id}
           className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-sm ${
             p.id === buzzerId
-              ? 'bg-pink-400/25 ring-1 ring-pink-300'
+              ? 'bg-amber-400/25 ring-1 ring-amber-300'
               : p.id === meId
-                ? 'bg-cyan-400/15 ring-1 ring-cyan-300/50'
+                ? 'bg-orange-400/20 ring-1 ring-orange-300/60'
                 : 'bg-white/5'
           }`}
         >
           <span>{rank === 0 && p.score > 0 ? '👑' : ''}{p.avatar}</span>
           <span className="max-w-16 truncate font-bold">{p.nickname}</span>
-          <span className="font-display shrink-0 font-extrabold text-slate-200">{p.score}</span>
+          <span className="font-display shrink-0 font-extrabold text-stone-200">{p.score}</span>
           {p.streak >= 3 && <span className="text-xs">🔥{p.streak}</span>}
           {showDeltas && p.lastDelta !== 0 && (
             <span className={`popscore font-display text-xs font-extrabold ${p.lastDelta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -564,7 +580,7 @@ function Reveal({ snap, meId, offset }: { snap: GameSnapshot; meId: string; offs
     color = 'text-emerald-300';
   } else if (outcome === 'nobody') {
     banner = T.game.nobodyBuzzed;
-    color = 'text-slate-300';
+    color = 'text-stone-300';
   } else if (outcome === 'timeout') {
     banner = T.game.timeoutSolo;
     color = 'text-amber-300';
@@ -577,7 +593,7 @@ function Reveal({ snap, meId, offset }: { snap: GameSnapshot; meId: string; offs
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="flex w-full flex-col items-center gap-2.5">
       <p className={`font-display text-2xl font-extrabold ${color}`}>{banner}</p>
       {cur.explanation && (
-        <p className="card max-w-md px-4 py-2 text-center text-sm text-slate-300">💡 {cur.explanation}</p>
+        <p className="card max-w-md px-4 py-2 text-center text-sm text-stone-300">💡 {cur.explanation}</p>
       )}
       <SofaiBubble comment={snap.sofia} />
       {cur.revealUntil && (
@@ -597,7 +613,7 @@ function ShrinkBar({ endsAt, durationMs, offset }: { endsAt: number; durationMs:
     }, 100);
     return () => clearInterval(iv);
   }, [endsAt, durationMs, offset]);
-  return <div className="h-full bg-cyan-300" style={{ width: `${frac * 100}%` }} />;
+  return <div className="h-full bg-teal-300" style={{ width: `${frac * 100}%` }} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -629,7 +645,7 @@ function Podium({ snap, meId }: { snap: GameSnapshot; meId: string }) {
               >
                 <span className="text-4xl">{p.avatar}</span>
                 <span className="max-w-24 truncate text-sm font-extrabold">{p.nickname}</span>
-                <span className="font-display text-lg font-extrabold text-cyan-300">{p.score}</span>
+                <span className="font-display text-lg font-extrabold text-amber-300">{p.score}</span>
               </motion.div>
               <motion.div
                 initial={{ height: 0 }}
@@ -639,8 +655,8 @@ function Podium({ snap, meId }: { snap: GameSnapshot; meId: string }) {
                   idx === 0
                     ? 'bg-gradient-to-b from-amber-300/80 to-amber-500/30'
                     : idx === 1
-                      ? 'bg-gradient-to-b from-slate-300/70 to-slate-400/25'
-                      : 'bg-gradient-to-b from-orange-400/60 to-orange-600/25'
+                      ? 'bg-gradient-to-b from-stone-300/70 to-stone-400/25'
+                      : 'bg-gradient-to-b from-orange-600/70 to-orange-800/30'
                 }`}
               >
                 {medals[idx]}
@@ -664,12 +680,12 @@ function Podium({ snap, meId }: { snap: GameSnapshot; meId: string }) {
           const acc = attempts > 0 ? Math.round((p.stats.correct / attempts) * 100) : 0;
           const avg = p.stats.answerCount > 0 ? (p.stats.answerTimeMsSum / p.stats.answerCount / 1000).toFixed(1) : '–';
           return (
-            <div key={p.id} className={`flex items-center gap-2.5 py-2.5 ${p.id === meId ? 'text-cyan-200' : ''}`}>
-              <span className="w-6 text-center font-display font-extrabold text-slate-400">{i + 1}</span>
+            <div key={p.id} className={`flex items-center gap-2.5 py-2.5 ${p.id === meId ? 'text-orange-200' : ''}`}>
+              <span className="w-6 text-center font-display font-extrabold text-stone-400">{i + 1}</span>
               <span className="text-2xl">{p.avatar}</span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-extrabold">{p.nickname}</p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-stone-400">
                   🎯 {acc}% · ⏱ {avg}s · 🔥 {p.stats.bestStreak} · ✋ {p.stats.buzzWins}
                 </p>
               </div>
@@ -698,12 +714,12 @@ async function fireConfetti(big: boolean) {
   if (big) {
     const end = Date.now() + 1600;
     const frame = () => {
-      confetti({ particleCount: 5, angle: 60, spread: 60, origin: { x: 0 }, colors: ['#22d3ee', '#f472b6', '#fbbf24'] });
-      confetti({ particleCount: 5, angle: 120, spread: 60, origin: { x: 1 }, colors: ['#22d3ee', '#f472b6', '#fbbf24'] });
+      confetti({ particleCount: 5, angle: 60, spread: 60, origin: { x: 0 }, colors: ['#f97316', '#fbbf24', '#2dd4bf'] });
+      confetti({ particleCount: 5, angle: 120, spread: 60, origin: { x: 1 }, colors: ['#f97316', '#fbbf24', '#2dd4bf'] });
       if (Date.now() < end) requestAnimationFrame(frame);
     };
     frame();
   } else {
-    confetti({ particleCount: 90, spread: 75, origin: { y: 0.7 }, colors: ['#22d3ee', '#f472b6', '#fbbf24', '#34d399'] });
+    confetti({ particleCount: 90, spread: 75, origin: { y: 0.7 }, colors: ['#f97316', '#fbbf24', '#2dd4bf', '#f7efe6'] });
   }
 }

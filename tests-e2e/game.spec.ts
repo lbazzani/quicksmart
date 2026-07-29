@@ -63,7 +63,7 @@ test('partita a squadre con 3 giocatori', async ({ browser }) => {
   await anna.screenshot({ path: `${SHOTS}/01-home.png` });
   await anna.getByRole('link', { name: /Crea una squadra/ }).click();
   await anna.getByPlaceholder('Es. I Fulmini').fill('I Fulmini');
-  await anna.getByPlaceholder('Es. Sofia').fill('Anna');
+  await anna.getByPlaceholder('Come ti chiami?').fill('Anna');
   await anna.getByRole('button', { name: '5', exact: true }).first().click(); // 5 round
   await anna.screenshot({ path: `${SHOTS}/02-new.png` });
   await anna.getByRole('button', { name: /Crea la partita/ }).click();
@@ -72,12 +72,12 @@ test('partita a squadre con 3 giocatori', async ({ browser }) => {
 
   // — lobby con QR
   await expect(anna.getByText(code)).toBeVisible();
-  await expect(anna.locator('img[alt="QR"]')).toBeVisible();
+  await expect(anna.locator('img[alt^="QR"]')).toBeVisible();
 
   // — gli altri entrano
   for (const [page, nick] of [[luca, 'Luca'], [marco, 'Marco']] as const) {
     await page.goto(`/join?code=${code}`);
-    await page.getByPlaceholder('Es. Sofia').fill(nick);
+    await page.getByPlaceholder('Come ti chiami?').fill(nick);
     await page.getByRole('button', { name: /^Entra$/ }).click();
     await page.waitForURL(/\/g\//);
   }
@@ -136,22 +136,22 @@ test('partita a squadre con 3 giocatori', async ({ browser }) => {
 });
 
 test('modalità solo con timeout e risposta', async ({ browser }) => {
-  const sofia = await newPlayer(browser);
-  await sofia.goto('/solo');
-  await sofia.getByPlaceholder('Es. Sofia').fill('Sofia');
-  await sofia.getByRole('button', { name: '5', exact: true }).first().click(); // 5 round
-  await sofia.getByRole('button', { name: '10', exact: true }).nth(1).click(); // 10s decisione
-  await sofia.screenshot({ path: `${SHOTS}/10-solo-setup.png` });
-  await sofia.getByRole('button', { name: /Inizia!/ }).click();
-  await sofia.waitForURL(/\/g\/[A-Z]{5}/);
-  const code = sofia.url().split('/').pop()!;
+  const solista = await newPlayer(browser);
+  await solista.goto('/solo');
+  await solista.getByPlaceholder('Come ti chiami?').fill('Marta');
+  await solista.getByRole('button', { name: '5', exact: true }).first().click(); // 5 round
+  await solista.getByRole('button', { name: '10', exact: true }).nth(1).click(); // 10s decisione
+  await solista.screenshot({ path: `${SHOTS}/10-solo-setup.png` });
+  await solista.getByRole('button', { name: /Inizia!/ }).click();
+  await solista.waitForURL(/\/g\/[A-Z]{5}/);
+  const code = solista.url().split('/').pop()!;
 
   // round 1: risponde correttamente
   await waitState(code, (x) => x.phase === 'buzz');
   const ci = await correctIndex(code);
-  await sofia.getByRole('button', { name: 'PRENOTATI!' }).click();
+  await solista.getByRole('button', { name: 'PRENOTATI!' }).click();
   await waitState(code, (x) => x.phase === 'answer');
-  await sofia.locator('button:has-text("A"), button:has-text("B"), button:has-text("C")').nth(ci).click();
+  await solista.locator('button:has-text("A"), button:has-text("B"), button:has-text("C")').nth(ci).click();
   let s = await waitState(code, (x) => x.phase === 'reveal');
   expect(s.current?.outcome).toBe('correct');
   expect(s.players[0].score).toBeGreaterThan(0);
@@ -161,5 +161,5 @@ test('modalità solo con timeout e risposta', async ({ browser }) => {
   s = await waitState(code, (x) => x.phase === 'reveal' && x.roundIndex === 1, 30_000);
   expect(s.current?.outcome).toBe('timeout');
   expect(s.players[0].score).toBeLessThan(before);
-  await sofia.screenshot({ path: `${SHOTS}/11-solo-timeout.png` });
+  await solista.screenshot({ path: `${SHOTS}/11-solo-timeout.png` });
 });

@@ -193,7 +193,7 @@ async function testTeam() {
 async function testSolo() {
   console.log('\n— MODALITÀ SOLO (2 round, timeout al primo) —');
   const solo = await post<Cred & { code: string }>(`/api/game`, {
-    nickname: 'Sofia',
+    nickname: 'Marta',
     avatar: '🦄',
     mode: 'solo',
     roundsTotal: 2,

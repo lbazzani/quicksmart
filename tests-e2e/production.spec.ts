@@ -58,14 +58,14 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
 
   await anna.getByRole('link', { name: /Crea una squadra/ }).click();
   await anna.getByPlaceholder('Es. I Fulmini').fill('Famiglia Bazzani');
-  await anna.getByPlaceholder('Es. Sofia').fill('Sofia');
+  await anna.getByPlaceholder('Come ti chiami?').fill('Marta');
   await anna.getByRole('button', { name: '5', exact: true }).first().click();
   await anna.getByRole('button', { name: /Crea la partita/ }).click();
   await anna.waitForURL(/\/g\/[A-Z]{5}/);
   const code = anna.url().split('/').pop()!;
 
   // il QR punta al dominio pubblico, non all'IP di LAN
-  const qr = anna.locator('img[alt="QR"]');
+  const qr = anna.locator('img[alt^="QR"]');
   await expect(qr).toBeVisible();
   const qrRes = await anna.request.get(`${SITE}/api/qr?code=${code}`);
   expect(qrRes.status()).toBe(200);
@@ -73,7 +73,7 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
 
   for (const [page, nick] of [[luca, 'Papà'], [marco, 'Mamma']] as const) {
     await page.goto(`${SITE}/join?code=${code}`);
-    await page.getByPlaceholder('Es. Sofia').fill(nick);
+    await page.getByPlaceholder('Come ti chiami?').fill(nick);
     await page.getByRole('button', { name: /^Entra$/ }).click();
     await page.waitForURL(/\/g\//);
   }
@@ -92,7 +92,7 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
 
   // gara di buzz da tre telefoni: uno solo vince
   const byNick = new Map<string, Page>([
-    ['Sofia', anna],
+    ['Marta', anna],
     ['Papà', luca],
     ['Mamma', marco],
   ]);
@@ -168,7 +168,7 @@ test('sito pubblico: si entra col QR anche a partita già avviata', async ({ bro
   // il capitano crea la partita e la avvia SUBITO, prima che arrivino gli altri
   await host.goto(`${SITE}/new`);
   await host.getByPlaceholder('Es. I Fulmini').fill('Ritardatari');
-  await host.getByPlaceholder('Es. Sofia').fill('Papà');
+  await host.getByPlaceholder('Come ti chiami?').fill('Papà');
   await host.getByRole('button', { name: /Crea la partita/ }).click();
   await host.waitForURL(/\/g\/[A-Z]{5}/);
   const code = host.url().split('/').pop()!;
@@ -180,21 +180,21 @@ test('sito pubblico: si entra col QR anche a partita già avviata', async ({ bro
   await host.getByRole('button', { name: /Via alla partita/ }).click();
   await waitState(code, (x) => x.status === 'playing');
 
-  // Sofia arriva DOPO il via, seguendo il QR
+  // Marta arriva DOPO il via, seguendo il QR
   await late.goto(joinUrl);
   await expect(late.locator('input').first()).toHaveValue(code); // codice già compilato
-  await late.getByPlaceholder('Es. Sofia').fill('Sofia');
+  await late.getByPlaceholder('Come ti chiami?').fill('Marta');
   await late.getByRole('button', { name: /^Entra$/ }).click();
   await late.waitForURL(new RegExp(`/g/${code}`), { timeout: 20_000 });
 
-  const s = await waitState(code, (x) => x.players.some((p) => p.nickname === 'Sofia'));
+  const s = await waitState(code, (x) => x.players.some((p) => p.nickname === 'Marta'));
   expect(s.players).toHaveLength(2);
   await late.waitForTimeout(1200);
   await late.screenshot({ path: `${SHOTS}/08-entrata-in-corsa.png` });
 
   // gioca dal round successivo, non da quello a metà
   const nextRound = await waitState(late.url() && code, (x) => x.roundIndex > s.roundIndex && x.phase === 'buzz', 90_000);
-  expect(nextRound.current!.lockedOut).not.toContain(s.players.find((p) => p.nickname === 'Sofia')!.id);
+  expect(nextRound.current!.lockedOut).not.toContain(s.players.find((p) => p.nickname === 'Marta')!.id);
   await expect(late.getByRole('button', { name: 'PRENOTATI!' })).toBeVisible({ timeout: 20_000 });
 });
 
@@ -202,7 +202,7 @@ test('sito pubblico: allenamento in solitaria', async ({ browser }) => {
   test.setTimeout(240_000);
   const p = await phone(browser);
   await p.goto(`${SITE}/solo`);
-  await p.getByPlaceholder('Es. Sofia').fill('Sofia');
+  await p.getByPlaceholder('Come ti chiami?').fill('Marta');
   await p.getByRole('button', { name: '5', exact: true }).first().click();
   await p.getByRole('button', { name: /Inizia!/ }).click();
   await p.waitForURL(/\/g\/[A-Z]{5}/);

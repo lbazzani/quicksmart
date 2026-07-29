@@ -68,7 +68,7 @@ export default function NewGame() {
           value={rounds}
           onChange={setRounds}
         />
-        {rounds === null && <span className="text-xs text-slate-400">{T.new.roundsOpenHint}</span>}
+        {rounds === null && <span className="text-xs text-stone-400">{T.new.roundsOpenHint}</span>}
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label={T.new.buzzTime}>

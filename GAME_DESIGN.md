@@ -79,7 +79,9 @@ Il payload è **dichiarativo** (JSON) e viene renderizzato client-side in SVG: n
 
 ### Tema visivo
 
-Dark "neon arcade": sfondo notte, glow ciano/magenta/viola, timer circolari, pulsante BUZZ gigante, transizioni motion, numeri che contano, confetti sulla vittoria. Font display per i numeri.
+Tavolozza "brace": sfondo notte calda (`#16100c`), **arancione** come colore guida con l'ambra a fargli eco e il verde acqua come contrappunto freddo (è il complementare dell'arancione). Niente viola né grigi azzurrini. Due colori restano riservati e non si usano come decorazione: **rosso** per il pulsante BUZZ e gli errori, **verde** per le risposte giuste — se l'arancione invadesse quel territorio, un errore e un elemento d'interfaccia si somiglierebbero.
+
+L'"arredo" delle figure (cornici, `?`, aste delle bilance, tessere) è un grigio caldo neutro: i colori della tavolozza portano significato, perché le domande li nominano a voce. Timer circolari, pulsante BUZZ gigante, transizioni motion, numeri che contano, confetti sulla vittoria. Font display per i numeri.
 
 ## Test
 

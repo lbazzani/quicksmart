@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../src/lib/rng';
 import { GENERATORS } from '../src/lib/questions';
 import type { CellSpec, Difficulty, Question } from '../src/lib/types';
-import { COLOR_FORMS, COLOR_NAMES } from '../src/lib/colors';
+import { COLOR_FORMS, COLOR_NAMES, distinctColors, tooSimilar } from '../src/lib/colors';
 import { PALETTE } from '../src/components/visuals';
 
 function generate(qtype: keyof typeof GENERATORS, n: number, seed = 4242): Question[] {
@@ -131,6 +131,21 @@ describe('i colori si chiamano come sono disegnati', () => {
   it('la tavolozza dei nomi e quella dei colori disegnati hanno la stessa lunghezza', () => {
     expect(COLOR_NAMES.length).toBe(PALETTE.length);
     expect(COLOR_FORMS.length).toBe(PALETTE.length);
+  });
+
+  it('trovare 4 colori distinguibili riesce SEMPRE', () => {
+    // Cambiare la tavolozza cambia anche quali coppie si confondono, e quindi
+    // se quattro colori distinguibili esistano ancora. La versione golosa
+    // falliva il 17,8% delle estrazioni con le coppie attuali: le domande
+    // "sets" e "pattern" semplicemente non venivano generate.
+    const rng = mulberry32(1234);
+    for (let i = 0; i < 5000; i++) {
+      const c = distinctColors(rng, 4);
+      expect(c.length).toBe(4);
+      for (let a = 0; a < c.length; a++)
+        for (let b = a + 1; b < c.length; b++)
+          expect(tooSimilar(c[a], c[b]), `${COLOR_NAMES[c[a]]}/${COLOR_NAMES[c[b]]} si confondono`).toBe(false);
+    }
   });
 });
 

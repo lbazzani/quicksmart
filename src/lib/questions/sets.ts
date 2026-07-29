@@ -63,7 +63,7 @@
 
 import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
-import { COLOR_NAMES, tooSimilar } from '../colors';
+import { COLOR_NAMES, distinctColors } from '../colors';
 import { placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -82,27 +82,17 @@ const ATTRS: Attr[] = ['shape', 'color', 'count', 'fill'];
 
 // forme inconfondibili anche in miniatura (pentagono/esagono sarebbero cerchi)
 const SHAPES: ShapeName[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'heart', 'cross', 'moon'];
-const PALETTE_SIZE = COLOR_NAMES.length;
 const FILLS: Fill[] = ['solid', 'outline', 'half'];
 const COUNTS = [1, 2, 3];
 
 /**
- * Quattro colori che si distinguono a due a due (la lista delle coppie che si
- * confondono è quella condivisa in src/lib/colors.ts). Qui un colore può essere
- * l'unica differenza fra la risposta e un distrattore: se due opzioni fossero
- * ciano e verde, la domanda diventerebbe un test della vista.
- * La presa "golosa" su un ordine casuale ne trova sempre almeno 4: le coppie
- * confondibili formano tre catene separate (azzurro-ciano-verde con viola,
- * rosa-rosso, giallo-arancione).
+ * Quattro colori che si distinguono a due a due (le coppie che si confondono
+ * stanno in src/lib/colors.ts). Qui un colore può essere l'unica differenza fra
+ * la risposta e un distrattore: se due opzioni fossero verde acqua e verde, la
+ * domanda diventerebbe un test della vista invece che di logica.
  */
 function pickPalette(rng: Rng): number[] {
-  const out: number[] = [];
-  for (const c of shuffle(rng, Array.from({ length: PALETTE_SIZE }, (_, i) => i))) {
-    if (out.every((x) => !tooSimilar(x, c))) out.push(c);
-    if (out.length === 4) break;
-  }
-  if (out.length < 4) throw new Error('colori distinguibili insufficienti');
-  return out;
+  return distinctColors(rng, 4);
 }
 
 /** etichetta stampata sopra la prima casella di ogni gruppo */

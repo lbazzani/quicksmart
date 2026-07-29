@@ -32,7 +32,7 @@ import type {
   ShapeSpec,
 } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { COLOR_FORMS, tooSimilar } from '../colors';
+import { COLOR_FORMS, distinctColors, tooSimilar } from '../colors';
 import { placeChoices, retry, balancedNumericDistractors } from './qutils';
 
 // ---------------------------------------------------------------------------
@@ -97,18 +97,12 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * n colori distinti e mai somiglianti fra loro (CONFUSABLE di ../colors).
- * Con quelle esclusioni il massimo ottenibile è 4: le trame che avrebbero
+ * Con quelle esclusioni il massimo ottenibile è 5: le trame che avrebbero
  * bisogno di più colori usano meno righe/colonne, oppure distinguono i simboli
  * anche per forma.
  */
 function pickColors(rng: Rng, n: number): ColorInfo[] {
-  const out: ColorInfo[] = [];
-  for (const c of shuffle(rng, [...COLORS])) {
-    if (out.some((o) => tooSimilar(o.idx, c.idx))) continue;
-    out.push(c);
-    if (out.length === n) return out;
-  }
-  throw new Error(`colori distinguibili insufficienti (${n})`);
+  return distinctColors(rng, n).map((idx) => COLORS[idx]);
 }
 
 // ---------------------------------------------------------------------------

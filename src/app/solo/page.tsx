@@ -48,7 +48,7 @@ export default function SoloPage() {
 
       <div className="flex items-center gap-3">
         <SofaiAvatar mood="teasing" size={56} />
-        <p className="card flex-1 rounded-bl-sm px-3 py-2 text-sm text-slate-300">{T.solo.subtitle}</p>
+        <p className="card flex-1 rounded-bl-sm px-3 py-2 text-sm text-stone-300">{T.solo.subtitle}</p>
       </div>
 
       <Field label={T.new.nickname}>

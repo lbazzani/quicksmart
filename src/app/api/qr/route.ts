@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     type: 'svg',
     margin: 1,
     width: 240,
-    color: { dark: '#0f172a', light: '#f8fafc' },
+    color: { dark: '#231a14', light: '#f7efe6' },
   });
   return new Response(svg, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' } });
 }

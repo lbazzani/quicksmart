@@ -93,9 +93,16 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
   const head =
     'Sei SofAI, la mascotte simpatica e un po\' sfottona di un quiz a squadre per famiglie. ' +
     'Scrivi UNA sola battuta in italiano (max 18 parole, al massimo 1 emoji), senza virgolette né premesse. ' +
-    'Usa i nomi dei giocatori esattamente come sono scritti qui sotto e non dare per scontato se sono maschi o femmine. ' +
+    'Usa i nomi di chi gioca esattamente come sono scritti qui sotto e non dedurre da un nome se la persona è maschio o femmina. ' +
+    'ITALIANO NEUTRO, obbligatorio: la battuta deve funzionare per bambine, bambini, mamme, papà e nonni, quindi NIENTE aggettivi, ' +
+    'participi o sostantivi al maschile o al femminile riferiti a chi gioca (vietati "bravo/brava", "sei stato/stata", "primo/prima", ' +
+    '"campione/campionessa", "veloce" va bene perché invariabile). Usa invece verbi, frasi impersonali, parole invariabili o ' +
+    'sostantivi che descrivono la cosa e non la persona ("che colpo!", "primo posto", "risposta lampo", "hai il cervello più veloce"). ' +
+    'Niente asterischi, schwa o forme tipo "benvenut@". ' +
     'Situazione: ';
-  const nameOf = (nick?: string) => (nick ? (alias.get(nick) ?? 'Giocatore') : 'Giocatore');
+  // Il ripiego non passa da deAlias (non è un alias numerato) e finirebbe a
+  // schermo così com'è: dev'essere invariabile, non "Giocatore".
+  const nameOf = (nick?: string) => (nick ? (alias.get(nick) ?? 'chi gioca') : 'chi gioca');
   if (ctx.kind === 'reveal') {
     const diff = T.difficulty[ctx.difficulty] ?? '';
     const qt = T.qtypes[ctx.qtype] ?? ctx.qtype;
@@ -121,7 +128,7 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
       .join(', ');
     return (
       head +
-      `la partita è finita, celebra chi ha vinto e prendi in giro con dolcezza gli ultimi. Classifica finale: ${list}.`
+      `la partita è finita, celebra chi ha vinto e prendi in giro con dolcezza chi è in fondo alla classifica. Classifica finale: ${list}.`
     );
   }
   return null; // welcome/join: bastano le battute pre-scritte

@@ -8,7 +8,7 @@ export function TimerRing({
   durationMs,
   offset,
   size = 64,
-  stroke = '#22d3ee',
+  stroke = '#2dd4bf', // verde acqua: il tempo è il dettaglio freddo della tavolozza
   showSeconds = true,
 }: {
   /** timestamp server di scadenza */
@@ -36,7 +36,7 @@ export function TimerRing({
   const r = 42;
   const circ = 2 * Math.PI * r;
   const urgent = frac < 0.25;
-  const color = urgent ? '#fb7185' : stroke;
+  const color = urgent ? '#fb7185' : stroke; // il rosso dell'ultimo quarto non si tocca
   const secs = Math.max(0, Math.ceil(remaining / 1000));
 
   return (
@@ -56,7 +56,7 @@ export function TimerRing({
         style={{ filter: `drop-shadow(0 0 6px ${color})` }}
       />
       {showSeconds && (
-        <text x={50} y={62} textAnchor="middle" fontSize={34} fontWeight={800} fill="#f8fafc" className="font-display">
+        <text x={50} y={62} textAnchor="middle" fontSize={34} fontWeight={800} fill="#f7efe6" className="font-display">
           {secs}
         </text>
       )}

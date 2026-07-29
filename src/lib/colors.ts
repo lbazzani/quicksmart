@@ -9,6 +9,8 @@
 // la discussione sarebbe immediata.
 // L'ordine segue PALETTE in src/components/visuals.tsx.
 
+import { shuffle } from './rng';
+
 export const COLOR_NAMES = [
   'arancione', // 0 #f97316 — il colore guida
   'giallo', // 1 #fbbf24
@@ -65,4 +67,46 @@ export const CONFUSABLE: ReadonlyArray<readonly [number, number]> = [
 /** true se i due colori sono troppo simili per distinguerli in piccolo */
 export function tooSimilar(a: number, b: number): boolean {
   return CONFUSABLE.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+}
+
+/** tutte le combinazioni di n colori distinguibili a due a due, calcolate una volta sola */
+const combinazioniCache = new Map<number, number[][]>();
+function combinazioniDistinguibili(n: number): number[][] {
+  const memo = combinazioniCache.get(n);
+  if (memo) return memo;
+  const out: number[][] = [];
+  const cur: number[] = [];
+  const rec = (start: number) => {
+    if (cur.length === n) return void out.push([...cur]);
+    for (let i = start; i < COLOR_NAMES.length; i++) {
+      if (cur.every((x) => !tooSimilar(x, i))) {
+        cur.push(i);
+        rec(i + 1);
+        cur.pop();
+      }
+    }
+  };
+  rec(0);
+  combinazioniCache.set(n, out);
+  return out;
+}
+
+/**
+ * n colori tutti distinguibili fra loro, sorteggiati fra TUTTE le combinazioni
+ * valide. Con questa tavolozza il massimo ottenibile è 5.
+ *
+ * La versione precedente era golosa — pesca a caso, scarta chi somiglia a
+ * quelli già presi — e sembrava equivalente. Non lo era: basta un ordine
+ * sfortunato (giallo, verde acqua, rosa) perché i colori rimasti siano tutti
+ * esclusi e la presa si fermi a tre. Su tutte e 40320 le estrazioni possibili
+ * falliva il 17,8% delle volte, e la domanda non veniva generata. Enumerare le
+ * combinazioni costa niente (sono al massimo una settantina) e in più le
+ * sorteggia in modo uniforme, invece che sbilanciato dall'ordine di pesca.
+ */
+export function distinctColors(rng: () => number, n: number): number[] {
+  const valide = combinazioniDistinguibili(n);
+  if (!valide.length) throw new Error(`colori distinguibili insufficienti (${n})`);
+  const scelta = valide[Math.floor(rng() * valide.length)];
+  // copia: shuffle riordina sul posto, e le combinazioni sono in cache
+  return shuffle(rng, [...scelta]);
 }

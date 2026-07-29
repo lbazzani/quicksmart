@@ -39,7 +39,7 @@ export default async function Anteprima({
       <h1 className="font-display text-2xl font-extrabold">
         Anteprima · difficoltà {difficulty} · seme {seed}
       </h1>
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-stone-400">
         {items.length} tipi. Cambia con ?seed=N&amp;d=1|2|3&amp;type=nome
       </p>
       {items.map(({ q, correct }, i) => (

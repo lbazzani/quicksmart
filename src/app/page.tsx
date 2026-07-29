@@ -14,12 +14,12 @@ export default function Home() {
         className="flex flex-col items-center gap-2 text-center"
       >
         <h1 className="font-display text-6xl font-extrabold tracking-tight">
-          <span className="text-cyan-300 glow-cyan">Quick</span>
-          <span className="text-pink-400 glow-pink">Smart</span>
+          <span className="text-orange-400 glow-orange">Quick</span>
+          <span className="text-amber-300 glow-amber">Smart</span>
           <span className="ml-1">⚡</span>
         </h1>
-        <p className="text-lg font-semibold text-slate-300">{T.tagline}</p>
-        <p className="max-w-xs text-sm text-slate-400">{T.home.subtitle}</p>
+        <p className="text-lg font-semibold text-stone-300">{T.tagline}</p>
+        <p className="max-w-xs text-sm text-stone-400">{T.home.subtitle}</p>
       </motion.div>
 
       <motion.div
@@ -29,8 +29,8 @@ export default function Home() {
         className="floaty flex items-end gap-2"
       >
         <SofaiAvatar mood="happy" size={96} />
-        <div className="card mb-6 rounded-bl-sm px-3 py-2 text-sm text-slate-200">
-          Ciao! Io sono <b className="text-violet-300">SofAI</b> 👋
+        <div className="card mb-6 rounded-bl-sm px-3 py-2 text-sm text-stone-200">
+          Ciao! Io sono <b className="text-amber-300">SofAI</b> 👋
         </div>
       </motion.div>
 
@@ -43,10 +43,10 @@ export default function Home() {
         <Link href="/new" className="btn-primary block py-4 text-center font-display text-xl">
           👑 {T.home.create}
         </Link>
-        <Link href="/join" className="btn-ghost block py-4 text-center font-display text-xl font-bold text-slate-100">
+        <Link href="/join" className="btn-ghost block py-4 text-center font-display text-xl font-bold text-stone-100">
           🔑 {T.home.join}
         </Link>
-        <Link href="/solo" className="btn-ghost block py-4 text-center font-display text-xl font-bold text-slate-100">
+        <Link href="/solo" className="btn-ghost block py-4 text-center font-display text-xl font-bold text-stone-100">
           🎯 {T.home.solo}
         </Link>
       </motion.nav>

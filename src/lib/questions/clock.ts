@@ -263,7 +263,7 @@ const SCENARIOS = [
   { a: 'Prima', b: 'Dopo', q: 'Quanto tempo è passato dal primo orologio al secondo?' },
   { a: 'Inizio', b: 'Fine', q: 'Il gioco comincia all’ora del primo orologio e finisce a quella del secondo: quanto dura?' },
   { a: 'Partenza', b: 'Arrivo', q: 'Il treno parte all’ora del primo orologio e arriva a quella del secondo: quanto dura il viaggio?' },
-  { a: 'Sveglia', b: 'Colazione', q: 'Sofia si sveglia all’ora del primo orologio e fa colazione a quella del secondo: quanto tempo passa?' },
+  { a: 'Sveglia', b: 'Colazione', q: 'Ci si sveglia all’ora del primo orologio e si fa colazione a quella del secondo: quanto tempo passa?' },
   { a: 'Andata', b: 'Ritorno', q: 'Si parte all’ora del primo orologio e si torna a quella del secondo: quanto tempo passa?' },
   { a: 'Entrata', b: 'Uscita', q: 'Si entra all’ora del primo orologio e si esce a quella del secondo: quanto tempo si resta dentro?' },
 ] as const;
