@@ -43,6 +43,8 @@ interface SofiaRoom {
   sofiaSeq: number;
   sofiaBusy: boolean;
   sofiaPending?: { ctx: SofiaEventCtx; seq: number };
+  /** interrompe la chiamata AI in volo: la usa il podio per passare avanti */
+  sofiaKill?: () => void;
   roundIndex: number;
 }
 
@@ -196,7 +198,7 @@ function minimalEnv(): NodeJS.ProcessEnv {
   };
 }
 
-function askClaude(prompt: string): Promise<string> {
+function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const bin = findClaude();
     if (!bin) return reject(new Error('claude CLI non trovato'));
@@ -233,6 +235,13 @@ function askClaude(prompt: string): Promise<string> {
       child.kill('SIGKILL');
       reject(new Error(`timeout dopo ${AI_TIMEOUT_MS}ms${err ? ` — stderr: ${err.slice(0, 300)}` : ''}`));
     }, AI_TIMEOUT_MS);
+    onStart?.(() => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(new Error('interrotta: ha la precedenza il podio'));
+    });
     child.stdout.on('data', (d) => (out += d));
     // stderr va CONSUMATO anche se non serve: è una pipe, e se si riempie il
     // CLI si blocca a metà scrittura e la battuta non arriva mai.
@@ -282,7 +291,13 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
   if (room.sofiaBusy) {
     // Una chiamata alla volta. Un commento di round che aspetta il suo turno
     // sarebbe vecchio due volte: si lascia perdere. Il podio invece aspetta.
-    if (ctx.kind === 'podium') room.sofiaPending = { ctx, seq };
+    if (ctx.kind === 'podium') {
+      room.sofiaPending = { ctx, seq };
+      // La battuta di round in volo non la leggerà più nessuno: la partita è
+      // finita. Interromperla fa partire subito quella del podio, che
+      // altrimenti aspetterebbe quasi un minuto davanti alla classifica.
+      room.sofiaKill?.();
+    }
     return;
   }
   await runAi(room, ctx, seq, onUpdate);
@@ -295,7 +310,7 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
   room.sofiaBusy = true;
   try {
     const t0 = Date.now();
-    const text = deAlias(await askClaude(prompt), alias);
+    const text = deAlias(await askClaude(prompt, (kill) => (room.sofiaKill = kill)), alias);
     console.warn(`[SofAI] AI ok (${ctx.kind}) in ${Date.now() - t0}ms`);
     // sostituisce solo se nel frattempo non è uscita una battuta più recente
     if (room.sofia && (room.sofia.seq === seq || ctx.kind === 'podium')) {
@@ -309,6 +324,7 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
     console.warn(`[SofAI] AI non disponibile (${ctx.kind}):`, e instanceof Error ? e.message : e);
   } finally {
     room.sofiaBusy = false;
+    room.sofiaKill = undefined;
     const pending = room.sofiaPending;
     room.sofiaPending = undefined;
     if (pending) await runAi(room, pending.ctx, pending.seq, onUpdate);
