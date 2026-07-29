@@ -83,14 +83,31 @@ Commenta la partita: ingresso in squadra, esito del round, podio. Le battute
 sono pre-scritte (`src/lib/sofia/lines.ts`), quindi compaiono **subito**: il
 gioco non aspetta mai una risposta esterna.
 
-Sul podio la battuta la scrive l'AI (il CLI di Claude, lato server, con
-`SOFIA_AI=1`) ed è marcata con ✦. È l'unico momento affidato all'AI, e la
-ragione è misurata: sul server il CLI risponde in 10-50 secondi, mentre un
-reveal dura 6. Una battuta di round arriverebbe sempre a round finito — e
-verrebbe scartata perché parla di una cosa già passata — occupando intanto
-l'unica linea disponibile e facendo aspettare il podio. Il podio invece la
-battuta la aspetta: la classifica resta sullo schermo, e l'AI fa la cosa che
-solo lei può fare, commentare i nomi e i punti veri di quella partita.
+L'AI (il CLI di Claude, lato server, con `SOFIA_AI=1`) interviene in due modi,
+entrambi marcati con ✦.
+
+**Durante la partita, scrivendo in anticipo.** Il CLI impiega dai 10 ai 50
+secondi e un reveal ne dura 6: chiedere una battuta quando serve è inutile,
+arriva sempre tardi. All'inizio della partita SofAI si fa scrivere un lotto di
+battute, una per ogni momento del gioco (risposta giusta, errore, nessuno si
+prenota, round lampo…), e le tiene pronte. Quando il momento arriva la battuta
+è già lì, e compare all'istante come una pre-scritta. Il lotto si ricarica da
+solo quando la scorta cala o quando il momento che serviva era a secco — una
+partita può battere sempre sullo stesso tasto. Nel prompt del lotto non entra
+niente scritto da chi gioca: dove va il nome c'è `{name}`, riempito al momento
+dell'uso.
+
+**Al podio, sul momento.** Lì la battuta si aspetta volentieri — la classifica
+resta sullo schermo — e l'AI fa la cosa che solo lei può fare: commentare i
+nomi e i punti veri di quella partita. Ha la precedenza su qualsiasi lotto in
+corso, che viene interrotto.
+
+Ogni riga generata passa da un filtro prima di andare a schermo: si scartano le
+risposte in cui il modello chiede informazioni invece di fare la battuta, e
+quelle che si rivolgono a chi gioca con una forma di genere («brava», «sei
+stato», «da solo»). Il filtro è volutamente stretto: la prima versione bloccava
+anche «prima», «solito» e «velocissima», che quasi sempre concordano con un
+nome e non con la persona, e buttava battute perfette in silenzio.
 
 Se l'AI non risponde resta la battuta pre-scritta e in partita non si nota
 nulla: proprio per questo il motivo del fallimento finisce nei log del

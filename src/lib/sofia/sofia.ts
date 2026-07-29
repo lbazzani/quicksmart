@@ -42,9 +42,13 @@ interface SofiaRoom {
   sofia: { text: string; mood: SofiaMood; roundIndex: number; ai: boolean; seq: number } | null;
   sofiaSeq: number;
   sofiaBusy: boolean;
-  sofiaPending?: { ctx: SofiaEventCtx; seq: number };
+  sofiaPending?: { ctx: SofiaEventCtx; seq: number; onUpdate: () => void };
   /** interrompe la chiamata AI in volo: la usa il podio per passare avanti */
   sofiaKill?: () => void;
+  /** battute scritte dall'AI in anticipo, pronte da usare durante la partita */
+  sofiaFresh?: Partial<Record<SofiaLineKind, string[]>>;
+  /** quanti lotti sono già stati chiesti in questa partita */
+  sofiaBatches?: number;
   roundIndex: number;
   players: Map<string, { connections: number }>;
 }
@@ -166,6 +170,36 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
 /** lunghezza massima della battuta mostrata in UI */
 const MAX_TEXT = 160;
 
+/**
+ * Momenti di gioco per cui l'AI prepara le battute in anticipo.
+ * `nome: true` = la battuta può usare {name} (c'è qualcuno da nominare).
+ */
+const MOMENTI: ReadonlyArray<{ kind: SofiaLineKind; nome: boolean; quando: string }> = [
+  { kind: 'correct', nome: true, quando: 'ha indovinato' },
+  { kind: 'correctFast', nome: true, quando: 'ha indovinato in meno di due secondi' },
+  { kind: 'correctStreak', nome: true, quando: 'ha indovinato parecchie volte di fila' },
+  { kind: 'wrong', nome: true, quando: 'ha sbagliato la risposta' },
+  { kind: 'nobody', nome: false, quando: 'nessuno si è prenotato per rispondere' },
+  { kind: 'timeout', nome: false, quando: 'è scaduto il tempo senza che nessuno rispondesse' },
+  { kind: 'exhausted', nome: false, quando: 'hanno sbagliato tutti' },
+  { kind: 'twin', nome: false, quando: 'sta arrivando una domanda che sembra già vista ma non lo è' },
+  { kind: 'lampo', nome: false, quando: 'round lampo: metà tempo e punti doppi' },
+];
+
+/**
+ * Il lotto può prendersela comoda: è la differenza fra chiedere una battuta
+ * quando serve e prepararla prima. Nessuno lo aspetta — se tarda, per qualche
+ * round si vedono le battute pre-scritte e poi entrano le sue. Scrivere nove
+ * battute richiede molto più di una sola, e col limite dei 60 secondi il lotto
+ * scadeva sempre.
+ */
+const WARMUP_TIMEOUT_MS = 180_000;
+
+/** quante battute preparate restano prima di chiederne altre */
+const SOGLIA_RICARICA = 3;
+/** tetto di lotti per partita: l'AI costa tempo, non deve girare a vuoto */
+const MAX_LOTTI = 6;
+
 /** il modello chiede informazioni invece di fare la battuta */
 const CHIEDE_CHIARIMENTI =
   /\b(mi serve|mi servono|non ho (il |abbastanza )?(contesto|informazioni)|puoi (dirmi|fornirmi)|potrebbe fornir|mi mancano|fammi sapere|per favore forniscimi)\b/i;
@@ -181,6 +215,32 @@ function deAlias(text: string, alias: Map<string, string>): string {
   for (const [nick, placeholder] of pairs) out = out.replaceAll(placeholder, nick);
   out = out.replace(/\s+/g, ' ').trim();
   return out.length > MAX_TEXT ? out.slice(0, MAX_TEXT - 1).trimEnd() + '…' : out;
+}
+
+/**
+ * Parole che si accordano con CHI GIOCA: il prompt le vieta, ma l'AI non è
+ * deterministica e queste battute finiscono a schermo senza che nessuno le
+ * rilegga. Una riga che ne contiene una si butta e si usa quella pre-scritta.
+ *
+ * L'elenco è volutamente stretto. La prima versione bloccava anche "prima",
+ * "solito", "velocissima" e simili, che in italiano nove volte su dieci
+ * concordano con un nome ("risposta velocissima", "prima ancora di pensarci")
+ * e non con la persona: buttava battute perfette, in silenzio, e il momento
+ * restava senza. Qui stanno solo le forme che si rivolgono davvero a qualcuno.
+ */
+// confini Unicode e non \b: in JavaScript \b guarda solo A-Z0-9_, quindi "\bè"
+// non combacia MAI — la forma "è stata" sarebbe passata indisturbata
+const RIVOLTO_A_UN_GENERE =
+  /(?<!\p{L})(?:brav[oa]|pront[oa]|(?:sei|è|era|sarebbe|sembri|sembra)\s+stat[oa]|campion(?:e|essa)|cervellon[ea]|benvenut[oa]|scars[oa]|fenomen[oa]|da\s+sol[oa])(?!\p{L})/iu;
+
+/** una riga sola, senza virgolette di contorno, entro la lunghezza mostrabile */
+function clampLine(raw: string): string {
+  return raw.trim().replaceAll('\n', ' ').replace(/\s+/g, ' ').replace(/^["«]|["»]$/g, '').trim().slice(0, MAX_TEXT);
+}
+
+/** true se la riga si può mostrare così com'è */
+function usabile(text: string): boolean {
+  return text.length >= 4 && !CHIEDE_CHIARIMENTI.test(text) && !RIVOLTO_A_UN_GENERE.test(text);
 }
 
 function findClaude(): string | null {
@@ -224,7 +284,8 @@ function minimalEnv(): NodeJS.ProcessEnv {
   };
 }
 
-function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promise<string> {
+/** Lancia il CLI e restituisce quello che ha scritto, senza interpretarlo. */
+function runClaude(prompt: string, onStart?: (kill: () => void) => void, timeoutMs = AI_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     const bin = findClaude();
     if (!bin) return reject(new Error('claude CLI non trovato'));
@@ -259,8 +320,8 @@ function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promis
     const timer = setTimeout(() => {
       done = true;
       child.kill('SIGKILL');
-      reject(new Error(`timeout dopo ${AI_TIMEOUT_MS}ms${err ? ` — stderr: ${err.slice(0, 300)}` : ''}`));
-    }, AI_TIMEOUT_MS);
+      reject(new Error(`timeout dopo ${timeoutMs}ms${err ? ` — stderr: ${err.slice(0, 300)}` : ''}`));
+    }, timeoutMs);
     onStart?.(() => {
       if (done) return;
       done = true;
@@ -283,14 +344,130 @@ function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promis
     child.on('close', (code) => {
       if (done) return;
       clearTimeout(timer);
-      const text = out.trim().replaceAll('\n', ' ').replace(/^["«]|["»]$/g, '').slice(0, MAX_TEXT);
-      // A volte il modello non fa la battuta: chiede altre informazioni. Non è
-      // un testo da mostrare a fine partita, meglio la battuta pre-scritta.
-      if (CHIEDE_CHIARIMENTI.test(text)) return reject(new Error(`risposta non utilizzabile: ${text.slice(0, 80)}`));
+      const text = out.trim();
       if (text.length >= 4) return resolve(text);
       reject(new Error(`uscita ${code} senza testo utile — stderr: ${err.trim().slice(0, 300) || '(vuoto)'}`));
     });
   });
+}
+
+/** Una battuta sola, pronta da mostrare. */
+async function askOneLine(prompt: string, onStart?: (kill: () => void) => void): Promise<string> {
+  const text = clampLine(await runClaude(prompt, onStart));
+  // A volte il modello non fa la battuta: chiede altre informazioni. Non è un
+  // testo da mostrare a fine partita, meglio la battuta pre-scritta.
+  if (!usabile(text)) throw new Error(`risposta non utilizzabile: ${text.slice(0, 80)}`);
+  return text;
+}
+
+/**
+ * Chiede all'AI un lotto di battute per i momenti della partita.
+ *
+ * Nel prompt non entra NIENTE che venga da chi gioca: né nickname né nome
+ * della squadra. Al posto del nome c'è il segnaposto {name}, riempito al
+ * momento dell'uso — quindi qui non serve nemmeno il de-aliasing, e la
+ * superficie d'attacco è zero.
+ */
+function warmupPrompt(): string {
+  // il segnaposto va mostrato DENTRO l'elenco: chiederlo solo a parole, dopo
+  // aver ordinato frasi impersonali, è una contraddizione — e infatti il
+  // modello non lo scriveva mai
+  const elenco = MOMENTI.map((m) => `${m.kind}: ${m.nome ? '{name} ' : ''}${m.quando}`).join('\n');
+  return (
+    'Sei SofAI, la mascotte simpatica e un po\' sfottona di un quiz visuale a squadre per famiglie. ' +
+    'Scrivi UNA battuta in italiano per ognuno dei momenti elencati sotto: originali, brevi (max 16 parole), ' +
+    'al massimo 1 emoji, senza virgolette. ' +
+    'ITALIANO NEUTRO, obbligatorio: devono funzionare per bambine, bambini, mamme, papà e nonni, quindi NIENTE ' +
+    'aggettivi, participi o sostantivi al maschile o al femminile riferiti a chi gioca (vietati "bravo/brava", ' +
+    '"sei stato/stata", "primo/prima", "campione/campionessa"). Usa verbi, frasi impersonali e parole invariabili. ' +
+    'Niente asterischi, schwa o forme tipo "benvenut@". ' +
+    'Dove nell\'elenco compare {name}, puoi usare {name} nella battuta: è il posto del nome di chi gioca, ' +
+    'lo riempio io — scrivilo esattamente così, e va bene anche una battuta che non nomina nessuno. ' +
+    'Nei momenti senza {name} invece non nominare nessuno e non scrivere {name}. ' +
+    'In correctStreak puoi usare {n} per il numero di risposte di fila. ' +
+    'Rispondi SOLO con righe nel formato "chiave: battuta", una per riga, senza altro testo.\n\n' +
+    elenco
+  );
+}
+
+/** Estrae le righe "chiave: battuta" e tiene solo quelle mostrabili. */
+export function parseWarmup(raw: string): Partial<Record<SofiaLineKind, string[]>> {
+  const perKind = new Map(MOMENTI.map((m) => [m.kind as string, m]));
+  const out: Partial<Record<SofiaLineKind, string[]>> = {};
+  for (const riga of raw.split('\n')) {
+    const m = /^\s*[-*]?\s*([a-zA-Z]+)\s*[:\-]\s*(.+)$/.exec(riga);
+    if (!m) continue;
+    const momento = perKind.get(m[1]);
+    if (!momento) continue;
+    const testo = clampLine(m[2]);
+    if (!usabile(testo)) continue;
+    // {name} dove non c'è nessuno da nominare lascerebbe un buco nella frase;
+    // il contrario invece va benissimo, una battuta impersonale funziona
+    if (testo.includes('{name}') && !momento.nome) continue;
+    if (testo.includes('{n}') && momento.kind !== 'correctStreak') continue;
+    (out[momento.kind] ??= []).push(testo);
+  }
+  return out;
+}
+
+/**
+ * Prepara le battute PRIMA che servano.
+ *
+ * È tutto il senso di questa funzione: il CLI impiega dai 10 ai 50 secondi e
+ * un reveal dura 6, quindi una battuta chiesta sul momento non fa mai in
+ * tempo. Chiesta all'inizio della partita, invece, è già lì quando serve — e
+ * durante il gioco si vedono battute scritte dall'AI, non solo al podio.
+ */
+export function sofiaWarmup(room: SofiaRoom): void {
+  if (!AI_ENABLED()) return;
+  if ((room.sofiaBatches ?? 0) >= MAX_LOTTI) return;
+  if (room.sofiaBusy) return;
+  // stessa regola dell'altra chiamata: una partita che nessuno sta guardando
+  // va avanti da sola per ore, e non deve continuare a chiedere battute
+  if (!qualcunoGuarda(room)) return;
+  room.sofiaBatches = (room.sofiaBatches ?? 0) + 1;
+  void runWarmup(room);
+}
+
+async function runWarmup(room: SofiaRoom): Promise<void> {
+  room.sofiaBusy = true;
+  try {
+    const t0 = Date.now();
+    const lotto = parseWarmup(
+      await runClaude(warmupPrompt(), (kill) => (room.sofiaKill = kill), WARMUP_TIMEOUT_MS)
+    );
+    const quante = Object.values(lotto).reduce((n, v) => n + v.length, 0);
+    const scartati = MOMENTI.filter((m) => !lotto[m.kind]).map((m) => m.kind);
+    room.sofiaFresh ??= {};
+    for (const [kind, righe] of Object.entries(lotto)) {
+      const k = kind as SofiaLineKind;
+      (room.sofiaFresh[k] ??= []).push(...righe);
+    }
+    console.warn(
+      `[SofAI] lotto ${room.sofiaBatches}: ${quante} battute pronte in ${Date.now() - t0}ms` +
+        (scartati.length ? ` (senza: ${scartati.join(', ')})` : '')
+    );
+  } catch (e) {
+    // niente battute preparate: restano quelle pre-scritte, e in partita non
+    // cambia nulla. Il motivo però va scritto, o resta invisibile.
+    console.warn('[SofAI] lotto non riuscito:', e instanceof Error ? e.message : e);
+  } finally {
+    room.sofiaBusy = false;
+    room.sofiaKill = undefined;
+    const pending = room.sofiaPending;
+    room.sofiaPending = undefined;
+    if (pending) await runAi(room, pending.ctx, pending.seq, pending.onUpdate);
+  }
+}
+
+/** true se almeno una persona è collegata alla partita */
+function qualcunoGuarda(room: SofiaRoom): boolean {
+  return [...room.players.values()].some((p) => p.connections > 0);
+}
+
+/** quante battute preparate restano in tutto */
+function rimaste(room: SofiaRoom): number {
+  return Object.values(room.sofiaFresh ?? {}).reduce((n, v) => n + v.length, 0);
 }
 
 /**
@@ -299,11 +476,21 @@ function askClaude(prompt: string, onStart?: (kill: () => void) => void): Promis
  */
 export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate: () => void): Promise<void> {
   const { kind, name, n } = lineKindFor(ctx);
+  // se l'AI ne ha preparata una per questo momento si usa quella, altrimenti
+  // la pre-scritta: in entrambi i casi compare SUBITO, il gioco non aspetta
+  const preparata = room.sofiaFresh?.[kind]?.shift();
   const pool = LINES[kind];
-  const canned = fillLine(pool[Math.floor(Math.random() * pool.length)], name, n);
+  const testo = fillLine(preparata ?? pool[Math.floor(Math.random() * pool.length)], name, n);
   const seq = ++room.sofiaSeq;
-  room.sofia = { text: canned, mood: MOODS[kind], roundIndex: room.roundIndex, ai: false, seq };
+  room.sofia = { text: testo, mood: MOODS[kind], roundIndex: room.roundIndex, ai: preparata !== undefined, seq };
   onUpdate();
+
+  // Ricarica quando la scorta si assottiglia, e soprattutto quando il momento
+  // che serviva ADESSO non aveva battute: guardare solo il totale non bastava,
+  // perché una partita può battere sempre sullo stesso momento (in solitaria,
+  // per dire, il tempo che scade) e restare a secco proprio lì mentre le altre
+  // scorte sono ancora piene.
+  if (AI_ENABLED() && (preparata === undefined || rimaste(room) < SOGLIA_RICARICA)) sofiaWarmup(room);
 
   if (!AI_ENABLED()) return;
   if (!aiPrompt(ctx, aliasMap(ctx))) return; // welcome/join: nessuna chiamata AI
@@ -312,7 +499,7 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
   // fino allo sweep (2 ore). Generare battute per una stanza vuota non serve a
   // nessuno e ruba tempo alle partite vere: il CLI è una risorsa sola, e con
   // più chiamate in volo passa da 10 a 50 secondi di risposta.
-  if (![...room.players.values()].some((p) => p.connections > 0)) return;
+  if (!qualcunoGuarda(room)) return;
 
   // Quanto ci mette davvero l'AI (misurato in produzione): 10-12 secondi
   // quando è libera, 30-50 se ci sono altre chiamate in volo. Un round ne dura
@@ -327,7 +514,7 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
     // Una chiamata alla volta. Un commento di round che aspetta il suo turno
     // sarebbe vecchio due volte: si lascia perdere. Il podio invece aspetta.
     if (ctx.kind === 'podium') {
-      room.sofiaPending = { ctx, seq };
+      room.sofiaPending = { ctx, seq, onUpdate };
       // La battuta di round in volo non la leggerà più nessuno: la partita è
       // finita. Interromperla fa partire subito quella del podio, che
       // altrimenti aspetterebbe quasi un minuto davanti alla classifica.
@@ -345,7 +532,7 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
   room.sofiaBusy = true;
   try {
     const t0 = Date.now();
-    const text = deAlias(await askClaude(prompt, (kill) => (room.sofiaKill = kill)), alias);
+    const text = deAlias(await askOneLine(prompt, (kill) => (room.sofiaKill = kill)), alias);
     console.warn(`[SofAI] AI ok (${ctx.kind}) in ${Date.now() - t0}ms`);
     // sostituisce solo se nel frattempo non è uscita una battuta più recente
     if (room.sofia && (room.sofia.seq === seq || ctx.kind === 'podium')) {

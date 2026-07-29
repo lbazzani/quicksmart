@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { motion } from 'motion/react';
 import { T } from '@/lib/i18n';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
+import { RulesSheet } from '@/components/RulesSheet';
 
 export default function Home() {
   return (
@@ -49,6 +50,9 @@ export default function Home() {
         <Link href="/solo" className="btn-ghost block py-4 text-center font-display text-xl font-bold text-stone-100">
           🎯 {T.home.solo}
         </Link>
+        <div className="mt-1 flex justify-center">
+          <RulesSheet />
+        </div>
       </motion.nav>
     </main>
   );

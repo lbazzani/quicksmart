@@ -30,7 +30,8 @@ import {
   wrongPenalty,
 } from '../scoring';
 import { dbAddPlayer, dbCreateGame, dbLoadQuestions, dbSavePlayer, dbSaveRound, dbSetGameStatus } from './store';
-import { sofiaOnEvent, type SofiaEventCtx } from '../sofia/sofia';
+import { sofiaOnEvent, sofiaWarmup, type SofiaEventCtx } from '../sofia/sofia';
+import type { SofiaLineKind } from '../sofia/lines';
 import { LiveQuestions, freshSeed, reshuffleChoices } from '../questions/live';
 import { TwinPool } from '../questions/twin';
 import { mulberry32, type Rng } from '../rng';
@@ -102,10 +103,14 @@ export interface Room {
   /** round in cui è già stata usata una gemella, per non abusarne */
   lastTwinRound: number;
   current: CurrentRound | null;
+  // stato di SofAI: il significato dei campi sta in src/lib/sofia/sofia.ts
   sofia: SofiaComment | null;
   sofiaSeq: number;
   sofiaBusy: boolean;
-  sofiaPending?: { ctx: SofiaEventCtx; seq: number };
+  sofiaPending?: { ctx: SofiaEventCtx; seq: number; onUpdate: () => void };
+  sofiaKill?: () => void;
+  sofiaFresh?: Partial<Record<SofiaLineKind, string[]>>;
+  sofiaBatches?: number;
   version: number;
   epoch: number; // invalida i timer di fasi superate
   timer: NodeJS.Timeout | null;
@@ -382,6 +387,9 @@ export class GameEngine {
       room.settings.roundsTotal = room.questions.length;
     }
     dbSetGameStatus(room.gameId, 'playing').catch(console.error);
+    // chiede subito all'AI le battute della partita: ci mette decine di
+    // secondi, ma qui c'è tutto il tempo — il primo reveal è lontano
+    sofiaWarmup(room);
     this.startRound(room, 0);
     return { ok: true };
   }
