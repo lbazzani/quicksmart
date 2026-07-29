@@ -555,16 +555,25 @@ function explain(spec: Spec, correct: number[]): string {
   return t;
 }
 
-/** il prompt dice esplicitamente che il tratteggio è la piega: è la chiave di lettura */
-function makePrompt(rng: Rng, nFolds: number, nPunches: number): string {
+/**
+ * Il prompt dice esplicitamente che il tratteggio è la piega, ed è QUI che va
+ * detta anche la regola della cordonatura quando serve: un buco fatto sulla
+ * piega non si sdoppia. Prima stava solo nella spiegazione, cioè si leggeva
+ * dopo aver risposto, e chi contava in modo ingenuo trovava il proprio errore
+ * fra le opzioni.
+ */
+function makePrompt(rng: Rng, nFolds: number, nPunches: number, onCrease: boolean): string {
   const linea = nFolds === 1 ? 'la linea tratteggiata' : 'le linee tratteggiate';
   const sulla = nFolds === 1 ? 'sulla linea tratteggiata' : 'sulle linee tratteggiate';
   const buco = nPunches === 1 ? 'un buco' : 'i buchi';
-  return pick(rng, [
+  const base = pick(rng, [
     `Il foglio si piega lungo ${linea}, poi si ${nPunches === 1 ? 'fa un buco' : 'fanno i buchi'}: come sarà una volta riaperto?`,
     `Pieghiamo il foglio ${sulla}, facciamo ${buco} e riapriamo tutto: quale foglio viene fuori?`,
     `${nFolds === 1 ? 'La linea tratteggiata mostra' : 'Le linee tratteggiate mostrano'} dove passa la piega: come sarà il foglio riaperto?`,
   ]);
+  return onCrease
+    ? `${base} (attenzione: un buco fatto proprio SULLA piega resta uno solo)`
+    : base;
 }
 
 // ---------------------------------------------------------------------------
@@ -585,12 +594,14 @@ function build(rng: Rng, difficulty: Difficulty): Question {
   const panels: CellSpec[] = [
     sheetCell(n, [], null, color, { crease: folds[0].axis, label: 'foglio' }),
     sheetCell(n, [], region(n, folds, 1), color, {
+      // il tratteggio qui è quello della piega SUCCESSIVA (dove si piegherà
+      // ora): l'etichetta deve raccontarlo, altrimenti dice il falso
       crease: folds[Math.min(1, F - 1)].axis,
-      label: F === 1 ? 'piegato' : '1ª piega',
+      label: F === 1 ? 'piegato' : 'ora piega qui',
     }),
     sheetCell(n, punches, region(n, folds), color, {
       crease: folds[F - 1].axis,
-      label: F === 1 ? 'buchi' : '2ª e buchi',
+      label: F === 1 ? 'buchi' : 'piegato e bucato',
       highlight: true,
     }),
     { shapes: [], unknown: true, label: 'riaperto?' },
@@ -602,7 +613,7 @@ function build(rng: Rng, difficulty: Difficulty): Question {
   return {
     qtype: 'fold',
     difficulty,
-    prompt: makePrompt(rng, F, punches.length),
+    prompt: makePrompt(rng, F, punches.length, punches.some((i) => onCrease(n, folds, i))),
     payload: { kind: 'cells', rows: [panels], arrows: true },
     choices,
     correctIndex,

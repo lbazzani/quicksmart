@@ -942,12 +942,16 @@ export function genSymmetry(rng: Rng, difficulty: Difficulty): Question {
       size,
     });
 
+    // L'asse va disegnato anche sulle OPZIONI, non solo sugli esempi: è la
+    // linea rispetto a cui si giudica la simmetria, e senza vederla si deve
+    // indovinare quale asse intendessimo.
+    const axis = v.exCrease;
     const { choices, correctIndex } = placeChoices(
       rng,
-      { kind: 'cell', cell: cellOf(v.correct, fmt) },
+      { kind: 'cell', cell: cellOf(v.correct, fmt, { crease: axis }) },
       [
-        { kind: 'cell', cell: cellOf(v.wrong[0].shapes, fmt) },
-        { kind: 'cell', cell: cellOf(v.wrong[1].shapes, fmt) },
+        { kind: 'cell', cell: cellOf(v.wrong[0].shapes, fmt, { crease: axis }) },
+        { kind: 'cell', cell: cellOf(v.wrong[1].shapes, fmt, { crease: axis }) },
       ]
     );
 

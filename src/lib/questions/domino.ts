@@ -134,7 +134,11 @@ const ALL_FAMILIES: Family[] = ['halves', 'chain', 'flip', 'alt', 'sum2', 'prev2
 const FAMILY_HINT: Record<Family, string> = {
   halves: 'ogni metà segue la sua regola',
   chain: 'ogni tessera comincia con il numero con cui finiva quella prima',
-  flip: 'ogni tessera nasce girando quella prima di lei',
+  // Attenzione: la regola gira la tessera E può aggiungere un numero. Dire solo
+  // "girando" sarebbe falso e chi lo prendesse alla lettera sceglierebbe il
+  // distrattore "gira e basta". Il suggerimento preciso lo mette `hint` in
+  // Built, calcolato su ciò che la regola fa davvero; questo è il ripiego.
+  flip: 'ogni tessera si gira, e i suoi numeri possono cambiare sempre allo stesso modo',
   // "o tutte e due" non è un dettaglio: una mossa può girare la tessera E
   // aggiungere un numero (1|6 → 6|1 → 2|0). Senza quelle parole chi prova solo
   // mosse "pure" non trova nessuna tessera che torna.
@@ -156,6 +160,12 @@ interface Built {
   mod?: boolean;
   /** che tipo di legame tiene insieme la fila: finisce nel prompt */
   family: Family;
+  /**
+   * Suggerimento su misura, quando quello generico della famiglia direbbe meno
+   * del vero. Il prompt non deve mai promettere una regola più semplice di
+   * quella che serve: chi lo prende alla lettera sceglierebbe un distrattore.
+   */
+  hint?: string;
   /** tessere di riferimento della regola: evidenziate nel disegno */
   refs?: number[];
 }
@@ -630,6 +640,9 @@ function buildD2(rng: Rng): Built {
       tiles,
       hidden,
       family: 'flip',
+      // k è sempre diverso da zero: il suggerimento deve dirlo, altrimenti
+      // "gira e basta" sembrerebbe la risposta giusta ed è un distrattore
+      hint: 'ogni tessera si gira e uno dei due numeri cambia sempre allo stesso modo',
       mod: wrapped,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
@@ -978,6 +991,8 @@ function buildD3(rng: Rng): Built {
       tiles,
       hidden,
       family: 'flip',
+      // qui si gira E si aggiunge lo stesso numero a tutte e due le metà
+      hint: 'ogni tessera si gira e tutti e due i numeri crescono sempre allo stesso modo',
       mod: wrapped,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
@@ -1043,7 +1058,7 @@ function promptFor(hidden: number, n: number, built: Built, rowTurns: boolean): 
       : hidden === 0
         ? 'Quale tessera apre la fila?'
         : 'Quale tessera manca nella fila?';
-  const notes: string[] = [FAMILY_HINT[built.family]];
+  const notes: string[] = [built.hint ?? FAMILY_HINT[built.family]];
   if (built.mod) notes.push('dopo il 6 si torna a 0');
   // con 'flip' e 'alt' il suggerimento parla già di girare la tessera
   if (rowTurns && built.family !== 'flip' && built.family !== 'alt') {
