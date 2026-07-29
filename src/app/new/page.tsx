@@ -3,18 +3,20 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
-import { T } from '@/lib/i18n';
+import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
-import { AvatarPicker, Field, Segmented, inputCls } from '@/components/AvatarPicker';
+import { AvatarPicker, Field, Segmented, Stepper, Toggle, inputCls } from '@/components/AvatarPicker';
 
 export default function NewGame() {
+  const T = useT();
   const router = useRouter();
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState('🦊');
   const [rounds, setRounds] = useState<number | null>(10);
-  const [buzzSec, setBuzzSec] = useState(25);
-  const [answerSec, setAnswerSec] = useState(5);
+  const [buzzSec, setBuzzSec] = useState(40);
+  const [answerSec, setAnswerSec] = useState(12);
+  const [showMistakes, setShowMistakes] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,6 +32,7 @@ export default function NewGame() {
         roundsTotal: rounds,
         buzzWindowSec: buzzSec,
         answerSec,
+        showMistakes,
       });
       if (res.error) throw new Error(res.error);
       saveIdentity(res.code, { playerId: res.playerId, token: res.token, nickname, avatar });
@@ -68,24 +71,29 @@ export default function NewGame() {
           value={rounds}
           onChange={setRounds}
         />
-        {rounds === null && <span className="text-xs text-stone-400">{T.new.roundsOpenHint}</span>}
+        {rounds === null ? (
+          <span className="text-xs text-stone-400">{T.new.roundsOpenHint}</span>
+        ) : (
+          <Stepper value={rounds} onChange={setRounds} min={3} max={30} />
+        )}
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label={T.new.buzzTime}>
           <Segmented
-            options={[{ label: '15', value: 15 }, { label: '25', value: 25 }, { label: '40', value: 40 }]}
+            options={[{ label: '25', value: 25 }, { label: '40', value: 40 }, { label: '60', value: 60 }]}
             value={buzzSec}
             onChange={setBuzzSec}
           />
         </Field>
         <Field label={T.new.answerTime}>
           <Segmented
-            options={[{ label: '5', value: 5 }, { label: '8', value: 8 }, { label: '12', value: 12 }]}
+            options={[{ label: '8', value: 8 }, { label: '12', value: 12 }, { label: '20', value: 20 }]}
             value={answerSec}
             onChange={setAnswerSec}
           />
         </Field>
       </div>
+      <Toggle checked={showMistakes} onChange={setShowMistakes} label={T.new.showMistakes} hint={T.new.showMistakesHint} />
 
       {error && <p className="text-sm font-bold text-rose-400">{error}</p>}
       <button

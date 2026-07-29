@@ -3,11 +3,12 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { T } from '@/lib/i18n';
+import { LangSwitch, useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
 import { AvatarPicker, Field, inputCls } from '@/components/AvatarPicker';
 
 function JoinForm() {
+  const T = useT();
   const router = useRouter();
   const params = useSearchParams();
   const [code, setCode] = useState((params.get('code') ?? '').toUpperCase());
@@ -51,7 +52,8 @@ function JoinForm() {
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 px-6 py-8">
       <header className="flex items-center gap-3">
         <Link href="/" className="btn-ghost px-3 py-1.5 text-lg">←</Link>
-        <h1 className="font-display text-3xl font-extrabold">🔑 {T.join.title}</h1>
+        <h1 className="min-w-0 flex-1 font-display text-3xl font-extrabold">🔑 {T.join.title}</h1>
+        <LangSwitch />
       </header>
 
       <Field label={T.join.code}>

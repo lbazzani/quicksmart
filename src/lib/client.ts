@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GameSnapshot } from './types';
-import { sfx } from './sounds';
+import { sfx, vibra } from './sounds';
 
 export interface Identity {
   playerId: string;
@@ -68,6 +68,7 @@ export function useCountdownTicks(endsAt: number | undefined, offset: number, at
       if (restano <= 0) return;
       if (restano <= TICK_DA_MS) {
         sfx.tick();
+        vibra(12); // il conto alla rovescia si sente anche nel palmo
         timer = setTimeout(passo, restano <= 2000 ? 500 : 1000);
       } else {
         // dormi fino all'inizio del conto alla rovescia sonoro

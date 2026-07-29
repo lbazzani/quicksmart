@@ -13,6 +13,7 @@ interface CreateBody {
   roundsTotal?: number | null;
   buzzWindowSec?: number;
   answerSec?: number;
+  showMistakes?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -33,8 +34,9 @@ export async function POST(req: NextRequest) {
 
   const roundsTotal =
     body.roundsTotal == null ? null : Math.max(1, Math.min(30, Math.round(body.roundsTotal)));
-  const buzzWindowSec = Math.max(5, Math.min(90, Math.round(body.buzzWindowSec ?? (mode === 'solo' ? 15 : 25))));
-  const answerSec = Math.max(3, Math.min(30, Math.round(body.answerSec ?? 5)));
+  // default rivisti dopo i test in famiglia: il tempo per pensare era troppo poco
+  const buzzWindowSec = Math.max(5, Math.min(90, Math.round(body.buzzWindowSec ?? (mode === 'solo' ? 20 : 40))));
+  const answerSec = Math.max(3, Math.min(30, Math.round(body.answerSec ?? 12)));
 
   try {
     const engine = getEngine();
@@ -46,6 +48,7 @@ export async function POST(req: NextRequest) {
       roundsTotal,
       buzzWindowMs: buzzWindowSec * 1000,
       answerMs: answerSec * 1000,
+      showMistakes: body.showMistakes !== false,
     });
     return NextResponse.json({ code, playerId, token });
   } catch (e) {

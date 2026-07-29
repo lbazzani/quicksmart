@@ -7,19 +7,20 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import type { GameSnapshot, PlayerPublic } from '@/lib/types';
-import { T } from '@/lib/i18n';
+import { useT } from '@/lib/lang';
 import { api, loadIdentity, useCountdownTicks, useGame, type Identity } from '@/lib/client';
-import { REOPEN_WINDOW_MS } from '@/lib/scoring';
+import { REOPEN_WINDOW_MS, SOFAI_STEAL_FRACTION } from '@/lib/scoring';
 import { QuestionView, ChoiceView } from '@/components/visuals';
 import { TimerRing } from '@/components/TimerRing';
 import { Buzzer } from '@/components/Buzzer';
 import { SofaiBubble } from '@/components/SofaiBubble';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
-import { isMuted, setMuted, sfx, unlockAudio } from '@/lib/sounds';
+import { isMuted, setMuted, sfx, unlockAudio, vibra } from '@/lib/sounds';
 
 const CHOICE_LABELS = ['A', 'B', 'C'];
 
 export default function GamePage({ params }: { params: Promise<{ code: string }> }) {
+  const T = useT();
   const { code } = use(params);
   const router = useRouter();
   const [identity, setIdentity] = useState<Identity | null | 'loading'>('loading');
@@ -47,6 +48,7 @@ function Center({ children }: { children: React.ReactNode }) {
 }
 
 function Game({ code, identity }: { code: string; identity: Identity }) {
+  const T = useT();
   const { snap, offset, notFound } = useGame(code, identity.playerId);
   const [muted, setMutedState] = useState(true);
   const startedRef = useRef(false);
@@ -73,8 +75,15 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
     if (snap.phase !== prev.phase) {
       if (snap.phase === 'countdown') sfx.countdown();
       if (snap.phase === 'buzz' && prev.phase === 'countdown') sfx.go();
-      if (snap.phase === 'buzz' && prev.phase === 'answer') sfx.wrong(); // riapertura dopo errore
-      if (snap.phase === 'answer') sfx.buzz();
+      if (snap.phase === 'buzz' && prev.phase === 'answer') {
+        sfx.wrong(); // riapertura dopo errore
+        // il pollice di chi ha sbagliato lo sente prima degli occhi
+        if (prev.current?.buzzerId === identity.playerId) vibra([70, 40, 70]);
+      }
+      if (snap.phase === 'answer') {
+        sfx.buzz();
+        if (snap.current?.buzzerId === identity.playerId) vibra(35); // buzz vinto
+      }
       if (snap.phase === 'reveal') {
         const out = snap.current?.outcome;
         if (out === 'correct') {
@@ -83,9 +92,15 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
           const streak = snap.players.find((p) => p.id === snap.current?.buzzerId)?.streak ?? 0;
           if (streak >= 3) sfx.streak();
           else sfx.correct();
-          if (snap.current?.buzzerId === identity.playerId) fireConfetti(false);
-        } else if (out === 'nobody' || out === 'timeout') sfx.nobody();
-        else sfx.wrong();
+          if (snap.current?.buzzerId === identity.playerId) {
+            fireConfetti(false);
+            vibra([25, 40, 25]);
+          }
+        } else if (out === 'nobody' || out === 'timeout' || out === 'stolen') sfx.nobody();
+        else {
+          sfx.wrong();
+          if (prev.current?.buzzerId === identity.playerId) vibra([70, 40, 70]);
+        }
       }
     }
     // qualcuno entra in squadra: in lobby si guarda il codice, non lo schermo
@@ -138,12 +153,13 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
         <Center><p className="animate-pulse font-display text-2xl">🎯 …</p></Center>
       )}
       {snap.status === 'playing' && me && <Play snap={snap} me={me} code={code} identity={identity} offset={offset} />}
-      {snap.status === 'ended' && <Podium snap={snap} meId={identity.playerId} />}
+      {snap.status === 'ended' && <Podium snap={snap} meId={identity.playerId} code={code} identity={identity} />}
     </main>
   );
 }
 
 function EndButton({ code, identity }: { code: string; identity: Identity }) {
+  const T = useT();
   const [confirm, setConfirm] = useState(false);
   return confirm ? (
     <span className="flex items-center gap-1.5">
@@ -167,6 +183,7 @@ function EndButton({ code, identity }: { code: string; identity: Identity }) {
 // ---------------------------------------------------------------------------
 
 function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPublic; code: string; identity: Identity }) {
+  const T = useT();
   const [copied, setCopied] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
@@ -281,6 +298,7 @@ function Play({
   identity: Identity;
   offset: number;
 }) {
+  const T = useT();
   const cur = snap.current;
   const [tooLate, setTooLate] = useState(false);
   const [buzzing, setBuzzing] = useState(false);
@@ -301,6 +319,8 @@ function Play({
   // riaperta solo dopo un errore: chi è appena entrato è in lockedOut ma non
   // ha fatto sbagliare nessuno
   const reopened = (cur?.errors ?? 0) > 0;
+  // opzioni già scelte e sbagliate (arrivano solo se l'host mostra gli errori)
+  const burned = new Set(cur?.wrongIndexes ?? []);
 
   // il conto alla rovescia si sente, non solo si vede: negli ultimi secondi
   // del tempo per prenotarsi e di quello per rispondere
@@ -361,7 +381,13 @@ function Play({
           {snap.phase === 'buzz' && cur.buzzDeadline && (
             <TimerRing
               endsAt={cur.buzzDeadline}
-              durationMs={reopened ? REOPEN_WINDOW_MS : snap.settings.buzzWindowMs}
+              durationMs={
+                reopened
+                  ? REOPEN_WINDOW_MS
+                  : cur.special === 'sofai'
+                    ? snap.settings.buzzWindowMs * SOFAI_STEAL_FRACTION
+                    : snap.settings.buzzWindowMs
+              }
               offset={offset}
               size={54}
             />
@@ -374,10 +400,21 @@ function Play({
 
       <ScoreStrip players={snap.players} meId={me.id} buzzerId={cur.buzzerId} showDeltas={snap.phase === 'reveal'} />
 
-      {/* countdown */}
+      {/* countdown, con l'anteprima di cosa sta arrivando: toglie l'ansia
+          da domanda a sorpresa e dà un secondo per "mettersi in modalità" */}
       <AnimatePresence>
         {snap.phase === 'countdown' && cur.countdownEndsAt && (
-          <Countdown key="cd" endsAt={cur.countdownEndsAt} offset={offset} />
+          <Countdown
+            key="cd"
+            endsAt={cur.countdownEndsAt}
+            offset={offset}
+            qtypeLabel={T.qtypes[cur.qtype] ?? cur.qtype}
+            difficulty={cur.difficulty}
+            value={cur.value}
+            buzzSec={Math.round(snap.settings.buzzWindowMs / 1000)}
+            answerSec={Math.round(snap.settings.answerMs / 1000)}
+            roundIndex={snap.roundIndex}
+          />
         )}
       </AnimatePresence>
 
@@ -417,34 +454,42 @@ function Play({
               ⚡ {T.game.lampoRound}
             </motion.span>
           )}
-          <p className="text-center font-display text-lg font-bold leading-tight">{cur.prompt}</p>
-          <QuestionView payload={cur.payload} />
-          {reopened && snap.phase === 'buzz' && (
-            <span className="rounded-full bg-teal-400/15 px-3 py-1 text-xs font-extrabold text-teal-200">
-              🔁 {T.game.reopened}
-            </span>
+          {cur.special === 'sofai' && snap.phase === 'buzz' && !reopened && (
+            <motion.span
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="rounded-full bg-rose-500/20 px-3 py-1 text-xs font-extrabold text-rose-200 ring-1 ring-rose-400/60"
+            >
+              🤖 {T.game.sofaiRound}
+            </motion.span>
           )}
+          <p className="text-center font-display text-xl font-bold leading-snug">{cur.prompt}</p>
+          <QuestionView payload={cur.payload} />
         </motion.div>
       )}
 
-      {/* opzioni: visibili a tutti, attive solo per chi risponde */}
-      {(snap.phase === 'answer' || snap.phase === 'reveal') && (
+      {/* opzioni: visibili a tutti, attive solo per chi risponde. Durante una
+          riapertura (con "errori visibili") compaiono già in prenotazione, con
+          quelle bruciate sbarrate: si vede cosa NON è, e conviene provarci */}
+      {cur.choices.length > 0 && snap.phase !== 'countdown' && (
         <div className="grid grid-cols-3 gap-2">
           {cur.choices.map((c, i) => {
             const isCorrect = snap.phase === 'reveal' && cur.correctIndex === i;
-            const isWrongPick = snap.phase === 'reveal' && cur.answeredIndex === i && cur.correctIndex !== i;
-            const active = snap.phase === 'answer' && iAmBuzzer && chosen === null;
+            const isWrongPick =
+              (snap.phase === 'reveal' && cur.answeredIndex === i && cur.correctIndex !== i) ||
+              (burned.has(i) && !isCorrect);
+            const active = snap.phase === 'answer' && iAmBuzzer && chosen === null && !burned.has(i);
             return (
               <motion.button
                 key={i}
                 whileTap={active ? { scale: 0.93 } : undefined}
                 disabled={!active}
                 onClick={() => doAnswer(i)}
-                className={`relative flex flex-col items-center gap-1 rounded-2xl border-2 px-1 py-2.5 transition-colors ${
+                className={`relative flex flex-col items-center gap-1 rounded-2xl border-2 px-1 py-3 transition-colors ${
                   isCorrect
                     ? 'border-emerald-400 bg-emerald-400/15 shadow-[0_0_18px_rgba(52,211,153,0.4)]'
                     : isWrongPick
-                      ? 'border-rose-400 bg-rose-400/15'
+                      ? 'border-rose-400/70 bg-rose-400/10 opacity-60'
                       : chosen === i
                         ? 'border-orange-300 bg-orange-300/10'
                         : 'border-white/12 bg-white/5'
@@ -468,6 +513,22 @@ function Play({
       <div className={`flex flex-col items-center gap-3 pb-3 ${snap.phase === 'buzz' ? 'mt-auto' : 'mt-3'}`}>
         {snap.phase === 'buzz' && (
           <>
+            {/* dopo un errore si dice CHI ha sbagliato e (se l'host lo mostra)
+                che cosa: il messaggio implicito non lo capiva nessuno */}
+            {reopened && cur.lastMiss && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-col items-center gap-1 text-center"
+              >
+                <span className="rounded-full bg-rose-500/15 px-4 py-1.5 text-base font-extrabold text-rose-300">
+                  ❌ {cur.lastMiss.avatar} {cur.lastMiss.nickname}{' '}
+                  {cur.lastMiss.mute ? T.game.missedMute : T.game.missed}
+                  {cur.lastMiss.choiceIndex != null && ` — ${CHOICE_LABELS[cur.lastMiss.choiceIndex]} ✗`}
+                </span>
+                {!lockedMe && <span className="text-sm font-bold text-teal-300">🔁 {T.game.stealHint}</span>}
+              </motion.div>
+            )}
             <AnimatePresence>
               {tooLate && (
                 <motion.span
@@ -489,7 +550,13 @@ function Play({
             ) : (
               <Buzzer
                 endsAt={cur.buzzDeadline ?? 0}
-                durationMs={reopened ? REOPEN_WINDOW_MS : snap.settings.buzzWindowMs}
+                durationMs={
+                  reopened
+                    ? REOPEN_WINDOW_MS
+                    : cur.special === 'sofai'
+                      ? snap.settings.buzzWindowMs * SOFAI_STEAL_FRACTION
+                      : snap.settings.buzzWindowMs
+                }
                 offset={offset}
                 disabled={buzzing}
                 onBuzz={doBuzz}
@@ -516,14 +583,33 @@ function Play({
           <p className="font-display text-lg font-extrabold text-orange-300">⚡ {T.game.youAnswer}</p>
         )}
 
-        {snap.phase === 'reveal' && <Reveal snap={snap} meId={me.id} offset={offset} />}
+        {snap.phase === 'reveal' && <Reveal snap={snap} meId={me.id} offset={offset} code={code} identity={identity} />}
         {snap.phase !== 'reveal' && <SofaiBubble comment={snap.sofia} compact />}
       </div>
     </div>
   );
 }
 
-function Countdown({ endsAt, offset }: { endsAt: number; offset: number }) {
+function Countdown({
+  endsAt,
+  offset,
+  qtypeLabel,
+  difficulty,
+  value,
+  buzzSec,
+  answerSec,
+  roundIndex,
+}: {
+  endsAt: number;
+  offset: number;
+  qtypeLabel: string;
+  difficulty: number;
+  value: number;
+  buzzSec: number;
+  answerSec: number;
+  roundIndex: number;
+}) {
+  const T = useT();
   const [n, setN] = useState(3);
   useEffect(() => {
     const iv = setInterval(() => {
@@ -533,12 +619,18 @@ function Countdown({ endsAt, offset }: { endsAt: number; offset: number }) {
     }, 80);
     return () => clearInterval(iv);
   }, [endsAt, offset]);
+  // il briefing di SofAI: che cosa arriva, quanto vale, quanto tempo c'è.
+  // Ruota con il round, così non ripete sempre la stessa formula.
+  const recap = T.game.countdownRecap[roundIndex % T.game.countdownRecap.length]
+    .replaceAll('{pts}', String(value))
+    .replaceAll('{buzz}', String(buzzSec))
+    .replaceAll('{ans}', String(answerSec));
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex flex-1 items-center justify-center py-16"
+      className="flex flex-1 flex-col items-center justify-center gap-4 py-10"
     >
       <motion.span
         key={n}
@@ -548,7 +640,63 @@ function Countdown({ endsAt, offset }: { endsAt: number; offset: number }) {
       >
         {n > 0 ? n : 'VIA!'}
       </motion.span>
+      <motion.span
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="rounded-full bg-white/5 px-4 py-1.5 text-base font-bold text-stone-200"
+      >
+        {T.game.next}: {qtypeLabel} · {'★'.repeat(difficulty)}{'☆'.repeat(3 - difficulty)}
+      </motion.span>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="flex max-w-sm items-start gap-2 px-4"
+      >
+        <SofaiAvatar mood="teasing" size={40} />
+        <p className="card flex-1 rounded-bl-sm px-3 py-2 text-sm leading-snug text-stone-200">{recap}</p>
+      </motion.div>
     </motion.div>
+  );
+}
+
+function PlayerChip({
+  p,
+  rank,
+  meId,
+  buzzerId,
+  showDeltas,
+  showRank = false,
+}: {
+  p: PlayerPublic;
+  rank: number;
+  meId: string;
+  buzzerId?: string;
+  showDeltas: boolean;
+  showRank?: boolean;
+}) {
+  return (
+    <div
+      className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-sm ${
+        p.id === buzzerId
+          ? 'bg-amber-400/25 ring-1 ring-amber-300'
+          : p.id === meId
+            ? 'bg-orange-400/20 ring-1 ring-orange-300/60'
+            : 'bg-white/5'
+      }`}
+    >
+      {showRank && <span className="font-display text-xs font-extrabold text-orange-300">#{rank + 1}</span>}
+      <span>{rank === 0 && p.score > 0 ? '👑' : ''}{p.avatar}</span>
+      <span className="max-w-16 truncate font-bold">{p.nickname}</span>
+      <span className="font-display shrink-0 font-extrabold text-stone-200">{p.score}</span>
+      {p.streak >= 3 && <span className="text-xs">🔥{p.streak}</span>}
+      {showDeltas && p.lastDelta !== 0 && (
+        <span className={`popscore font-display text-xs font-extrabold ${p.lastDelta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+          {p.lastDelta > 0 ? '+' : ''}{p.lastDelta}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -563,35 +711,38 @@ function ScoreStrip({
   buzzerId?: string;
   showDeltas: boolean;
 }) {
+  // il MIO chip sta fuori dalla zona che scorre: con 5+ giocatori sparivo
+  // dalla classifica proprio mentre volevo sapere come sto andando
+  const meRank = players.findIndex((p) => p.id === meId);
+  const me = meRank >= 0 ? players[meRank] : undefined;
   return (
-    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-      {players.map((p, rank) => (
-        <div
-          key={p.id}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-sm ${
-            p.id === buzzerId
-              ? 'bg-amber-400/25 ring-1 ring-amber-300'
-              : p.id === meId
-                ? 'bg-orange-400/20 ring-1 ring-orange-300/60'
-                : 'bg-white/5'
-          }`}
-        >
-          <span>{rank === 0 && p.score > 0 ? '👑' : ''}{p.avatar}</span>
-          <span className="max-w-16 truncate font-bold">{p.nickname}</span>
-          <span className="font-display shrink-0 font-extrabold text-stone-200">{p.score}</span>
-          {p.streak >= 3 && <span className="text-xs">🔥{p.streak}</span>}
-          {showDeltas && p.lastDelta !== 0 && (
-            <span className={`popscore font-display text-xs font-extrabold ${p.lastDelta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {p.lastDelta > 0 ? '+' : ''}{p.lastDelta}
-            </span>
-          )}
-        </div>
-      ))}
+    <div className="flex items-center gap-1.5">
+      {me && <PlayerChip p={me} rank={meRank} meId={meId} buzzerId={buzzerId} showDeltas={showDeltas} showRank />}
+      <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1">
+        {players.map((p, rank) =>
+          p.id === meId ? null : (
+            <PlayerChip key={p.id} p={p} rank={rank} meId={meId} buzzerId={buzzerId} showDeltas={showDeltas} />
+          )
+        )}
+      </div>
     </div>
   );
 }
 
-function Reveal({ snap, meId, offset }: { snap: GameSnapshot; meId: string; offset: number }) {
+function Reveal({
+  snap,
+  meId,
+  offset,
+  code,
+  identity,
+}: {
+  snap: GameSnapshot;
+  meId: string;
+  offset: number;
+  code: string;
+  identity: Identity;
+}) {
+  const T = useT();
   const cur = snap.current!;
   const winner = snap.players.find((p) => p.id === cur.buzzerId);
   const outcome = cur.outcome;
@@ -603,6 +754,9 @@ function Reveal({ snap, meId, offset }: { snap: GameSnapshot; meId: string; offs
   } else if (outcome === 'nobody') {
     banner = T.game.nobodyBuzzed;
     color = 'text-stone-300';
+  } else if (outcome === 'stolen') {
+    banner = `😼 ${T.game.stolen}`;
+    color = 'text-amber-300';
   } else if (outcome === 'timeout') {
     banner = T.game.timeoutSolo;
     color = 'text-amber-300';
@@ -610,20 +764,90 @@ function Reveal({ snap, meId, offset }: { snap: GameSnapshot; meId: string; offs
     banner = `😅 ${T.game.exhausted}`;
     color = 'text-rose-300';
   }
-  void meId;
   return (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="flex w-full flex-col items-center gap-2.5">
-      <p className={`font-display text-2xl font-extrabold ${color}`}>{banner}</p>
+      <p className={`text-center font-display text-2xl font-extrabold ${color}`}>{banner}</p>
+      {/* quando nessuno ha indovinato, la risposta giusta si dice a voce:
+          il solo bordo verde nella griglia passava inosservato */}
+      {outcome !== 'correct' && cur.correctIndex != null && (
+        <p className="font-bold text-emerald-300">
+          ✅ {T.game.theAnswerWas}: {CHOICE_LABELS[cur.correctIndex]}
+        </p>
+      )}
       {cur.explanation && (
-        <p className="card max-w-md px-4 py-2 text-center text-sm text-stone-300">💡 {cur.explanation}</p>
+        <p className="card w-full max-w-md px-4 py-3 text-center text-base leading-snug text-stone-200">
+          💡 {cur.explanation}
+        </p>
       )}
       <SofaiBubble comment={snap.sofia} />
+      {/* chi ha vinto il round ha il microfono: una riga per sfottere gli altri
+          (in solitaria non c'è nessuno da sfottere) */}
+      {snap.mode === 'team' && <ChatPanel snap={snap} meId={meId} code={code} identity={identity} />}
       {cur.revealUntil && (
         <div className="h-1 w-40 overflow-hidden rounded-full bg-white/10">
-          <ShrinkBar endsAt={cur.revealUntil} durationMs={snap.settings.revealMs} offset={offset} />
+          <ShrinkBar endsAt={cur.revealUntil} durationMs={cur.revealMs ?? snap.settings.revealMs} offset={offset} />
         </div>
       )}
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CHAT — parla chi se l'è guadagnato (vincitore del round o della partita)
+// ---------------------------------------------------------------------------
+
+function ChatPanel({ snap, meId, code, identity }: { snap: GameSnapshot; meId: string; code: string; identity: Identity }) {
+  const T = useT();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const canTalk = snap.chatOpenFor === meId;
+  const messages = snap.chat.slice(-3);
+  if (!canTalk && messages.length === 0) return null;
+
+  async function send() {
+    const t = text.trim();
+    if (!t || busy) return;
+    setBusy(true);
+    const r = await api(`/api/game/${code}/say`, { playerId: identity.playerId, token: identity.token, text: t });
+    setBusy(false);
+    if (r.ok) setText('');
+  }
+
+  return (
+    <div className="flex w-full max-w-md flex-col gap-1.5">
+      <AnimatePresence>
+        {messages.map((m) => (
+          <motion.div
+            key={m.seq}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="flex items-start gap-2 rounded-2xl rounded-bl-sm bg-teal-400/10 px-3 py-2 ring-1 ring-teal-300/25"
+          >
+            <span className="text-xl">{m.avatar}</span>
+            <p className="min-w-0 text-sm leading-snug">
+              <b className="text-teal-200">{m.nickname}</b>{' '}
+              <span className="break-words text-stone-100">{m.text}</span>
+            </p>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      {canTalk && (
+        <div className="flex items-center gap-1.5">
+          <input
+            className="min-w-0 flex-1 rounded-xl border border-teal-300/40 bg-white/5 px-3 py-2.5 text-sm font-semibold text-stone-100 placeholder:text-stone-500"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && send()}
+            placeholder={T.game.chatPlaceholder}
+            maxLength={80}
+            enterKeyHint="send"
+          />
+          <button onClick={send} disabled={busy || !text.trim()} className="btn-primary px-3.5 py-2.5 text-sm">
+            🎤 {T.game.chatSend}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -642,12 +866,28 @@ function ShrinkBar({ endsAt, durationMs, offset }: { endsAt: number; durationMs:
 // PODIO
 // ---------------------------------------------------------------------------
 
-function Podium({ snap, meId }: { snap: GameSnapshot; meId: string }) {
+function Podium({ snap, meId, code, identity }: { snap: GameSnapshot; meId: string; code: string; identity: Identity }) {
+  const T = useT();
   const ranked = snap.players;
   const top = ranked.slice(0, 3);
   const medals = ['🥇', '🥈', '🥉'];
   const heights = [148, 108, 84];
   const order = top.length === 3 ? [1, 0, 2] : top.map((_, i) => i);
+  const me = ranked.find((p) => p.id === meId);
+  // la rivincita la comanda chi ha vinto (l'host resta il padrone di casa)
+  const canRematch = snap.mode === 'team' && (ranked[0]?.id === meId || me?.isHost === true);
+  const [rematchBusy, setRematchBusy] = useState(false);
+
+  async function rematch(applySuggestion: boolean) {
+    if (rematchBusy) return;
+    setRematchBusy(true);
+    const r = await api(`/api/game/${code}/rematch`, {
+      playerId: identity.playerId,
+      token: identity.token,
+      applySuggestion,
+    });
+    if (!r.ok) setRematchBusy(false); // se riparte, ci pensa lo snapshot
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-5">
@@ -695,6 +935,51 @@ function Podium({ snap, meId }: { snap: GameSnapshot; meId: string }) {
       )}
 
       <SofaiBubble comment={snap.sofia} />
+
+      {/* la chat del podio: il microfono è di chi ha vinto */}
+      {snap.mode === 'team' && (
+        <>
+          <ChatPanel snap={snap} meId={meId} code={code} identity={identity} />
+          {snap.chatOpenFor === meId && (
+            <p className="-mt-3 text-center text-xs font-bold text-teal-300">{T.game.chatMic}</p>
+          )}
+        </>
+      )}
+
+      {/* rivincita: decide chi ha vinto, con l'eventuale proposta di SofAI */}
+      {snap.mode === 'team' && (
+        <div className="card flex flex-col gap-2.5 px-4 py-3">
+          {snap.suggestion && (
+            <p className="text-sm leading-snug text-stone-300">
+              <b className="text-amber-300">💡 {T.podium.suggestionTitle}:</b> {snap.suggestion.text}
+            </p>
+          )}
+          {canRematch ? (
+            <div className="flex flex-col gap-2">
+              {snap.suggestion && (
+                <button
+                  disabled={rematchBusy}
+                  onClick={() => rematch(true)}
+                  className="btn-primary py-3 font-display text-lg"
+                >
+                  ✨ {T.podium.rematchTweak}
+                </button>
+              )}
+              <button
+                disabled={rematchBusy}
+                onClick={() => rematch(false)}
+                className={`${snap.suggestion ? 'btn-ghost font-bold' : 'btn-primary'} py-3 font-display text-lg`}
+              >
+                🔁 {T.podium.rematch}
+              </button>
+            </div>
+          ) : (
+            <p className="animate-pulse text-center text-sm text-stone-400">
+              👑 {T.podium.waitWinner}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="card divide-y divide-white/8 px-4 py-1">
         {ranked.map((p, i) => {

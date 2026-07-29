@@ -50,13 +50,13 @@ describe('scoring', () => {
     expect(correctPoints(100, -2, 1)).toBe(100);
   });
 
-  it('penalità', () => {
-    expect(wrongPenalty(200)).toBe(-100);
-    expect(wrongPenalty(140)).toBe(-70);
-    expect(mutePenalty(200)).toBe(-120);
-    expect(soloTimeoutPenalty(1)).toBe(-40);
-    expect(soloTimeoutPenalty(3)).toBe(-120);
-    expect(NOBODY_PENALTY).toBe(-25);
+  it('penalità (ritarate dopo i test in famiglia: pungere, non castigare)', () => {
+    expect(wrongPenalty(200)).toBe(-60);
+    expect(wrongPenalty(140)).toBe(-42);
+    expect(mutePenalty(200)).toBe(-80);
+    expect(soloTimeoutPenalty(1)).toBe(-25);
+    expect(soloTimeoutPenalty(3)).toBe(-75);
+    expect(NOBODY_PENALTY).toBe(-10);
   });
 
   it('rampa di difficoltà nei round', () => {

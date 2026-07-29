@@ -21,6 +21,8 @@ import { genDomino } from './domino';
 import { genSymmetry } from './symmetry';
 import { genWeights } from './weights';
 import { genPattern } from './pattern';
+import { genMajority } from './majority';
+import { genPairs } from './pairs';
 
 export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Question> = {
   sequence: genSequence,
@@ -41,19 +43,24 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
   symmetry: genSymmetry,
   weights: genWeights,
   pattern: genPattern,
+  majority: genMajority,
+  pairs: genPairs,
 };
 
 /**
  * Tipi sospesi dal gioco: restano nel codice e nei test, ma non vengono pescati.
  *
- * Ci si finisce per un motivo solo: un audit alla cieca ha mostrato che si può
- * ragionare bene e sbagliare comunque. Ci sono passati `fold`, `symmetry` e
- * `domino`; sono rientrati dopo che la regola decisiva è stata portata nel
- * prompt, l'asse di simmetria disegnato anche sulle opzioni e i suggerimenti
- * resi veri. Le condizioni del loro rientro sono custodite da
- * tests/fairness.test.ts.
+ * Ci si finisce per un motivo solo: la domanda non è un gioco onesto per chi la
+ * riceve. Un audit alla cieca ce ne ha mandati tre (si poteva ragionare bene e
+ * sbagliare comunque); `fold`, `symmetry` e `domino` erano rientrati dopo le
+ * correzioni custodite da tests/fairness.test.ts.
+ *
+ * `fold` e `domino` sono di nuovo fuori dopo i test in famiglia (luglio 2026):
+ * stavolta non per l'equità ma per la comprensibilità — il foglio piegato non
+ * si capisce sul telefono e le tessere risultano troppo complicate. Rientrano
+ * solo con una presentazione ripensata e riprovata dal vivo.
  */
-export const QUARANTINED: QuestionType[] = [];
+export const QUARANTINED: QuestionType[] = ['fold', 'domino'];
 
 /** tutti i tipi esistenti, inclusi quelli in quarantena (per test e audit) */
 export const ALL_QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];

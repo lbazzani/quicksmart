@@ -68,6 +68,8 @@ Tre tipi — `fold`, `symmetry`, `domino` — sono stati **sospesi e poi riammes
 
 Sono rientrati dopo che la regola è stata portata nel prompt, l'asse disegnato anche sulle opzioni e i suggerimenti resi veri: il nuovo audit ha dato **36 risposte su 36**, con tutte le regole dichiarate prima di rispondere. Le condizioni del rientro sono ora custodite da `tests/fairness.test.ts`, che fallisce se qualcuno le rimuove.
 
+**Aggiornamento (luglio 2026, dopo i test in famiglia):** `fold` e `domino` sono di nuovo in quarantena, stavolta non per l'equità ma per la **comprensibilità** — il foglio piegato non si capisce sul telefono, le tessere risultano troppo complicate. Al loro posto sono entrati due tipi pensati per capirsi al primo sguardo: `majority` (gruppi di figure a confronto: quale ne ha di più?) e `pairs` (tutte le figure sono in coppia, una è sola). Le loro garanzie — conteggi ricontati, scarto ≥ 2 del gruppo vincente, una e una sola figura senza gemella — stanno anch'esse in `tests/fairness.test.ts`.
+
 Lo stesso audit ha scovato un difetto che avevo introdotto io nel renderer: una fila di tre forme sforava il riquadro e l'SVG ne tagliava oltre un terzo. Le forme ora stanno intere; per la leggibilità cresce la cella, non la figura.
 
 ### Tre strumenti di misura, nati da tre errori

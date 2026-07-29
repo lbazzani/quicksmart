@@ -21,6 +21,19 @@ export function isMuted(): boolean {
   return localStorage.getItem('qs:muted') === '1';
 }
 
+/**
+ * Vibrazione breve dove il browser la offre (Android sì, iOS Safari no).
+ * Sul telefono il feedback al pollice arriva prima di occhi e orecchie;
+ * non dipende dal mute audio, che riguarda solo i suoni.
+ */
+export function vibra(pattern: number | number[]) {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern);
+  } catch {
+    // niente vibrazione: pazienza
+  }
+}
+
 export function setMuted(m: boolean) {
   localStorage.setItem('qs:muted', m ? '1' : '0');
 }

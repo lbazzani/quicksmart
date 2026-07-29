@@ -2,13 +2,17 @@
 
 import Link from 'next/link';
 import { motion } from 'motion/react';
-import { T } from '@/lib/i18n';
+import { LangSwitch, useT } from '@/lib/lang';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
 import { RulesSheet } from '@/components/RulesSheet';
+import { Onboarding } from '@/components/Onboarding';
 
 export default function Home() {
+  const T = useT();
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-8 px-6 py-10">
+    <main className="relative mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-8 px-6 py-10">
+      <Onboarding />
+      <LangSwitch className="absolute right-4 top-4" />
       <motion.div
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}

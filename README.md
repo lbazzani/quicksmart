@@ -2,7 +2,7 @@
 
 **Online su [quicksmart.it](https://quicksmart.it)**
 
-Quiz visuale stile test del QI, in tempo reale, mobile-first. Crea una squadra, condividi il codice (o il QR), prenotati per primo e rispondi in 5 secondi. Con **SofAI**, la mascotte che commenta la partita (battute generate da Claude).
+Quiz visuale stile test del QI, in tempo reale, mobile-first. Crea una squadra, condividi il codice (o il QR), prenotati per primo e rispondi al volo. Con **SofAI**, la mascotte che commenta la partita (battute generate da Claude).
 
 Regole complete e architettura: [GAME_DESIGN.md](GAME_DESIGN.md).
 

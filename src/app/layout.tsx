@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Baloo_2, Nunito } from 'next/font/google';
+import { SwRegister } from '@/components/SwRegister';
+import { LangProvider } from '@/lib/lang';
 import './globals.css';
 
 const baloo = Baloo_2({
@@ -16,7 +18,7 @@ const nunito = Nunito({
 
 // niente "per primo": il testo si rivolge a chiunque giochi (vedi i18n.ts)
 const DESCRIPTION =
-  'Quiz visuali in tempo reale per tutta la famiglia: guarda la figura, prenotati prima degli altri e rispondi in 5 secondi.';
+  'Quiz visuali in tempo reale per tutta la famiglia: guarda la figura, prenotati prima degli altri e rispondi al volo.';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://quicksmart.it'),
@@ -57,12 +59,22 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: '#16100c',
+  // il contenuto arriva fino ai bordi (notch compreso): i padding con
+  // env(safe-area-inset-*) stanno in globals.css
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="it" className={`${baloo.variable} ${nunito.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        <LangProvider>{children}</LangProvider>
+        <div className="gira-telefono" aria-hidden="true">
+          <span className="text-5xl">📱</span>
+          <span className="font-display text-xl">Gira il telefono in verticale</span>
+        </div>
+        <SwRegister />
+      </body>
     </html>
   );
 }

@@ -48,9 +48,12 @@ async function correctIndex(code: string): Promise<number> {
   return ci;
 }
 
-async function newPlayer(browser: Browser): Promise<Page> {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
-  return ctx.newPage();
+async function newPlayer(browser: Browser, locale = 'it-IT'): Promise<Page> {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, locale });
+  const page = await ctx.newPage();
+  // l'onboarding compare solo al primo ingresso: nei test i giocatori sono "veterani"
+  await page.addInitScript(() => localStorage.setItem('qs:onboarded', '1'));
+  return page;
 }
 
 test('partita a squadre con 3 giocatori', async ({ browser }) => {
@@ -101,7 +104,12 @@ test('partita a squadre con 3 giocatori', async ({ browser }) => {
   await luca.locator('button:has-text("A"), button:has-text("B"), button:has-text("C")').nth(ci1).click();
   let s = await waitState(code, (x) => x.phase === 'reveal');
   expect(s.current?.outcome).toBe('correct');
-  await luca.waitForTimeout(500);
+
+  // — chat del vincitore: Luca ha il microfono, gli altri leggono
+  await luca.getByPlaceholder('Dì qualcosa agli altri…').fill('gg, troppo facile 😎');
+  await luca.getByRole('button', { name: /Invia/ }).click();
+  await expect(anna.getByText('gg, troppo facile 😎')).toBeVisible();
+  await luca.waitForTimeout(300);
   await luca.screenshot({ path: `${SHOTS}/07-reveal-giusto.png` });
 
   // ROUND 2: Anna sbaglia, la domanda riapre, Marco indovina
@@ -133,6 +141,31 @@ test('partita a squadre con 3 giocatori', async ({ browser }) => {
   expect(byNick['Luca']).toBeGreaterThan(0);
   expect(byNick['Marco']).toBeGreaterThan(0);
   expect(byNick['Anna']).toBeLessThan(0);
+
+  // — rivincita: la decide chi ha vinto, stessa stanza, punteggi azzerati
+  const pages: Record<string, Page> = { Anna: anna, Luca: luca, Marco: marco };
+  const winnerPage = pages[s.players[0].nickname];
+  await winnerPage.getByRole('button', { name: /Rivincita/ }).first().click();
+  s = await waitState(code, (x) => x.status === 'playing' && x.roundIndex === 0);
+  for (const p of s.players) expect(p.score).toBe(0);
+  await waitState(code, (x) => x.phase === 'buzz' && x.roundIndex === 0);
+  await anna.screenshot({ path: `${SHOTS}/12-rivincita.png` });
+
+  // il capitano può chiudere anche la rivincita
+  await anna.getByRole('button', { name: '🏁' }).click();
+  await anna.getByRole('button', { name: /Termina partita\?/ }).click();
+  await waitState(code, (x) => x.status === 'ended');
+});
+
+test('interfaccia in inglese per chi ha il browser in inglese, con cambio lingua', async ({ browser }) => {
+  const page = await newPlayer(browser, 'en-US');
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: /Join with a code/ })).toBeVisible();
+  // il cambio lingua riporta all'italiano e viene ricordato
+  await page.getByRole('button', { name: 'language' }).click();
+  await expect(page.getByRole('link', { name: /Entra con un codice/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('link', { name: /Entra con un codice/ })).toBeVisible();
 });
 
 test('modalità solo con timeout e risposta', async ({ browser }) => {

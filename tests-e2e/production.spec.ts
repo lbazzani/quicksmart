@@ -42,8 +42,12 @@ async function waitState(code: string, pred: (s: Snap) => boolean, timeoutMs = 6
 }
 
 async function phone(browser: Browser): Promise<Page> {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
-  return ctx.newPage();
+  // locale esplicito: l'interfaccia segue la lingua del browser e questo test
+  // parla italiano; l'onboarding del primo ingresso qui non serve
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, locale: 'it-IT' });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem('qs:onboarded', '1'));
+  return page;
 }
 
 test('sito pubblico: partita a squadre completa', async ({ browser }) => {

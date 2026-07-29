@@ -161,8 +161,12 @@ function Crease({ dir }: { dir: NonNullable<CellSpec['crease']> }) {
   );
 }
 
-/** Una cella 100×100: 1 forma centrata, o più forme in griglia/fila. */
-export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
+/**
+ * Una cella 100×100: 1 forma centrata, o più forme in griglia/fila.
+ * Con `fluid` la cella si restringe con lo schermo (fino a `size` al massimo):
+ * sui telefoni stretti una riga da 5 celle fisse usciva dal bordo.
+ */
+export function Cell({ cell, size = 76, fluid = false }: { cell: CellSpec; size?: number; fluid?: boolean }) {
   const n = cell.shapes.length;
   let content: React.ReactNode;
   if (cell.unknown || n === 0) {
@@ -202,7 +206,13 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
     });
   }
   const svg = (
-    <svg viewBox="0 0 100 100" width={size} height={size} className="shrink-0">
+    <svg
+      viewBox="0 0 100 100"
+      width={fluid ? undefined : size}
+      height={fluid ? undefined : size}
+      style={fluid ? { width: '100%', maxWidth: size, height: 'auto', aspectRatio: '1 / 1' } : undefined}
+      className="shrink-0"
+    >
       <rect
         x={2}
         y={2}
@@ -226,7 +236,7 @@ export function Cell({ cell, size = 76 }: { cell: CellSpec; size?: number }) {
   );
   if (!cell.label) return svg;
   return (
-    <div className="flex flex-col items-center gap-0.5">
+    <div className={`flex flex-col items-center gap-0.5 ${fluid ? 'w-full min-w-0' : ''}`}>
       <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">{cell.label}</span>
       {svg}
     </div>
@@ -479,30 +489,42 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
     case 'cells': {
       const cols = Math.max(...payload.rows.map((r) => r.length));
       const cellSize = cols >= 5 ? 56 : cols === 4 ? 66 : cols === 3 ? 82 : 92;
+      // le griglie semplici (senza frecce fra le celle) sono FLUIDE: su un
+      // telefono stretto le celle si restringono invece di uscire dal bordo
+      const fluid = !payload.arrows && !payload.analogy && !payload.wrapSequence;
       return (
-        <div className={`flex flex-col items-center ${payload.groups ? 'gap-2.5' : 'gap-2'}`}>
-          {payload.rows.map((row, ri) => (
-            <div
-              key={ri}
-              className={`flex items-center gap-1.5 ${
-                payload.groups ? 'rounded-2xl border border-white/12 bg-white/[0.03] px-2 py-1.5' : ''
-              }`}
-            >
-              {row.map((cell, ci) => (
-                <div key={ci} className="flex items-center gap-1.5">
-                  {ci > 0 && (payload.arrows || payload.analogy) && (
-                    <span className="font-display text-xl text-stone-500">{payload.analogy ? '➜' : '→'}</span>
-                  )}
-                  <Cell cell={cell} size={cellSize} />
-                </div>
-              ))}
-              {/* la sequenza continua sulla riga sotto: senza questo segno le
-                  righe si leggono come una matrice invece che come una catena */}
-              {payload.wrapSequence && ri < payload.rows.length - 1 && (
-                <span className="font-display text-xl text-stone-500">↴</span>
-              )}
-            </div>
-          ))}
+        <div className={`flex w-full flex-col items-center ${payload.groups ? 'gap-2.5' : 'gap-2'}`}>
+          {payload.rows.map((row, ri) =>
+            fluid ? (
+              <div
+                key={ri}
+                className={`grid w-full max-w-md justify-center gap-1.5 ${
+                  payload.groups ? 'rounded-2xl border border-white/12 bg-white/[0.03] px-2 py-1.5' : ''
+                }`}
+                style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, ${cellSize}px))` }}
+              >
+                {row.map((cell, ci) => (
+                  <Cell key={ci} cell={cell} size={cellSize} fluid />
+                ))}
+              </div>
+            ) : (
+              <div key={ri} className="flex items-center gap-1.5">
+                {row.map((cell, ci) => (
+                  <div key={ci} className="flex items-center gap-1.5">
+                    {ci > 0 && (payload.arrows || payload.analogy) && (
+                      <span className="font-display text-xl text-stone-500">{payload.analogy ? '➜' : '→'}</span>
+                    )}
+                    <Cell cell={cell} size={cellSize} />
+                  </div>
+                ))}
+                {/* la sequenza continua sulla riga sotto: senza questo segno le
+                    righe si leggono come una matrice invece che come una catena */}
+                {payload.wrapSequence && ri < payload.rows.length - 1 && (
+                  <span className="font-display text-xl text-stone-500">↴</span>
+                )}
+              </div>
+            )
+          )}
         </div>
       );
     }
@@ -563,9 +585,10 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
   switch (choice.kind) {
     case 'cell': {
       // una fila di tre forme in una cella da 72px le rende minuscole: la cella
-      // cresce, così ogni forma resta leggibile e per intero
+      // cresce, così ogni forma resta leggibile e per intero. Fluida: sui
+      // telefoni stretti si adatta alla colonna invece di sbordare.
       const affollata = choice.cell.layout === 'row' && choice.cell.shapes.length >= 3;
-      return <Cell cell={choice.cell} size={affollata ? 96 : 72} />;
+      return <Cell cell={choice.cell} size={affollata ? 96 : 72} fluid />;
     }
     case 'clock':
       return <Clock clock={choice.clock} size={76} />;
@@ -573,9 +596,10 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
       return <Domino tile={choice.tile} size={40} />;
     case 'text': {
       // le risposte testuali possono essere parole lunghe ("pentagono") o
-      // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo
+      // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo.
+      // Taglie riviste verso l'alto dopo i test in famiglia: si gioca dal telefono
       const n = choice.text.length;
-      const size = n <= 4 ? 'text-2xl' : n <= 7 ? 'text-xl' : n <= 11 ? 'text-base' : 'text-sm';
+      const size = n <= 4 ? 'text-3xl' : n <= 7 ? 'text-2xl' : n <= 11 ? 'text-lg' : 'text-base';
       return (
         <span className={`font-display w-full break-words px-0.5 text-center font-extrabold leading-tight ${size}`}>
           {choice.text}

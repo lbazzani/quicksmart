@@ -18,7 +18,7 @@ const N = 40;
 const only = process.argv[2];
 const types = only
   ? [only]
-  : ['sequence', 'matrix', 'oddone', 'numseries', 'rotation', 'dice', 'clock', 'balance', 'analogy', 'arithgrid', 'fold', 'paths', 'sets', 'mirror', 'domino', 'symmetry', 'weights', 'pattern'];
+  : ['sequence', 'matrix', 'oddone', 'numseries', 'rotation', 'dice', 'clock', 'balance', 'analogy', 'arithgrid', 'fold', 'paths', 'sets', 'mirror', 'domino', 'symmetry', 'weights', 'pattern', 'majority', 'pairs'];
 
 /**
  * Periodo di simmetria rotazionale di ogni forma: ruotarla di questo angolo la

@@ -10,6 +10,8 @@ export default defineConfig({
     baseURL: process.env.BASE ?? 'http://localhost:3005',
     viewport: { width: 390, height: 844 }, // iPhone-ish, mobile first
     hasTouch: true,
+    // l'interfaccia segue la lingua del browser: i test parlano italiano
+    locale: 'it-IT',
   },
   reporter: [['list']],
 });

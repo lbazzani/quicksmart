@@ -144,7 +144,9 @@ export type QuestionType =
   | 'domino'
   | 'symmetry'
   | 'weights'
-  | 'pattern';
+  | 'pattern'
+  | 'majority'
+  | 'pairs';
 
 export interface Question {
   id?: number;
@@ -178,20 +180,30 @@ export interface GameSettings {
   buzzWindowMs: number;
   /** tempo per scegliere la risposta dopo il buzz */
   answerMs: number;
-  /** durata della schermata di reveal */
+  /** durata base della schermata di reveal (si allunga con le spiegazioni lunghe) */
   revealMs: number;
+  /**
+   * Quando qualcuno sbaglia e la domanda riapre, gli altri vedono le tre
+   * opzioni con quelle già bruciate sbarrate: aiuta e invoglia a riprovare.
+   */
+  showMistakes: boolean;
 }
 
 export type GameStatus = 'lobby' | 'playing' | 'ended';
 export type Phase = 'idle' | 'countdown' | 'buzz' | 'answer' | 'reveal';
 
-/** round speciali: 'twin' = gemella (trappola per chi va a memoria), 'lampo' = tempo dimezzato e punti doppi */
-export type SpecialRound = 'none' | 'twin' | 'lampo';
+/**
+ * round speciali: 'twin' = gemella (trappola per chi va a memoria),
+ * 'lampo' = tempo dimezzato e punti doppi, 'sofai' = SofAI gioca anche lei e
+ * ruba la domanda se nessuno si prenota in tempo.
+ */
+export type SpecialRound = 'none' | 'twin' | 'lampo' | 'sofai';
 
 export type RoundOutcome =
   | 'correct'   // qualcuno ha indovinato
   | 'exhausted' // tutti hanno sbagliato
   | 'nobody'    // nessuno si è prenotato
+  | 'stolen'    // (round sfida) SofAI se l'è presa lei
   | 'timeout';  // (solo) tempo di decisione scaduto
 
 export interface PlayerStats {
@@ -230,6 +242,21 @@ export interface SofiaComment {
   seq: number;
 }
 
+/** messaggio nella chat di partita (la scrive chi se l'è guadagnata) */
+export interface ChatMsg {
+  nickname: string;
+  avatar: string;
+  text: string;
+  seq: number;
+}
+
+/** proposta di SofAI per la rivincita, calcolata sui numeri della partita */
+export interface RematchSuggestion {
+  kind: 'easier' | 'harder';
+  /** frase mostrata sul podio */
+  text: string;
+}
+
 /** Snapshot sanitizzato inviato ai client via SSE */
 export interface GameSnapshot {
   code: string;
@@ -243,6 +270,12 @@ export interface GameSnapshot {
   serverNow: number;
   version: number;
   sofia: SofiaComment | null;
+  /** ultimi messaggi della chat di partita (reveal e podio) */
+  chat: ChatMsg[];
+  /** chi può scrivere in chat ADESSO (vincitore del round o della partita) */
+  chatOpenFor?: string;
+  /** (podio) proposta di SofAI per la rivincita */
+  suggestion?: RematchSuggestion;
   joinUrl?: string;
   current: null | {
     qtype: QuestionType;
@@ -260,8 +293,17 @@ export interface GameSnapshot {
     /** risposte sbagliate finora in questo round (>0 = domanda riaperta) */
     errors: number;
     special: SpecialRound;
+    /**
+     * Ultimo errore del round: chi era e (se showMistakes) che cosa aveva
+     * scelto. choiceIndex null = si è prenotato e non ha risposto.
+     */
+    lastMiss?: { nickname: string; avatar: string; choiceIndex: number | null; mute: boolean };
+    /** indici delle opzioni già scelte e sbagliate (solo con showMistakes) */
+    wrongIndexes?: number[];
     /** presenti solo in fase reveal */
     revealUntil?: number;
+    /** durata effettiva del reveal (allungata se la spiegazione è lunga) */
+    revealMs?: number;
     correctIndex?: number;
     explanation?: string;
     outcome?: RoundOutcome;

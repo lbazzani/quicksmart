@@ -32,6 +32,31 @@ body {
   min-height: 100dvh;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  /* iPhone con notch: niente contenuto sotto la tacca o la barra home */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* telefono ruotato in orizzontale: il layout è pensato verticale.
+   pointer: coarse esclude i desktop, dove il landscape è la norma. */
+.gira-telefono {
+  display: none;
+}
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 520px) {
+  .gira-telefono {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: var(--qs-night);
+    font-weight: 800;
+  }
 }
 
 .font-display {

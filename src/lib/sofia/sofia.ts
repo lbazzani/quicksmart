@@ -16,14 +16,17 @@ import { existsSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import os from 'os';
-import type { RoundOutcome, SofiaMood } from '../types';
+import type { QuestionType, RoundOutcome, SofiaMood } from '../types';
 import { T } from '../i18n';
-import { LINES, MOODS, fillLine, type SofiaLineKind } from './lines';
+import { HINTS, LINES, MOODS, fillLine, type SofiaLineKind } from './lines';
 
 export type SofiaEventCtx =
   | { kind: 'welcome'; nickname: string }
   | { kind: 'join'; nickname: string }
-  | { kind: 'special'; special: 'none' | 'twin' | 'lampo' }
+  | { kind: 'special'; special: 'none' | 'twin' | 'lampo' | 'sofai' }
+  | { kind: 'cocco'; nickname: string }
+  | { kind: 'hint'; nickname: string; qtype: QuestionType }
+  | { kind: 'rematch'; nickname: string }
   | {
       kind: 'reveal';
       outcome: RoundOutcome;
@@ -72,14 +75,20 @@ const AI_ENABLED = () => process.env.SOFIA_AI === '1';
 /** al massimo 8 giocatori nel prompt: tiene corto il testo e limita la superficie */
 const MAX_STANDINGS = 8;
 
-function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; n?: number } {
+function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; n?: number; tip?: string } {
   switch (ctx.kind) {
     case 'welcome':
       return { kind: 'welcome', name: ctx.nickname };
     case 'join':
       return { kind: 'join', name: ctx.nickname };
     case 'special':
-      return { kind: ctx.special === 'twin' ? 'twin' : 'lampo' };
+      return { kind: ctx.special === 'twin' ? 'twin' : ctx.special === 'sofai' ? 'sofaiRound' : 'lampo' };
+    case 'cocco':
+      return { kind: 'cocco', name: ctx.nickname };
+    case 'hint':
+      return { kind: 'hint', name: ctx.nickname, tip: HINTS[ctx.qtype] };
+    case 'rematch':
+      return { kind: 'rematch', name: ctx.nickname };
     case 'podium':
       return { kind: 'podium', name: ctx.standings[0]?.nickname };
     case 'reveal': {
@@ -89,6 +98,7 @@ function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; 
         return { kind: 'correct', name: ctx.winner };
       }
       if (ctx.outcome === 'nobody') return { kind: 'nobody' };
+      if (ctx.outcome === 'stolen') return { kind: 'stolen' };
       if (ctx.outcome === 'timeout') return { kind: 'timeout' };
       return { kind: 'exhausted' };
     }
@@ -112,7 +122,8 @@ function aliasMap(ctx: SofiaEventCtx): Map<string, string> {
 
 function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null {
   const head =
-    'Sei SofAI, la mascotte simpatica e un po\' sfottona di un quiz a squadre per famiglie. ' +
+    'Sei SofAI, la mascotte di un quiz a squadre per famiglie: ironica, pungente, un po\' teatrale, ma sempre affettuosa. ' +
+    'Ti piace prenderti il merito delle domande belle e dare la colpa ai giocatori per quelle sbagliate. ' +
     'Scrivi UNA sola battuta in italiano (max 18 parole, al massimo 1 emoji), senza virgolette né premesse. ' +
     'Usa i nomi di chi gioca esattamente come sono scritti qui sotto e non dedurre da un nome se la persona è maschio o femmina. ' +
     'ITALIANO NEUTRO, obbligatorio: la battuta deve funzionare per bambine, bambini, mamme, papà e nonni, quindi NIENTE aggettivi, ' +
@@ -138,6 +149,8 @@ function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null
         `${nameOf(ctx.winner)} ha indovinato una domanda ${diff} (${qt}) in ${secs} secondi` +
         ((ctx.streak ?? 0) >= 3 ? `, ${Math.round(ctx.streak ?? 0)} giuste di fila` : '');
     } else if (ctx.outcome === 'nobody') what = `nessuno ha avuto il coraggio di prenotarsi (domanda ${diff})`;
+    else if (ctx.outcome === 'stolen')
+      what = `round sfida: nessuno si è prenotato in tempo e tu, SofAI, hai RUBATO la domanda — pavoneggiati`;
     else if (ctx.outcome === 'timeout') what = `tempo scaduto senza risposta (allenamento in solitaria)`;
     else what = `tutti hanno sbagliato la domanda (${qt})`;
     return head + `${what}. Classifica: ${top}.`;
@@ -184,6 +197,10 @@ const MOMENTI: ReadonlyArray<{ kind: SofiaLineKind; nome: boolean; quando: strin
   { kind: 'exhausted', nome: false, quando: 'hanno sbagliato tutti' },
   { kind: 'twin', nome: false, quando: 'sta arrivando una domanda che sembra già vista ma non lo è' },
   { kind: 'lampo', nome: false, quando: 'round lampo: metà tempo e punti doppi' },
+  { kind: 'sofaiRound', nome: false, quando: 'round sfida: annunci che giochi anche tu e che rubi la domanda a chi non si prenota' },
+  { kind: 'stolen', nome: false, quando: 'hai rubato la domanda perché nessuno si è prenotato in tempo: pavoneggiati' },
+  { kind: 'cocco', nome: true, quando: 'annunci che da adesso tifi per {name}, in fondo alla classifica' },
+  { kind: 'rematch', nome: true, quando: 'ha chiesto la rivincita: si riparte da zero' },
 ];
 
 /**
@@ -374,7 +391,8 @@ function warmupPrompt(): string {
   // modello non lo scriveva mai
   const elenco = MOMENTI.map((m) => `${m.kind}: ${m.nome ? '{name} ' : ''}${m.quando}`).join('\n');
   return (
-    'Sei SofAI, la mascotte simpatica e un po\' sfottona di un quiz visuale a squadre per famiglie. ' +
+    'Sei SofAI, la mascotte di un quiz visuale a squadre per famiglie: ironica, pungente, un po\' teatrale, ' +
+    'mai cattiva. Ti prendi il merito delle domande belle e dai la colpa ai giocatori per quelle sbagliate. ' +
     'Scrivi UNA battuta in italiano per ognuno dei momenti elencati sotto: originali, brevi (max 16 parole), ' +
     'al massimo 1 emoji, senza virgolette. ' +
     'ITALIANO NEUTRO, obbligatorio: devono funzionare per bambine, bambini, mamme, papà e nonni, quindi NIENTE ' +
@@ -475,12 +493,13 @@ function rimaste(room: SofiaRoom): number {
  * `onUpdate` va chiamato a ogni modifica di room.sofia (bump versione + SSE).
  */
 export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate: () => void): Promise<void> {
-  const { kind, name, n } = lineKindFor(ctx);
+  const { kind, name, n, tip } = lineKindFor(ctx);
   // se l'AI ne ha preparata una per questo momento si usa quella, altrimenti
-  // la pre-scritta: in entrambi i casi compare SUBITO, il gioco non aspetta
-  const preparata = room.sofiaFresh?.[kind]?.shift();
+  // la pre-scritta: in entrambi i casi compare SUBITO, il gioco non aspetta.
+  // I consigli (hint) invece sono SEMPRE pre-scritti: devono essere veri.
+  const preparata = kind === 'hint' ? undefined : room.sofiaFresh?.[kind]?.shift();
   const pool = LINES[kind];
-  const testo = fillLine(preparata ?? pool[Math.floor(Math.random() * pool.length)], name, n);
+  const testo = fillLine(preparata ?? pool[Math.floor(Math.random() * pool.length)], name, n, tip);
   const seq = ++room.sofiaSeq;
   room.sofia = { text: testo, mood: MOODS[kind], roundIndex: room.roundIndex, ai: preparata !== undefined, seq };
   onUpdate();

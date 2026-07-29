@@ -6,9 +6,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../src/lib/rng';
-import { GENERATORS } from '../src/lib/questions';
-import type { CellSpec, Difficulty, Question } from '../src/lib/types';
+import { GENERATORS, QUARANTINED, QUESTION_TYPES } from '../src/lib/questions';
+import type { CellSpec, Difficulty, Question, ShapeSpec } from '../src/lib/types';
 import { COLOR_FORMS, COLOR_NAMES, distinctColors, tooSimilar } from '../src/lib/colors';
+import { SHAPES } from '../src/lib/questions/vocab';
 import { PALETTE } from '../src/components/visuals';
 
 function generate(qtype: keyof typeof GENERATORS, n: number, seed = 4242): Question[] {
@@ -109,6 +110,69 @@ describe('domino — il suggerimento dice la verità', () => {
       }
     }
     expect(controllate).toBeGreaterThan(0);
+  });
+});
+
+describe('tipi sospesi dopo i test in famiglia (luglio 2026)', () => {
+  it('fold e domino non vengono pescati finché non sono ripensati', () => {
+    expect(QUARANTINED).toContain('fold');
+    expect(QUARANTINED).toContain('domino');
+    expect(QUESTION_TYPES).not.toContain('fold');
+    expect(QUESTION_TYPES).not.toContain('domino');
+  });
+});
+
+describe('majority — vince davvero il gruppo indicato', () => {
+  it('contando dall’esterno (come chi gioca) si arriva alla stessa risposta, con scarto onesto', () => {
+    for (const q of generate('majority', 50)) {
+      expect(q.payload.kind).toBe('cells');
+      if (q.payload.kind !== 'cells') continue;
+      const rows = q.payload.rows;
+      // il bersaglio si legge SOLO dal prompt, come farebbe chi gioca
+      const shape = SHAPES.find((s) => q.prompt.includes(` ${s.many}`));
+      const colorIdx = COLOR_FORMS.findIndex((f) =>
+        [...new Set([f.fp, f.mp])].some((w) => q.prompt.endsWith(` ${w}?`))
+      );
+      const match = (s: ShapeSpec) =>
+        (shape ? s.shape === shape.shape : true) && (colorIdx >= 0 ? (s.color ?? 0) === colorIdx : true);
+      const counts = rows.map((row) => row.flatMap((c) => c.shapes).filter(match).length);
+      const best = Math.max(...counts);
+      const winners = counts.filter((n) => n === best).length;
+      const text = q.choices[q.correctIndex];
+      expect(text.kind).toBe('text');
+      if (text.kind !== 'text') continue;
+      if (winners > 1) {
+        expect(text.text, q.prompt).toBe('Sono uguali');
+      } else {
+        expect(text.text, `${q.prompt} → conteggi ${counts.join('/')}`).toBe(`Gruppo ${counts.indexOf(best) + 1}`);
+        // scarto ≥ 2: chi perde il conto di uno non cambia risposta
+        const second = [...counts].sort((a, b) => b - a)[1];
+        expect(best - second, `scarto risicato: ${counts.join('/')}`).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+});
+
+describe('pairs — una sola figura è davvero senza gemella', () => {
+  it('il disegno contiene esattamente una figura singola, ed è la risposta', () => {
+    const key = (s: ShapeSpec) => JSON.stringify([s.shape, s.color ?? 0, s.fillMode ?? 'solid']);
+    for (const q of generate('pairs', 50)) {
+      expect(q.payload.kind).toBe('cells');
+      if (q.payload.kind !== 'cells') continue;
+      const tally = new Map<string, number>();
+      for (const cell of q.payload.rows.flat())
+        for (const s of cell.shapes) tally.set(key(s), (tally.get(key(s)) ?? 0) + 1);
+      const singles = [...tally.entries()].filter(([, n]) => n === 1);
+      expect(singles, 'deve esserci UNA sola figura senza gemella').toHaveLength(1);
+      for (const [, n] of tally) expect([1, 2]).toContain(n);
+      q.choices.forEach((c, i) => {
+        expect(c.kind).toBe('cell');
+        if (c.kind !== 'cell') return;
+        const k = key(c.cell.shapes[0]);
+        // la risposta è la solitaria; i distrattori hanno la gemella nel disegno
+        expect(tally.get(k), `opzione ${i} non presente nel disegno`).toBe(i === q.correctIndex ? 1 : 2);
+      });
+    }
   });
 });
 

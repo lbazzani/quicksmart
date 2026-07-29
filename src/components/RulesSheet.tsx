@@ -8,12 +8,13 @@
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { T } from '@/lib/i18n';
+import { useT } from '@/lib/lang';
 import { SofaiAvatar } from './SofaiAvatar';
 
 type Scheda = 'team' | 'solo';
 
 export function RulesSheet() {
+  const T = useT();
   const [aperto, setAperto] = useState(false);
   const [scheda, setScheda] = useState<Scheda>('team');
 
@@ -72,7 +73,7 @@ export function RulesSheet() {
                 <SofaiAvatar mood="happy" size={44} />
                 <div className="min-w-0 flex-1">
                   <h2 className="font-display text-xl font-extrabold text-amber-300">{T.rules.title}</h2>
-                  <p className="text-xs leading-snug text-stone-400">{T.rules.intro}</p>
+                  <p className="text-sm leading-snug text-stone-400">{T.rules.intro}</p>
                 </div>
               </div>
 
@@ -101,8 +102,8 @@ export function RulesSheet() {
                       {v.e}
                     </span>
                     <div>
-                      <p className="font-display text-sm font-bold text-stone-100">{v.t}</p>
-                      <p className="text-[13px] leading-snug text-stone-400">{v.d}</p>
+                      <p className="font-display text-base font-bold text-stone-100">{v.t}</p>
+                      <p className="text-sm leading-normal text-stone-400">{v.d}</p>
                     </div>
                   </li>
                 ))}

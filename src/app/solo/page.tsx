@@ -3,18 +3,19 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
-import { T } from '@/lib/i18n';
+import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
-import { AvatarPicker, Field, Segmented, inputCls } from '@/components/AvatarPicker';
+import { AvatarPicker, Field, Segmented, Stepper, inputCls } from '@/components/AvatarPicker';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
 
 export default function SoloPage() {
+  const T = useT();
   const router = useRouter();
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState('🦄');
   const [rounds, setRounds] = useState<number>(10);
-  const [decisionSec, setDecisionSec] = useState(15);
-  const [answerSec, setAnswerSec] = useState(5);
+  const [decisionSec, setDecisionSec] = useState(20);
+  const [answerSec, setAnswerSec] = useState(12);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -63,18 +64,19 @@ export default function SoloPage() {
           value={rounds}
           onChange={setRounds}
         />
+        <Stepper value={rounds} onChange={setRounds} min={3} max={30} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label={T.solo.decisionTime}>
           <Segmented
-            options={[{ label: '10', value: 10 }, { label: '15', value: 15 }, { label: '20', value: 20 }]}
+            options={[{ label: '10', value: 10 }, { label: '20', value: 20 }, { label: '30', value: 30 }]}
             value={decisionSec}
             onChange={setDecisionSec}
           />
         </Field>
         <Field label={T.new.answerTime}>
           <Segmented
-            options={[{ label: '5', value: 5 }, { label: '8', value: 8 }, { label: '12', value: 12 }]}
+            options={[{ label: '8', value: 8 }, { label: '12', value: 12 }, { label: '20', value: 20 }]}
             value={answerSec}
             onChange={setAnswerSec}
           />
