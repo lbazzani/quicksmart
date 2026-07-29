@@ -221,25 +221,31 @@ function askClaude(prompt: string): Promise<string> {
       }
     );
     let out = '';
+    let err = '';
     let done = false;
     const timer = setTimeout(() => {
       done = true;
       child.kill('SIGKILL');
-      reject(new Error('timeout'));
+      reject(new Error(`timeout dopo ${AI_TIMEOUT_MS}ms${err ? ` — stderr: ${err.slice(0, 300)}` : ''}`));
     }, AI_TIMEOUT_MS);
     child.stdout.on('data', (d) => (out += d));
+    // stderr va CONSUMATO anche se non serve: è una pipe, e se si riempie il
+    // CLI si blocca a metà scrittura e la battuta non arriva mai.
+    child.stderr.on('data', (d) => {
+      if (err.length < 4000) err += d;
+    });
     child.on('error', (e) => {
       if (!done) {
         clearTimeout(timer);
         reject(e);
       }
     });
-    child.on('close', () => {
+    child.on('close', (code) => {
       if (done) return;
       clearTimeout(timer);
       const text = out.trim().replaceAll('\n', ' ').replace(/^["«]|["»]$/g, '').slice(0, MAX_TEXT);
-      if (text.length < 4) reject(new Error('risposta vuota'));
-      else resolve(text);
+      if (text.length >= 4) return resolve(text);
+      reject(new Error(`uscita ${code} senza testo utile — stderr: ${err.trim().slice(0, 300) || '(vuoto)'}`));
     });
   });
 }
@@ -279,8 +285,11 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
       room.sofia = { text, mood: room.sofia.mood, roundIndex: room.sofia.roundIndex, ai: true, seq: ++room.sofiaSeq };
       onUpdate();
     }
-  } catch {
-    // l'AI non ha risposto in tempo: resta la battuta pre-scritta
+  } catch (e) {
+    // Resta la battuta pre-scritta, e in partita non si nota nulla: proprio per
+    // questo il motivo va scritto nei log, o l'AI può restare spenta per
+    // settimane senza che nessuno se ne accorga.
+    console.warn(`[SofAI] AI non disponibile (${ctx.kind}):`, e instanceof Error ? e.message : e);
   } finally {
     room.sofiaBusy = false;
     const pending = room.sofiaPending;
