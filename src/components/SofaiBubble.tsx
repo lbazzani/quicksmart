@@ -4,9 +4,11 @@
 
 import { motion } from 'motion/react';
 import type { SofiaComment } from '@/lib/types';
+import { useLoc } from '@/lib/lang';
 import { SofaiAvatar } from './SofaiAvatar';
 
 export function SofaiBubble({ comment, compact = false }: { comment: SofiaComment | null; compact?: boolean }) {
+  const loc = useLoc();
   if (!comment) return null;
   return (
     <div className="pointer-events-none flex items-end gap-2">
@@ -28,7 +30,7 @@ export function SofaiBubble({ comment, compact = false }: { comment: SofiaCommen
         >
           <span className="mr-1 font-display font-bold text-amber-200">SofAI</span>
           {comment.ai && <span title="commento AI" className="mr-1 text-teal-300">✦</span>}
-          <span className="text-stone-100">{comment.text}</span>
+          <span className="text-stone-100">{loc(comment.text)}</span>
         </motion.div>
     </div>
   );

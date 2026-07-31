@@ -6,6 +6,7 @@
 
 import { Pool } from 'pg';
 import type { GameSnapshot } from '../src/lib/types';
+import { NOBODY_PENALTY, soloTimeoutPenalty, wrongPenalty } from '../src/lib/scoring';
 
 const BASE = process.env.BASE ?? 'http://localhost:3005';
 const pool = new Pool({
@@ -137,14 +138,16 @@ async function testTeam() {
   const r2buzz = await post<{ ok: boolean }>(`/api/game/${code}/buzz`, host);
   check(r2buzz.ok, 'round 2: Anna si prenota');
   s = await snap(code);
+  const valueBeforeWrong = s.current!.value;
   const ci2 = await correctIndexOf(s);
   await post(`/api/game/${code}/answer`, { ...host, choiceIndex: (ci2 + 1) % 3 });
   s = await waitFor(code, (x) => x.phase === 'buzz' && (x.current?.lockedOut.length ?? 0) === 1, 10_000);
   check(true, 'dopo errore la domanda riapre');
   const annaAfterWrong = s.players.find((p) => p.id === host.playerId)!;
+  const expectedWrong = (preScores.get(host.playerId) ?? 0) + wrongPenalty(valueBeforeWrong);
   check(
-    annaAfterWrong.score === (preScores.get(host.playerId) ?? 0) - 100,
-    `penalità errore −50% del valore (−100): ${annaAfterWrong.score}`
+    annaAfterWrong.score === expectedWrong,
+    `penalità errore ${wrongPenalty(valueBeforeWrong)} (atteso ${expectedWrong}): ${annaAfterWrong.score}`
   );
   check(s.current!.value === 140, `valore decaduto a 140 (${s.current!.value})`);
   const annaRetry = await post<{ ok: boolean; error?: string }>(`/api/game/${code}/buzz`, host);
@@ -162,8 +165,8 @@ async function testTeam() {
   const pre3 = new Map(s.players.map((p) => [p.id, p.score]));
   s = await waitFor(code, (x) => x.phase === 'reveal' && x.roundIndex === 2, 15_000);
   check(s.current?.outcome === 'nobody', 'nessun buzz → outcome nobody');
-  const allMinus25 = s.players.every((p) => p.score === (pre3.get(p.id) ?? 0) - 25);
-  check(allMinus25, 'tutti −25');
+  const allPenalized = s.players.every((p) => p.score === (pre3.get(p.id) ?? 0) + NOBODY_PENALTY);
+  check(allPenalized, `tutti ${NOBODY_PENALTY}`);
 
   // fine partita automatica dopo 3 round
   s = await waitFor(code, (x) => x.status === 'ended', 15_000);
@@ -205,10 +208,14 @@ async function testSolo() {
   check(!!code, `partita solo creata (${code})`);
   await post(`/api/game/${code}/start`, solo);
 
-  // round 1: lascia scadere il tempo di decisione → −40% del base (100) = −40
+  // round 1: lascia scadere il tempo di decisione → penalità sul base della difficoltà
   let s = await waitFor(code, (x) => x.phase === 'reveal' && x.roundIndex === 0, 20_000);
   check(s.current?.outcome === 'timeout', 'timeout di decisione rilevato');
-  check(s.players[0].score === -40, `penalità solo −40 (${s.players[0].score})`);
+  const expectedSoloTimeout = soloTimeoutPenalty(s.current!.difficulty);
+  check(
+    s.players[0].score === expectedSoloTimeout,
+    `penalità solo ${expectedSoloTimeout} (${s.players[0].score})`
+  );
 
   // round 2: buzz + risposta corretta
   s = await waitFor(code, (x) => x.phase === 'buzz' && x.roundIndex === 1, 20_000);

@@ -36,7 +36,8 @@ describe('LiveQuestions', () => {
         expect(q.difficulty).toBe(d);
         expect(q.choices).toHaveLength(3);
         expect([0, 1, 2]).toContain(q.correctIndex);
-        expect(q.prompt.length).toBeGreaterThan(3);
+        expect(q.prompt.it.length).toBeGreaterThan(3);
+        expect(q.prompt.en.length).toBeGreaterThan(3);
       }
     }
   });

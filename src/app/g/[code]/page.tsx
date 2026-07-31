@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import type { GameSnapshot, PlayerPublic } from '@/lib/types';
-import { useT } from '@/lib/lang';
+import { useLoc, useT } from '@/lib/lang';
 import { api, loadIdentity, useCountdownTicks, useGame, type Identity } from '@/lib/client';
 import { REOPEN_WINDOW_MS, SOFAI_STEAL_FRACTION } from '@/lib/scoring';
 import { QuestionView, ChoiceView } from '@/components/visuals';
@@ -299,6 +299,7 @@ function Play({
   offset: number;
 }) {
   const T = useT();
+  const loc = useLoc();
   const cur = snap.current;
   const [tooLate, setTooLate] = useState(false);
   const [buzzing, setBuzzing] = useState(false);
@@ -463,7 +464,7 @@ function Play({
               🤖 {T.game.sofaiRound}
             </motion.span>
           )}
-          <p className="text-center font-display text-xl font-bold leading-snug">{cur.prompt}</p>
+          <p className="text-center font-display text-xl font-bold leading-snug">{loc(cur.prompt)}</p>
           <QuestionView payload={cur.payload} />
         </motion.div>
       )}
@@ -743,6 +744,7 @@ function Reveal({
   identity: Identity;
 }) {
   const T = useT();
+  const loc = useLoc();
   const cur = snap.current!;
   const winner = snap.players.find((p) => p.id === cur.buzzerId);
   const outcome = cur.outcome;
@@ -776,7 +778,7 @@ function Reveal({
       )}
       {cur.explanation && (
         <p className="card w-full max-w-md px-4 py-3 text-center text-base leading-snug text-stone-200">
-          💡 {cur.explanation}
+          💡 {loc(cur.explanation)}
         </p>
       )}
       <SofaiBubble comment={snap.sofia} />

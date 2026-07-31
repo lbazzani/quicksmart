@@ -80,9 +80,11 @@ function visualSimilarity(a: ChoiceVisual, b: ChoiceVisual): number {
  * fantasmi e rischiare di peggiorare le domande per nulla.
  */
 const FEATURES: Feature[] = [
-  { name: 'primo numero', of: (c) => (c.kind === 'text' ? numberIn(c.text) : null) },
-  { name: 'somma dei numeri', of: (c) => (c.kind === 'text' ? allNumbers(c.text) : null) },
-  { name: 'lunghezza del testo', of: (c) => (c.kind === 'text' ? c.text.length : null) },
+  // il testo è bilingue (LocalizedText), ma queste feature sono numeriche: la
+  // lingua italiana basta a misurarle, il numero non cambia fra le due
+  { name: 'primo numero', of: (c) => (c.kind === 'text' ? numberIn(c.text.it) : null) },
+  { name: 'somma dei numeri', of: (c) => (c.kind === 'text' ? allNumbers(c.text.it) : null) },
+  { name: 'lunghezza del testo', of: (c) => (c.kind === 'text' ? c.text.it.length : null) },
   { name: 'quante figure', of: (c) => shapesOf(c)?.length ?? null },
   {
     name: 'quanti colori diversi',

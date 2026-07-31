@@ -29,9 +29,10 @@
 // restano dritti e fanno da punto di riferimento di colore e posizione, così una
 // rotazione non si trasforma mai in un indizio da 18°.
 
-import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
-import { COLOR_NAMES } from '../colors';
+import type { CellSpec, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
+import { COLOR_NAMES, colorNameEn } from '../colors';
 import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { normRot, placeChoices, retry } from './qutils';
 
 // ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ function cues(a: Comp, b: Comp): number {
   return n;
 }
 
-function toCell(c: Comp, label?: string): CellSpec {
+function toCell(c: Comp, label?: LocalizedText): CellSpec {
   const cell: CellSpec = { shapes: c.shapes.map(clean), layout: c.layout };
   if (label) cell.label = label;
   return cell;
@@ -213,21 +214,69 @@ type OpName = 'id' | 'mirV' | 'mirH' | 'rot90' | 'rot180' | 'rot270' | 'posV' | 
 interface OpDef {
   perm: PermFn;
   shape: ShapeOp;
-  /** come si chiama nella spiegazione ("Le altre due risposte sono …") */
-  label: string;
+  /** come si chiama nella spiegazione ("Le altre due risposte sono …"), in ogni lingua */
+  label: LocalizedText;
 }
 
 const OPS: Record<OpName, OpDef> = {
-  id: { perm: pKeep, shape: keep, label: 'la figura di partenza, identica' },
-  mirV: { perm: pMirV, shape: flipV, label: 'il riflesso nello specchio a destra (destra e sinistra scambiate)' },
-  mirH: { perm: pMirH, shape: flipH, label: 'il riflesso nello specchio messo sotto (alto e basso scambiati)' },
-  rot90: { perm: p90, shape: turn(90), label: 'la figura girata di un quarto di giro (90°)' },
-  rot180: { perm: p180, shape: turn(180), label: 'la figura girata di mezzo giro (180°)' },
-  rot270: { perm: p270, shape: turn(270), label: 'la figura girata di tre quarti di giro (270°)' },
-  posV: { perm: pMirV, shape: keep, label: 'le forme spostate a specchio ma non ribaltate su sé stesse' },
-  posH: { perm: pMirH, shape: keep, label: 'le forme spostate in alto e in basso ma non capovolte' },
-  selfV: { perm: pKeep, shape: flipV, label: 'le forme ribaltate su sé stesse ma rimaste al loro posto' },
-  selfH: { perm: pKeep, shape: flipH, label: 'le forme capovolte ma rimaste al loro posto' },
+  id: { perm: pKeep, shape: keep, label: L('la figura di partenza, identica', 'the starting shape, unchanged') },
+  mirV: {
+    perm: pMirV,
+    shape: flipV,
+    label: L(
+      'il riflesso nello specchio a destra (destra e sinistra scambiate)',
+      'the reflection in the mirror on the right (left and right swapped)'
+    ),
+  },
+  mirH: {
+    perm: pMirH,
+    shape: flipH,
+    label: L(
+      'il riflesso nello specchio messo sotto (alto e basso scambiati)',
+      'the reflection in the mirror placed below (top and bottom swapped)'
+    ),
+  },
+  rot90: {
+    perm: p90,
+    shape: turn(90),
+    label: L('la figura girata di un quarto di giro (90°)', 'the shape turned a quarter turn (90°)'),
+  },
+  rot180: {
+    perm: p180,
+    shape: turn(180),
+    label: L('la figura girata di mezzo giro (180°)', 'the shape turned a half turn (180°)'),
+  },
+  rot270: {
+    perm: p270,
+    shape: turn(270),
+    label: L('la figura girata di tre quarti di giro (270°)', 'the shape turned three-quarters of a turn (270°)'),
+  },
+  posV: {
+    perm: pMirV,
+    shape: keep,
+    label: L(
+      'le forme spostate a specchio ma non ribaltate su sé stesse',
+      'the shapes moved to mirrored positions but not flipped in place'
+    ),
+  },
+  posH: {
+    perm: pMirH,
+    shape: keep,
+    label: L('le forme spostate in alto e in basso ma non capovolte', 'the shapes moved up and down but not flipped'),
+  },
+  selfV: {
+    perm: pKeep,
+    shape: flipV,
+    label: L(
+      'le forme ribaltate su sé stesse ma rimaste al loro posto',
+      'the shapes flipped in place but still in their original position'
+    ),
+  },
+  selfH: {
+    perm: pKeep,
+    shape: flipH,
+    label: L('le forme capovolte ma rimaste al loro posto', 'the shapes flipped but still in their original position'),
+  },
 };
 
 const ROTATIONS: OpName[] = ['rot90', 'rot180', 'rot270'];
@@ -264,6 +313,22 @@ const SHAPE_IT: Record<ShapeName, string> = {
   dot: 'il pallino',
 };
 
+/** stesse forme, in inglese: nome nudo, senza articolo (ci pensa nameOfEn) */
+const SHAPE_EN: Record<ShapeName, string> = {
+  circle: 'circle',
+  square: 'square',
+  triangle: 'triangle',
+  diamond: 'diamond',
+  star: 'star',
+  pentagon: 'pentagon',
+  hexagon: 'hexagon',
+  arrow: 'arrow',
+  heart: 'heart',
+  cross: 'cross',
+  moon: 'moon',
+  dot: 'dot',
+};
+
 /** nomi di colore invariabili, così vanno bene con maschile e femminile */
 const COLOR_IT = [...COLOR_NAMES];
 
@@ -283,6 +348,11 @@ function nameOf(s: ShapeSpec): string {
   return `${SHAPE_IT[s.shape]} ${COLOR_IT[(s.color ?? 0) % COLOR_IT.length]}`;
 }
 
+/** come `nameOf`, in inglese: l'aggettivo di colore va prima del nome della forma */
+function nameOfEn(s: ShapeSpec): string {
+  return `the ${colorNameEn(s.color ?? 0)} ${SHAPE_EN[s.shape]}`;
+}
+
 function posName(c: Comp, i: number): string {
   const r = Math.floor(i / c.cols);
   const col = i % c.cols;
@@ -290,6 +360,16 @@ function posName(c: Comp, i: number): string {
   const v = c.rows === 1 ? '' : r === 0 ? 'in alto' : r === c.rows - 1 ? 'in basso' : 'in mezzo';
   if (v && h) return `${v} ${h}`;
   return v || h || 'al centro';
+}
+
+/** come `posName`, in inglese */
+function posNameEn(c: Comp, i: number): string {
+  const r = Math.floor(i / c.cols);
+  const col = i % c.cols;
+  const h = c.cols === 1 ? '' : col === 0 ? 'left' : col === c.cols - 1 ? 'right' : 'center';
+  const v = c.rows === 1 ? '' : r === 0 ? 'top' : r === c.rows - 1 ? 'bottom' : 'middle';
+  if (v && h) return `${v} ${h}`;
+  return v || h || 'center';
 }
 
 // ---------------------------------------------------------------------------
@@ -365,13 +445,13 @@ interface Variant {
   wrong: [OpName, OpName];
   /** 'direct' = figura → ?  |  'example' = esempio risolto + figura → ? */
   style: 'direct' | 'example';
-  prompt: string;
+  prompt: LocalizedText;
   /** frase che apre la spiegazione */
-  rule: string;
+  rule: LocalizedText;
   /** verbo usato per il ribaltamento delle singole forme */
-  selfWord: string;
+  selfWord: LocalizedText;
   /** etichetta della cella con il punto interrogativo */
-  outLabel: string;
+  outLabel: LocalizedText;
 }
 
 class Ambiguous extends Error {}
@@ -430,10 +510,10 @@ function assemble(rng: Rng, difficulty: Difficulty, v: Variant): Question {
         throw new Ambiguous("l'esempio non basta a capire la regola");
       }
     }
-    rows.push([toCell(exSrc, 'esempio'), toCell(exOut, v.outLabel)]);
-    rows.push([toCell(src, 'e questa?'), { shapes: [], unknown: true, label: v.outLabel }]);
+    rows.push([toCell(exSrc, L('esempio', 'example')), toCell(exOut, v.outLabel)]);
+    rows.push([toCell(src, L('e questa?', 'and this one?')), { shapes: [], unknown: true, label: v.outLabel }]);
   } else {
-    rows.push([toCell(src, 'la figura'), { shapes: [], unknown: true, label: v.outLabel }]);
+    rows.push([toCell(src, L('la figura', 'the shape')), { shapes: [], unknown: true, label: v.outLabel }]);
   }
 
   const { choices, correctIndex } = placeChoices(rng, { kind: 'cell', cell: cells[0] }, [
@@ -456,14 +536,14 @@ function assemble(rng: Rng, difficulty: Difficulty, v: Variant): Question {
     },
     choices,
     correctIndex,
-    explanation: explain(v, src, right, exSrc),
+    explanation: L(explain(v, src, right, exSrc), explainEn(v, src, right, exSrc)),
   };
 }
 
 function explain(v: Variant, src: Comp, out: Comp, example: Comp | null): string {
   const parts: string[] = [];
   if (example) parts.push("Nell'esempio la figura entra nello specchio e ne esce ribaltata.");
-  parts.push(v.rule);
+  parts.push(v.rule.it);
 
   // traccia concreta: due forme che cambiano posto
   const perm = OPS[v.correct].perm(src.rows, src.cols);
@@ -478,10 +558,36 @@ function explain(v: Variant, src: Comp, out: Comp, example: Comp | null): string
 
   const changed = src.shapes.findIndex((s) => !sameLook(s, OPS[v.correct].shape(s)));
   if (changed >= 0) {
-    parts.push(`Anche ogni singola forma ${v.selfWord}: guarda ${nameOf(src.shapes[changed])}.`);
+    parts.push(`Anche ogni singola forma ${v.selfWord.it}: guarda ${nameOf(src.shapes[changed])}.`);
   }
 
-  parts.push(`Le altre due risposte sono ${OPS[v.wrong[0]].label} e ${OPS[v.wrong[1]].label}.`);
+  parts.push(`Le altre due risposte sono ${OPS[v.wrong[0]].label.it} e ${OPS[v.wrong[1]].label.it}.`);
+  return parts.join(' ');
+}
+
+/** come `explain`, in inglese */
+function explainEn(v: Variant, src: Comp, out: Comp, example: Comp | null): string {
+  const parts: string[] = [];
+  if (example) parts.push('In the example, the shape goes into the mirror and comes out flipped.');
+  parts.push(v.rule.en);
+
+  // traccia concreta: due forme che cambiano posto
+  const perm = OPS[v.correct].perm(src.rows, src.cols);
+  const moves: string[] = [];
+  for (let d = 0; d < perm.src.length && moves.length < 2; d++) {
+    const s = perm.src[d];
+    if (s === d) continue;
+    moves.push(`${nameOfEn(src.shapes[s])} goes from ${posNameEn(src, s)} to ${posNameEn(out, d)}`);
+  }
+  if (moves.length) parts.push(`So ${moves.join(' and ')}.`);
+  else parts.push("No shape changes position: only each shape's direction changes.");
+
+  const changed = src.shapes.findIndex((s) => !sameLook(s, OPS[v.correct].shape(s)));
+  if (changed >= 0) {
+    parts.push(`Every single shape also ${v.selfWord.en}: look at ${nameOfEn(src.shapes[changed])}.`);
+  }
+
+  parts.push(`The other two answers are ${OPS[v.wrong[0]].label.en} and ${OPS[v.wrong[1]].label.en}.`);
   return parts.join(' ');
 }
 
@@ -493,40 +599,78 @@ function explain(v: Variant, src: Comp, out: Comp, example: Comp | null): string
 // legge "ribalta in verticale" (scambia alto e basso), e in questo tipo di
 // domanda le due letture portano a due opzioni diverse, entrambe presenti.
 
-const PROMPT_V = [
-  "Lo specchio è a destra della figura: cosa si vede riflesso?",
-  'Metti uno specchio in piedi a destra della figura: quale immagine ci vedi?',
-  'La figura si guarda in uno specchio messo a destra: qual è il suo riflesso?',
+const PROMPT_V: LocalizedText[] = [
+  L("Lo specchio è a destra della figura: cosa si vede riflesso?", 'The mirror is to the right of the shape: what do you see reflected?'),
+  L(
+    'Metti uno specchio in piedi a destra della figura: quale immagine ci vedi?',
+    'Stand a mirror upright to the right of the shape: what image do you see in it?'
+  ),
+  L(
+    'La figura si guarda in uno specchio messo a destra: qual è il suo riflesso?',
+    "The shape looks at itself in a mirror placed to its right: what's its reflection?"
+  ),
 ];
-const PROMPT_H = [
-  "Lo specchio è sotto la figura, come l'acqua di un lago: qual è il riflesso?",
-  'La figura si specchia nell\'acqua, proprio sotto di lei: quale riflesso vedi?',
+const PROMPT_H: LocalizedText[] = [
+  L(
+    "Lo specchio è sotto la figura, come l'acqua di un lago: qual è il riflesso?",
+    "The mirror is below the shape, like the water of a lake: what's the reflection?"
+  ),
+  L(
+    'La figura si specchia nell\'acqua, proprio sotto di lei: quale riflesso vedi?',
+    'The shape is reflected in the water, right below it: what reflection do you see?'
+  ),
 ];
-const PROMPT_DOUBLE = [
-  'Due specchi di fila: prima quello a destra, poi quello sotto. Che immagine esce alla fine?',
-  'La figura si riflette prima nello specchio a destra e poi in quello sotto: come appare alla fine?',
+const PROMPT_DOUBLE: LocalizedText[] = [
+  L(
+    'Due specchi di fila: prima quello a destra, poi quello sotto. Che immagine esce alla fine?',
+    'Two mirrors in a row: first the one on the right, then the one below. What image comes out at the end?'
+  ),
+  L(
+    'La figura si riflette prima nello specchio a destra e poi in quello sotto: come appare alla fine?',
+    'The shape reflects first in the mirror on the right, then in the one below: what does it look like at the end?'
+  ),
 ];
-const PROMPT_EX_V = [
-  "Guarda l'esempio: la figura si riflette nello specchio a destra. Ora tocca alla seconda figura.",
-  "Sopra c'è una figura e il suo riflesso nello specchio a destra: qual è il riflesso della seconda?",
+const PROMPT_EX_V: LocalizedText[] = [
+  L(
+    "Guarda l'esempio: la figura si riflette nello specchio a destra. Ora tocca alla seconda figura.",
+    "Look at the example: the shape reflects in the mirror on the right. Now it's the second shape's turn."
+  ),
+  L(
+    "Sopra c'è una figura e il suo riflesso nello specchio a destra: qual è il riflesso della seconda?",
+    "Above is a shape and its reflection in the mirror on the right: what's the reflection of the second one?"
+  ),
 ];
-const PROMPT_EX_H = [
-  "Guarda l'esempio: la figura si riflette nell'acqua sotto di lei. Ora tocca alla seconda figura.",
-  "Sopra c'è una figura e il suo riflesso nello specchio messo sotto: qual è il riflesso della seconda?",
+const PROMPT_EX_H: LocalizedText[] = [
+  L(
+    "Guarda l'esempio: la figura si riflette nell'acqua sotto di lei. Ora tocca alla seconda figura.",
+    "Look at the example: the shape reflects in the water below it. Now it's the second shape's turn."
+  ),
+  L(
+    "Sopra c'è una figura e il suo riflesso nello specchio messo sotto: qual è il riflesso della seconda?",
+    "Above is a shape and its reflection in the mirror placed below: what's the reflection of the second one?"
+  ),
 ];
 
-const RULE_V = "Uno specchio messo a destra scambia la destra con la sinistra, ma lascia l'alto in alto.";
-const RULE_H = "Uno specchio messo sotto scambia l'alto con il basso, ma lascia la sinistra a sinistra.";
-const RULE_DOUBLE =
-  'Due riflessioni di fila si annullano a metà: la prima scambia destra e sinistra, la seconda alto e basso, e alla fine la figura risulta girata di mezzo giro (180°).';
+const RULE_V = L(
+  "Uno specchio messo a destra scambia la destra con la sinistra, ma lascia l'alto in alto.",
+  'A mirror placed on the right swaps left and right, but leaves top and bottom just as they are.'
+);
+const RULE_H = L(
+  "Uno specchio messo sotto scambia l'alto con il basso, ma lascia la sinistra a sinistra.",
+  'A mirror placed below swaps top and bottom, but leaves left and right just as they are.'
+);
+const RULE_DOUBLE = L(
+  'Due riflessioni di fila si annullano a metà: la prima scambia destra e sinistra, la seconda alto e basso, e alla fine la figura risulta girata di mezzo giro (180°).',
+  'Two reflections in a row partly cancel each other out: the first swaps left and right, the second swaps top and bottom, and in the end the shape comes out turned by a half turn (180°).'
+);
 
-const SELF_V = "si ribalta su sé stessa, come se guardasse dall'altra parte";
-const SELF_H = 'si capovolge sottosopra';
-const SELF_TURN = 'fa mezzo giro su sé stessa';
+const SELF_V = L("si ribalta su sé stessa, come se guardasse dall'altra parte", 'flips itself over, as if it were now looking the other way');
+const SELF_H = L('si capovolge sottosopra', 'flips upside down');
+const SELF_TURN = L('fa mezzo giro su sé stessa', 'does a half turn in place');
 
-const OUT_V = 'riflesso';
-const OUT_H = 'riflesso';
-const OUT_DOUBLE = '2 specchi';
+const OUT_V = L('riflesso', 'reflection');
+const OUT_H = L('riflesso', 'reflection');
+const OUT_DOUBLE = L('2 specchi', '2 mirrors');
 
 // ---------------------------------------------------------------------------
 // Difficoltà 1 — specchio a destra, forme dritte

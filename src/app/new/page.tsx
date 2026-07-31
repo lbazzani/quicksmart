@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
 import { AvatarPicker, Field, Segmented, Stepper, Toggle, inputCls } from '@/components/AvatarPicker';
+import type { GamePack } from '@/lib/types';
 
 export default function NewGame() {
   const T = useT();
@@ -13,6 +14,7 @@ export default function NewGame() {
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState('🦊');
+  const [pack, setPack] = useState<GamePack>('logic');
   const [rounds, setRounds] = useState<number | null>(10);
   const [buzzSec, setBuzzSec] = useState(40);
   const [answerSec, setAnswerSec] = useState(12);
@@ -29,6 +31,7 @@ export default function NewGame() {
         nickname,
         avatar,
         mode: 'team',
+        pack,
         roundsTotal: rounds,
         buzzWindowSec: buzzSec,
         answerSec,
@@ -58,6 +61,17 @@ export default function NewGame() {
       </Field>
       <Field label={T.new.avatar}>
         <AvatarPicker value={avatar} onChange={setAvatar} />
+      </Field>
+      <Field label={T.new.pack}>
+        <Segmented
+          options={[
+            { label: T.new.packLogic, value: 'logic' as GamePack },
+            { label: T.new.packFlags, value: 'flags' as GamePack },
+          ]}
+          value={pack}
+          onChange={setPack}
+        />
+        {pack === 'flags' && <span className="text-xs text-stone-400">{T.new.packFlagsHint}</span>}
       </Field>
       <Field label={T.new.rounds}>
         <Segmented

@@ -21,11 +21,11 @@ async function main() {
       [
         q.qtype,
         q.difficulty,
-        q.prompt,
+        JSON.stringify(q.prompt),
         JSON.stringify(q.payload),
         JSON.stringify(q.choices),
         q.correctIndex,
-        q.explanation,
+        JSON.stringify(q.explanation),
         q.hash,
       ]
     );

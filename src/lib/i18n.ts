@@ -18,6 +18,10 @@ const it = {
     nickname: 'Il tuo nome',
     nicknamePlaceholder: 'Come ti chiami?',
     avatar: 'Scegli il tuo avatar',
+    pack: 'Tipo di gioco',
+    packLogic: '🧩 Logica',
+    packFlags: '🚩 Bandiere',
+    packFlagsHint: 'Indovina il paese dalla sua bandiera: stesso ritmo del gioco, domande diverse.',
     rounds: 'Round',
     roundsOpen: 'Aperta',
     roundsOpenHint: 'decidi tu quando finire',
@@ -200,9 +204,14 @@ const it = {
 export type Dict = typeof it;
 
 // ---------------------------------------------------------------------------
-// English. L'INTERFACCIA è tradotta; le domande e le battute di SofAI restano
-// in italiano: nascono sul server, per stanza, e sono condivise da tutti i
-// giocatori — una partita non ha "la lingua di ognuno".
+// English. L'interfaccia E il contenuto delle domande (prompt, risposte,
+// spiegazione) sono tradotti: ogni giocatore vede la propria lingua, anche in
+// una stanza mista — la domanda nasce una volta sola sul server (stessa
+// struttura, stessi distrattori, stessa risposta per tutti), ma porta con sé
+// il testo in entrambe le lingue (vedi LocalizedText in src/lib/types.ts).
+// Le battute di SofAI restano in italiano; fanno eccezione i suoi consigli
+// veri sul tipo di domanda (src/lib/sofia/lines.ts, HINTS), tradotti anche
+// loro perché parlano del contenuto della domanda.
 // ---------------------------------------------------------------------------
 
 const en: Dict = {
@@ -221,6 +230,10 @@ const en: Dict = {
     nickname: 'Your name',
     nicknamePlaceholder: 'What’s your name?',
     avatar: 'Pick your avatar',
+    pack: 'Game type',
+    packLogic: '🧩 Logic',
+    packFlags: '🚩 Flags',
+    packFlagsHint: 'Guess the country from its flag: same pace, different questions.',
     rounds: 'Rounds',
     roundsOpen: 'Open',
     roundsOpenHint: 'you decide when to stop',
@@ -399,7 +412,8 @@ const en: Dict = {
   },
 };
 
-export type LangCode = 'it' | 'en';
+export type { LangCode } from './types';
+import type { LangCode } from './types';
 
 export const DICTS: Record<LangCode, Dict> = { it, en };
 

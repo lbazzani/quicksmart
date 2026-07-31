@@ -25,10 +25,11 @@ for (const qtype of types) {
     for (let i = 0; i < per; i++) {
       const q = GENERATORS[qtype](rng, d);
       const myId = id++;
-      sample.push({ id: myId, difficulty: d, prompt: q.prompt, payload: q.payload, choices: q.choices });
+      // l'audit alla cieca è in italiano: si esporta solo quella lingua
+      sample.push({ id: myId, difficulty: d, prompt: q.prompt.it, payload: q.payload, choices: q.choices });
       solutions[myId] = {
         correctIndex: q.correctIndex,
-        explanation: q.explanation,
+        explanation: q.explanation.it,
         qtype,
         difficulty: d,
       };

@@ -34,10 +34,10 @@ describe('fold — la regola della piega si legge prima di rispondere', () => {
     // la spiegazione (che si legge DOPO) non può essere l'unico posto in cui
     // sta la regola decisiva: chi contava in modo ingenuo trovava la propria
     // svista fra le opzioni
-    const conCordonatura = questions.filter((q) => /SULLA linea|SULLA piega/i.test(q.explanation));
+    const conCordonatura = questions.filter((q) => /SULLA linea|SULLA piega/i.test(q.explanation.it));
     expect(conCordonatura.length).toBeGreaterThan(0);
     for (const q of conCordonatura) {
-      expect(q.prompt, `prompt senza avviso: ${q.prompt}`).toMatch(/SULLA piega/i);
+      expect(q.prompt.it, `prompt senza avviso: ${q.prompt.it}`).toMatch(/SULLA piega/i);
     }
   });
 
@@ -79,7 +79,7 @@ describe('symmetry — l’asse si vede anche dove serve giudicarlo', () => {
       // sarebbe fuorviante. Con un asse solo, invece, va mostrato dove si
       // giudica la simmetria.
       if (assiEsempi.size === 1) {
-        expect(conAsse.length, `asse negli esempi ma non nelle opzioni: ${q.prompt}`).toBe(3);
+        expect(conAsse.length, `asse negli esempi ma non nelle opzioni: ${q.prompt.it}`).toBe(3);
       }
     }
   });
@@ -90,7 +90,7 @@ describe('domino — il suggerimento dice la verità', () => {
     const questions = generate('domino', 60);
     let controllate = 0;
     for (const q of questions) {
-      if (!/si gira|girando/.test(q.prompt)) continue;
+      if (!/si gira|girando/.test(q.prompt.it)) continue;
       if (q.payload.kind !== 'dominoes') continue;
       const tiles = q.payload.tiles;
       const hidden = tiles.findIndex((t) => t.unknown);
@@ -106,7 +106,7 @@ describe('domino — il suggerimento dice la verità', () => {
       if (indice !== q.correctIndex) {
         // se seguire il suggerimento alla lettera porta a un distrattore,
         // il prompt DEVE aver avvertito che i numeri cambiano
-        expect(q.prompt, `prompt fuorviante: ${q.prompt}`).toMatch(/cambia|crescono/);
+        expect(q.prompt.it, `prompt fuorviante: ${q.prompt.it}`).toMatch(/cambia|crescono/);
       }
     }
     expect(controllate).toBeGreaterThan(0);
@@ -129,9 +129,9 @@ describe('majority — vince davvero il gruppo indicato', () => {
       if (q.payload.kind !== 'cells') continue;
       const rows = q.payload.rows;
       // il bersaglio si legge SOLO dal prompt, come farebbe chi gioca
-      const shape = SHAPES.find((s) => q.prompt.includes(` ${s.many}`));
+      const shape = SHAPES.find((s) => q.prompt.it.includes(` ${s.many}`));
       const colorIdx = COLOR_FORMS.findIndex((f) =>
-        [...new Set([f.fp, f.mp])].some((w) => q.prompt.endsWith(` ${w}?`))
+        [...new Set([f.fp, f.mp])].some((w) => q.prompt.it.endsWith(` ${w}?`))
       );
       const match = (s: ShapeSpec) =>
         (shape ? s.shape === shape.shape : true) && (colorIdx >= 0 ? (s.color ?? 0) === colorIdx : true);
@@ -142,9 +142,9 @@ describe('majority — vince davvero il gruppo indicato', () => {
       expect(text.kind).toBe('text');
       if (text.kind !== 'text') continue;
       if (winners > 1) {
-        expect(text.text, q.prompt).toBe('Sono uguali');
+        expect(text.text.it, q.prompt.it).toBe('Sono uguali');
       } else {
-        expect(text.text, `${q.prompt} → conteggi ${counts.join('/')}`).toBe(`Gruppo ${counts.indexOf(best) + 1}`);
+        expect(text.text.it, `${q.prompt.it} → conteggi ${counts.join('/')}`).toBe(`Gruppo ${counts.indexOf(best) + 1}`);
         // scarto ≥ 2: chi perde il conto di uno non cambia risposta
         const second = [...counts].sort((a, b) => b - a)[1];
         expect(best - second, `scarto risicato: ${counts.join('/')}`).toBeGreaterThanOrEqual(2);
@@ -185,7 +185,9 @@ describe('i colori si chiamano come sono disegnati', () => {
   it('nessun testo nomina un colore che non è nella tavolozza', () => {
     for (const qtype of Object.keys(GENERATORS) as (keyof typeof GENERATORS)[]) {
       for (const q of generate(qtype, 25)) {
-        const testo = [q.prompt, q.explanation, ...q.choices.map((c) => (c.kind === 'text' ? c.text : ''))].join(' ');
+        const testo = [q.prompt.it, q.explanation.it, ...q.choices.map((c) => (c.kind === 'text' ? c.text.it : ''))].join(
+          ' '
+        );
         const trovato = testo.match(fuoriTavolozza);
         expect(trovato?.[0], `${qtype} nomina "${trovato?.[0]}": ${testo.slice(0, 120)}`).toBeUndefined();
       }

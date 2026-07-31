@@ -27,17 +27,22 @@ import type {
   CellSpec,
   ChoiceVisual,
   Difficulty,
+  LocalizedText,
   Question,
   ShapeName,
   ShapeSpec,
 } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { tooSimilar } from '../colors';
+import { colorNameEn, tooSimilar } from '../colors';
+import { L } from '../localize';
 import { placeChoices, retry, balancedNumericDistractors } from './qutils';
 import {
   FILL_ADJ,
+  FILL_ADJ_EN,
   SHAPES,
+  SHAPES_EN,
   SIZE_ADJ,
+  SIZE_ADJ_EN,
   agr,
   artPl,
   cap,
@@ -47,9 +52,27 @@ import {
   unArt,
   type ColorInfo,
   type ShapeInfo,
+  type ShapeInfoEn,
 } from './vocab';
 
 const ORD = ['prima', 'seconda', 'terza', 'quarta', 'quinta'];
+const ORD_EN = ['first', 'second', 'third', 'fourth', 'fifth'];
+
+// ---------------------------------------------------------------------------
+// Parole (inglese). SHAPES_EN, FILL_ADJ_EN e SIZE_ADJ_EN vengono da ./vocab,
+// nello stesso ordine/indicizzazione degli originali italiani: qui solo
+// l'accoppiamento con ciò che l'italiano ha già scelto tramite rng (mai un
+// nuovo consumo di rng) e i colori, che in inglese non si accordano.
+// ---------------------------------------------------------------------------
+
+/** ShapeInfoEn corrispondente a uno ShapeInfo italiano già scelto (stesso nome forma) */
+const enOf = (s: ShapeInfo): ShapeInfoEn => SHAPES_EN.find((e) => e.shape === s.shape) as ShapeInfoEn;
+
+/** articolo indeterminativo inglese: dipende dal suono iniziale, non dal genere */
+const unArtEn = (s: ShapeInfoEn): string => (/^[aeiou]/i.test(s.one) ? 'an' : 'a');
+
+/** nome del colore in inglese: invariabile, nessun accordo di genere/numero */
+const colEn = (c: ColorInfo): string => colorNameEn(c.idx);
 
 // ---------------------------------------------------------------------------
 // Helper di griglia + conteggi VERIFICATI
@@ -230,8 +253,8 @@ function countChoices(
   }
   shuffle(rng, out);
   return [
-    { kind: 'text', text: String(out[0]) },
-    { kind: 'text', text: String(out[1]) },
+    { kind: 'text', text: L(String(out[0])) },
+    { kind: 'text', text: L(String(out[1])) },
   ];
 }
 
@@ -239,11 +262,11 @@ interface CountQuestion {
   rng: Rng;
   difficulty: Difficulty;
   grid: Grid;
-  prompt: string;
+  prompt: LocalizedText;
   correct: number;
   /** errori concettuali da offrire come distrattori, se abbastanza lontani */
   prefer: number[];
-  explanation: string;
+  explanation: LocalizedText;
   /** la domanda nomina un colore: i conteggi per colore devono essere diversi */
   colorCriterion?: boolean;
 }
@@ -263,7 +286,7 @@ function countQuestion(q: CountQuestion): Question {
   if (q.correct < MIN_COUNT_ANSWER) throw new Error('conteggio troppo piccolo per distrattori equilibrati');
   const maxAnswer = q.grid.length * q.grid[0].length;
   const [d1, d2] = countChoices(q.rng, q.correct, q.prefer, maxAnswer);
-  const { choices, correctIndex } = placeChoices(q.rng, { kind: 'text', text: String(q.correct) }, [d1, d2]);
+  const { choices, correctIndex } = placeChoices(q.rng, { kind: 'text', text: L(String(q.correct)) }, [d1, d2]);
   return {
     qtype: 'pattern',
     difficulty: q.difficulty,
@@ -283,7 +306,7 @@ function cellQuestion(
   hidden: [number, number],
   correct: ShapeSpec,
   distractors: [ShapeSpec, ShapeSpec],
-  explanation: string
+  explanation: LocalizedText
 ): Question {
   guardColors(grid, [correct, ...distractors]);
   const { choices, correctIndex } = placeChoices(rng, cellChoice(correct), [
@@ -293,7 +316,7 @@ function cellQuestion(
   return {
     qtype: 'pattern',
     difficulty,
-    prompt: 'Quale figura va nella cella mancante?',
+    prompt: L('Quale figura va nella cella mancante?', 'Which shape goes in the missing cell?'),
     payload: { kind: 'cells', rows: hide(grid, hidden[0], hidden[1]) },
     choices,
     correctIndex,
@@ -322,6 +345,10 @@ function hiddenPos(rng: Rng, rows: number, cols: number): [number, number] {
 
 function where(r: number, c: number): string {
   return `Il ? sta nella ${ORD[r]} riga e nella ${ORD[c]} colonna.`;
+}
+
+function whereEn(r: number, c: number): string {
+  return `The ? is in the ${ORD_EN[r]} row and ${ORD_EN[c]} column.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,16 +395,21 @@ function d1CountShape(rng: Rng): Question {
     rng,
     difficulty: 1,
     grid: g,
-    prompt: `${quanti(T)} ${T.many} ci sono in tutto?`,
+    prompt: L(`${quanti(T)} ${T.many} ci sono in tutto?`, `How many ${enOf(T).many} are there in total?`),
     correct: n,
     prefer: oc,
     colorCriterion: false,
-    explanation:
+    explanation: L(
       `${cap(artPl(T))} ${T.many} stanno tutt${T.f ? 'e' : 'i'} in un blocco: ` +
-      `basta contarl${T.f ? 'e' : 'i'} con ordine, una riga alla volta. ` +
-      `${sumLine(perRow(g, isShape(T)))}, quindi ${n}. ` +
-      cap(others.map((s, i) => `${artPl(s)} ${s.many} sono ${oc[i]}`).join(', ')) +
-      `: sono lì solo per confondere.`,
+        `basta contarl${T.f ? 'e' : 'i'} con ordine, una riga alla volta. ` +
+        `${sumLine(perRow(g, isShape(T)))}, quindi ${n}. ` +
+        cap(others.map((s, i) => `${artPl(s)} ${s.many} sono ${oc[i]}`).join(', ')) +
+        `: sono lì solo per confondere.`,
+      `The ${enOf(T).many} are all in one block: just count them in order, one row at a time. ` +
+        `${sumLine(perRow(g, isShape(T)))}, so ${n}. ` +
+        cap(others.map((s, i) => `the ${enOf(s).many} are ${oc[i]}`).join(', ')) +
+        `: they're only there to confuse you.`
+    ),
   });
 }
 
@@ -408,14 +440,18 @@ function d1CountColor(rng: Rng): Question {
     rng,
     difficulty: 1,
     grid: g,
-    prompt: `Quante figure ${col(T, true)} ci sono in tutto?`,
+    prompt: L(`Quante figure ${col(T, true)} ci sono in tutto?`, `How many ${colEn(T)} shapes are there in total?`),
     correct: n,
     prefer: oc,
     colorCriterion: true,
-    explanation:
+    explanation: L(
       `Le forme sono tutte uguali: conta solo il colore. Le figure ${col(T, true)} stanno vicine, ` +
-      `riga per riga sono ${sumLine(perRow(g, isColor(T)))}. ` +
-      cap(others.map((c, i) => `le ${col(c, true)} sono ${oc[i]}`).join(', ')) + '.',
+        `riga per riga sono ${sumLine(perRow(g, isColor(T)))}. ` +
+        cap(others.map((c, i) => `le ${col(c, true)} sono ${oc[i]}`).join(', ')) + '.',
+      `The shapes are all the same: only the color counts. The ${colEn(T)} shapes are grouped together, ` +
+        `row by row that's ${sumLine(perRow(g, isColor(T)))}. ` +
+        cap(others.map((c, i) => `the ${colEn(c)} ones are ${oc[i]}`).join(', ')) + '.'
+    ),
   });
 }
 
@@ -443,19 +479,28 @@ function d1CountFill(rng: Rng): Question {
   const nOther = total - n;
   const adjT = agr(FILL_ADJ[target], true);
   const adjO = agr(FILL_ADJ[other], true);
+  const adjTEn = FILL_ADJ_EN[target];
+  const adjOEn = FILL_ADJ_EN[other];
 
   return countQuestion({
     rng,
     difficulty: 1,
     grid: g,
-    prompt: `Quante figure ${adjT}${target === 'outline' ? ' (solo il contorno)' : ''} ci sono?`,
+    prompt: L(
+      `Quante figure ${adjT}${target === 'outline' ? ' (solo il contorno)' : ''} ci sono?`,
+      `How many ${adjTEn} shapes${target === 'outline' ? ' (outline only)' : ''} are there?`
+    ),
     correct: n,
     prefer: [nOther],
     colorCriterion: false,
-    explanation:
+    explanation: L(
       `Qui non conta né la forma né il colore: guarda solo se la figura è piena o è solo contorno. ` +
-      `Le figure ${adjT} stanno tutte vicine: ${sumLine(perRow(g, isFill(target)))}, quindi ${n}. ` +
-      `Le ${adjO} sono ${nOther}: l'errore classico è contare il gruppo sbagliato.`,
+        `Le figure ${adjT} stanno tutte vicine: ${sumLine(perRow(g, isFill(target)))}, quindi ${n}. ` +
+        `Le ${adjO} sono ${nOther}: l'errore classico è contare il gruppo sbagliato.`,
+      `Shape and color don't matter here: just look at whether each figure is full or outline only. ` +
+        `The ${adjTEn} shapes are all grouped together: ${sumLine(perRow(g, isFill(target)))}, so ${n}. ` +
+        `The ${adjOEn} ones are ${nOther}: the classic mistake is counting the wrong group.`
+    ),
   });
 }
 
@@ -482,19 +527,25 @@ function d1CountSize(rng: Rng): Question {
   const nOther = total - n;
   const adjT = agr(wantBig ? SIZE_ADJ.big : SIZE_ADJ.small, true);
   const adjO = agr(wantBig ? SIZE_ADJ.small : SIZE_ADJ.big, true);
+  const adjTEn = wantBig ? SIZE_ADJ_EN.big : SIZE_ADJ_EN.small;
+  const adjOEn = wantBig ? SIZE_ADJ_EN.small : SIZE_ADJ_EN.big;
 
   return countQuestion({
     rng,
     difficulty: 1,
     grid: g,
-    prompt: `Quante figure ${adjT} ci sono?`,
+    prompt: L(`Quante figure ${adjT} ci sono?`, `How many ${adjTEn} shapes are there?`),
     correct: n,
     prefer: [nOther],
     colorCriterion: false,
-    explanation:
+    explanation: L(
       `Conta solo la grandezza: le figure ${adjT} stanno tutte vicine. ` +
-      `${sumLine(perRow(g, isBig(wantBig)))}, quindi ${n}. ` +
-      `Le figure ${adjO} sono ${nOther} (in tutto ${total} celle).`,
+        `${sumLine(perRow(g, isBig(wantBig)))}, quindi ${n}. ` +
+        `Le figure ${adjO} sono ${nOther} (in tutto ${total} celle).`,
+      `Only size matters here: the ${adjTEn} shapes are all grouped together. ` +
+        `${sumLine(perRow(g, isBig(wantBig)))}, so ${n}. ` +
+        `The ${adjOEn} shapes are ${nOther} (${total} cells in total).`
+    ),
   });
 }
 
@@ -523,21 +574,25 @@ function d1MostFrequent(rng: Rng): Question {
   const others = sh.filter((_, i) => i !== ti);
 
   guardColors(g);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: W.many }, [
-    { kind: 'text', text: others[0].many },
-    { kind: 'text', text: others[1].many },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(W.many, enOf(W).many) }, [
+    { kind: 'text', text: L(others[0].many, enOf(others[0]).many) },
+    { kind: 'text', text: L(others[1].many, enOf(others[1]).many) },
   ]);
   return {
     qtype: 'pattern',
     difficulty: 1,
-    prompt: 'Quale forma compare più volte?',
+    prompt: L('Quale forma compare più volte?', 'Which shape appears the most?'),
     payload: { kind: 'cells', rows: g },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Ogni forma sta tutta in un blocco: conta i tre blocchi invece di fidarti dell'impressione. ` +
-      cap(sh.map((s, i) => `${artPl(s)} ${s.many} sono ${counts[i]}`).join(', ')) +
-      `. Vincono ${artPl(W)} ${W.many} con ${best}, ${best - second} in più della seconda forma.`,
+        cap(sh.map((s, i) => `${artPl(s)} ${s.many} sono ${counts[i]}`).join(', ')) +
+        `. Vincono ${artPl(W)} ${W.many} con ${best}, ${best - second} in più della seconda forma.`,
+      `Each shape sits in its own block: count the three blocks instead of trusting your first impression. ` +
+        cap(sh.map((s, i) => `the ${enOf(s).many} are ${counts[i]}`).join(', ')) +
+        `. The ${enOf(W).many} win with ${best}, ${best - second} more than the runner-up.`
+    ),
   };
 }
 
@@ -559,16 +614,19 @@ interface Filler {
 }
 
 interface CompositeSetup {
-  prompt: string;
+  prompt: LocalizedText;
   /** sintagma per la spiegazione: "figure piene", "stelle", "figure verdi" */
   aLabel: string;
+  aLabelEn: string;
   bLabel: string;
+  bLabelEn: string;
   /** costruisce una figura che soddisfa/non soddisfa le due proprietà */
   make: (a: boolean, b: boolean, f: Filler) => ShapeSpec;
   predA: Pred;
   predB: Pred;
   /** frase finale personalizzata ("piene E grandi insieme") */
   both: string;
+  bothEn: string;
   /** quale delle due proprietà è il colore chiesto dalla domanda */
   colorSide?: 'a' | 'b';
   /** i due colori usati quando la proprietà di colore è falsa */
@@ -645,10 +703,14 @@ function compositeCount(rng: Rng, difficulty: Difficulty, rows: number, cols: nu
     correct: nBoth,
     prefer: [nA, nB],
     colorCriterion: st.colorSide !== undefined,
-    explanation:
+    explanation: L(
       `Attenzione alla trappola: in tutto ci sono ${nA} ${st.aLabel} e ${nB} ${st.bLabel}, ` +
-      `ma vanno contate solo le figure che sono ${st.both}: sono ${nBoth} ` +
-      `(riga per riga: ${sumLine(perRow(g, both))}). Chi guarda una caratteristica sola risponde ${nA} o ${nB}.`,
+        `ma vanno contate solo le figure che sono ${st.both}: sono ${nBoth} ` +
+        `(riga per riga: ${sumLine(perRow(g, both))}). Chi guarda una caratteristica sola risponde ${nA} o ${nB}.`,
+      `Watch out for the trap: in total there are ${nA} ${st.aLabelEn} and ${nB} ${st.bLabelEn}, ` +
+        `but only the shapes that are ${st.bothEn} count: that's ${nBoth} ` +
+        `(row by row: ${sumLine(perRow(g, both))}). Looking at just one trait gets you ${nA} or ${nB}.`
+    ),
   });
 }
 
@@ -660,10 +722,13 @@ function d2ShapeColor(rng: Rng): Question {
   const [T, S1, S2] = sh;
   const [C, K1, K2] = cl;
   return compositeCount(rng, 2, rows, cols, {
-    prompt: `${quanti(T)} ${T.many} ${col(C, T.f)} ci sono?`,
+    prompt: L(`${quanti(T)} ${T.many} ${col(C, T.f)} ci sono?`, `How many ${colEn(C)} ${enOf(T).many} are there?`),
     aLabel: T.many,
+    aLabelEn: enOf(T).many,
     bLabel: `figure ${col(C, true)}`,
+    bLabelEn: `${colEn(C)} shapes`,
     both: `${T.many} E ${col(C, T.f)} insieme`,
+    bothEn: `${enOf(T).many} and ${colEn(C)} at once`,
     make: (a, b, f) => mk(a ? T.shape : pick(rng, [S1, S2]).shape, b ? C.idx : f.otherColor()),
     predA: isShape(T),
     predB: isColor(C),
@@ -689,15 +754,23 @@ function d3Composite(rng: Rng): Question {
   const wantBig = chance(rng, 0.5);
   const fillAdjF = agr(FILL_ADJ[wantFill], true);
   const sizeAdjF = agr(wantBig ? SIZE_ADJ.big : SIZE_ADJ.small, true);
+  const fillAdjEn = FILL_ADJ_EN[wantFill];
+  const sizeAdjEn = wantBig ? SIZE_ADJ_EN.big : SIZE_ADJ_EN.small;
   const sz = (big: boolean) => (big ? BIG : SMALL);
 
   if (kind === 0) {
     // pieno/vuoto E grande/piccolo
     return compositeCount(rng, 3, rows, cols, {
-      prompt: `Quante figure sono ${fillAdjF} E ${sizeAdjF} allo stesso tempo?`,
+      prompt: L(
+        `Quante figure sono ${fillAdjF} E ${sizeAdjF} allo stesso tempo?`,
+        `How many shapes are ${fillAdjEn} AND ${sizeAdjEn} at the same time?`
+      ),
       aLabel: `figure ${fillAdjF}`,
+      aLabelEn: `${fillAdjEn} shapes`,
       bLabel: `figure ${sizeAdjF}`,
+      bLabelEn: `${sizeAdjEn} shapes`,
       both: `${fillAdjF} E ${sizeAdjF} insieme`,
+      bothEn: `${fillAdjEn} and ${sizeAdjEn} at once`,
       make: (a, b) => mk(anyShape(), anyColor(), a ? wantFill : notFill, sz(b ? wantBig : !wantBig)),
       predA: isFill(wantFill),
       predB: isBig(wantBig),
@@ -706,10 +779,16 @@ function d3Composite(rng: Rng): Question {
   if (kind === 1) {
     // forma E pieno/vuoto
     return compositeCount(rng, 3, rows, cols, {
-      prompt: `${quanti(T)} ${T.many} ${agr(FILL_ADJ[wantFill], T.f)} ci sono?`,
+      prompt: L(
+        `${quanti(T)} ${T.many} ${agr(FILL_ADJ[wantFill], T.f)} ci sono?`,
+        `How many ${fillAdjEn} ${enOf(T).many} are there?`
+      ),
       aLabel: T.many,
+      aLabelEn: enOf(T).many,
       bLabel: `figure ${fillAdjF}`,
+      bLabelEn: `${fillAdjEn} shapes`,
       both: `${T.many} E ${agr(FILL_ADJ[wantFill], T.f)} insieme`,
+      bothEn: `${enOf(T).many} and ${fillAdjEn} at once`,
       make: (a, b) => mk(a ? T.shape : otherShape(), anyColor(), b ? wantFill : notFill),
       predA: isShape(T),
       predB: isFill(wantFill),
@@ -718,10 +797,16 @@ function d3Composite(rng: Rng): Question {
   if (kind === 2) {
     // forma E grandezza
     return compositeCount(rng, 3, rows, cols, {
-      prompt: `${quanti(T)} ${T.many} ${agr(wantBig ? SIZE_ADJ.big : SIZE_ADJ.small, T.f)} ci sono?`,
+      prompt: L(
+        `${quanti(T)} ${T.many} ${agr(wantBig ? SIZE_ADJ.big : SIZE_ADJ.small, T.f)} ci sono?`,
+        `How many ${sizeAdjEn} ${enOf(T).many} are there?`
+      ),
       aLabel: T.many,
+      aLabelEn: enOf(T).many,
       bLabel: `figure ${sizeAdjF}`,
+      bLabelEn: `${sizeAdjEn} shapes`,
       both: `${T.many} E ${agr(wantBig ? SIZE_ADJ.big : SIZE_ADJ.small, T.f)} insieme`,
+      bothEn: `${enOf(T).many} and ${sizeAdjEn} at once`,
       make: (a, b) => mk(a ? T.shape : otherShape(), anyColor(), 'solid', sz(b ? wantBig : !wantBig)),
       predA: isShape(T),
       predB: isBig(wantBig),
@@ -730,10 +815,16 @@ function d3Composite(rng: Rng): Question {
   if (kind === 3) {
     // colore E grandezza
     return compositeCount(rng, 3, rows, cols, {
-      prompt: `Quante figure ${col(C, true)} e ${sizeAdjF} ci sono?`,
+      prompt: L(
+        `Quante figure ${col(C, true)} e ${sizeAdjF} ci sono?`,
+        `How many ${colEn(C)} and ${sizeAdjEn} shapes are there?`
+      ),
       aLabel: `figure ${col(C, true)}`,
+      aLabelEn: `${colEn(C)} shapes`,
       bLabel: `figure ${sizeAdjF}`,
+      bLabelEn: `${sizeAdjEn} shapes`,
       both: `${col(C, true)} E ${sizeAdjF} insieme`,
+      bothEn: `${colEn(C)} and ${sizeAdjEn} at once`,
       make: (a, b, f) => mk(anyShape(), a ? C.idx : f.otherColor(), 'solid', sz(b ? wantBig : !wantBig)),
       predA: isColor(C),
       predB: isBig(wantBig),
@@ -743,10 +834,16 @@ function d3Composite(rng: Rng): Question {
   }
   // colore E pieno/vuoto
   return compositeCount(rng, 3, rows, cols, {
-    prompt: `Quante figure ${col(C, true)} e ${fillAdjF} ci sono?`,
+    prompt: L(
+      `Quante figure ${col(C, true)} e ${fillAdjF} ci sono?`,
+      `How many ${colEn(C)} and ${fillAdjEn} shapes are there?`
+    ),
     aLabel: `figure ${col(C, true)}`,
+    aLabelEn: `${colEn(C)} shapes`,
     bLabel: `figure ${fillAdjF}`,
+    bLabelEn: `${fillAdjEn} shapes`,
     both: `${col(C, true)} E ${fillAdjF} insieme`,
+    bothEn: `${colEn(C)} and ${fillAdjEn} at once`,
     make: (a, b, f) => mk(anyShape(), a ? C.idx : f.otherColor(), b ? wantFill : notFill),
     predA: isColor(C),
     predB: isFill(wantFill),
@@ -803,22 +900,30 @@ function d2Difference(rng: Rng): Question {
 
   const label = (i: number) =>
     byColor ? `figure ${col(cl[i], true)}` : `${sh[i].many} ${col(cl[i], sh[i].f)}`;
+  const labelEn = (i: number) => (byColor ? `${colEn(cl[i])} shapes` : `${colEn(cl[i])} ${enOf(sh[i]).many}`);
   const prompt = byColor
     ? `Quante figure ${col(cl[0], true)} ci sono in più rispetto a quelle ${col(cl[1], true)}?`
     : `${quanti(sh[0])} ${sh[0].many} ci sono in più rispetto ${sh[1].f ? 'alle' : 'ai'} ${sh[1].many}?`;
+  const promptEn = byColor
+    ? `How many more ${colEn(cl[0])} shapes are there than ${colEn(cl[1])} ones?`
+    : `How many more ${enOf(sh[0]).many} are there than ${enOf(sh[1]).many}?`;
 
   return countQuestion({
     rng,
     difficulty: 2,
     grid: g,
-    prompt,
+    prompt: L(prompt, promptEn),
     correct: diff,
     prefer: [cA, cB],
     colorCriterion: true,
-    explanation:
+    explanation: L(
       `Servono due conteggi e una sottrazione. ${cap(label(0))}: ${sumLine(perRow(g, pA))}. ` +
-      `${cap(label(1))}: ${sumLine(perRow(g, pB))}. La domanda chiede QUANTE IN PIÙ, ` +
-      `quindi ${cA} − ${cB} = ${diff} (rispondere ${cA} vuol dire essersi dimenticati della sottrazione).`,
+        `${cap(label(1))}: ${sumLine(perRow(g, pB))}. La domanda chiede QUANTE IN PIÙ, ` +
+        `quindi ${cA} − ${cB} = ${diff} (rispondere ${cA} vuol dire essersi dimenticati della sottrazione).`,
+      `This takes two counts and a subtraction. ${cap(labelEn(0))}: ${sumLine(perRow(g, pA))}. ` +
+        `${cap(labelEn(1))}: ${sumLine(perRow(g, pB))}. The question asks HOW MANY MORE, ` +
+        `so ${cA} − ${cB} = ${diff} (answering ${cA} means forgetting the subtraction).`
+    ),
   });
 }
 
@@ -851,10 +956,16 @@ function d2Checker(rng: Rng): Question {
       mk(there.shape, rc[rm].idx), // ha sbagliato l'alternanza
       mk(here.shape, rc[ro].idx), // ha preso il colore della riga sopra
     ],
-    `Ci sono due regole. 1) Le forme si alternano come su una scacchiera: ogni cella è diversa da quelle ` +
-      `sopra, sotto, a destra e a sinistra, ma uguale a quelle in diagonale. 2) Il colore dipende dalla riga: ` +
-      `ogni riga ha il suo. ${where(rm, cm)} Quella riga è ${col(rc[rm], true, false)}, e lì tocca ` +
-      `${unArt(here)} ${here.one}: quindi ${unArt(here)} ${here.one} ${col(rc[rm], here.f, false)}.`
+    L(
+      `Ci sono due regole. 1) Le forme si alternano come su una scacchiera: ogni cella è diversa da quelle ` +
+        `sopra, sotto, a destra e a sinistra, ma uguale a quelle in diagonale. 2) Il colore dipende dalla riga: ` +
+        `ogni riga ha il suo. ${where(rm, cm)} Quella riga è ${col(rc[rm], true, false)}, e lì tocca ` +
+        `${unArt(here)} ${here.one}: quindi ${unArt(here)} ${here.one} ${col(rc[rm], here.f, false)}.`,
+      `There are two rules. 1) The shapes alternate like a checkerboard: every cell differs from the ones ` +
+        `above, below, right, and left, but matches the ones diagonally. 2) The color depends on the row: ` +
+        `each row has its own. ${whereEn(rm, cm)} That row is ${colEn(rc[rm])}, and it's ${unArtEn(enOf(here))} ` +
+        `${enOf(here).one}'s turn there: so it's ${unArtEn(enOf(here))} ${colEn(rc[rm])} ${enOf(here).one}.`
+    )
   );
 }
 
@@ -878,10 +989,16 @@ function d2RowCol(rng: Rng): Question {
       mk(cs[cm - 1].shape, rc[rm].idx), // forma della colonna accanto
       mk(cs[cm].shape, rc[rm - 1].idx), // colore della riga sopra
     ],
-    `Guarda separatamente le colonne e le righe: ogni colonna ha sempre la stessa forma dall'alto in basso, ` +
-      `ogni riga ha sempre lo stesso colore da sinistra a destra. ${where(rm, cm)} ` +
-      `Quella è la colonna ${cs[cm].f ? 'delle' : 'dei'} ${cs[cm].many} e la riga ${col(rc[rm], true, false)}: ` +
-      `ci va ${unArt(cs[cm])} ${cs[cm].one} ${col(rc[rm], cs[cm].f, false)}.`
+    L(
+      `Guarda separatamente le colonne e le righe: ogni colonna ha sempre la stessa forma dall'alto in basso, ` +
+        `ogni riga ha sempre lo stesso colore da sinistra a destra. ${where(rm, cm)} ` +
+        `Quella è la colonna ${cs[cm].f ? 'delle' : 'dei'} ${cs[cm].many} e la riga ${col(rc[rm], true, false)}: ` +
+        `ci va ${unArt(cs[cm])} ${cs[cm].one} ${col(rc[rm], cs[cm].f, false)}.`,
+      `Look at columns and rows separately: every column always has the same shape top to bottom, ` +
+        `every row always has the same color left to right. ${whereEn(rm, cm)} ` +
+        `That's the column of ${enOf(cs[cm]).many} and the ${colEn(rc[rm])} row: ` +
+        `it needs ${unArtEn(enOf(cs[cm]))} ${colEn(rc[rm])} ${enOf(cs[cm]).one}.`
+    )
   );
 }
 
@@ -901,6 +1018,10 @@ const symName = (s: { info: ShapeInfo; color: ColorInfo }) =>
   `${s.info.one} ${col(s.color, s.info.f, false)}`;
 /** "una stella rossa" (con l'articolo, per le frasi discorsive) */
 const symArt = (s: { info: ShapeInfo; color: ColorInfo }) => `${unArt(s.info)} ${symName(s)}`;
+
+const symNameEn = (s: { info: ShapeInfo; color: ColorInfo }) => `${colEn(s.color)} ${enOf(s.info).one}`;
+/** "a red star" (con l'articolo, per le frasi discorsive) */
+const symArtEn = (s: { info: ShapeInfo; color: ColorInfo }) => `${unArtEn(enOf(s.info))} ${symNameEn(s)}`;
 
 /** trame a scorrimento: la riga sotto ripete la riga sopra spostata di `shift` */
 function shiftPattern(rng: Rng, difficulty: Difficulty, shift: number, rows: number, cols: number): Question {
@@ -931,12 +1052,20 @@ function shiftPattern(rng: Rng, difficulty: Difficulty, shift: number, rows: num
     [rm, cm],
     at(rm, cm),
     [symSpec(sym[picked[0]]), symSpec(sym[picked[1]])],
-    `Ogni riga contiene le stesse ${k} figure della riga sopra, ma spostate di ${shift} ` +
-      `${shift === 1 ? 'posto' : 'posti'} verso destra (chi esce a destra rientra a sinistra). ` +
-      `Detto in un altro modo: scendendo di una riga e spostandosi di ${shift} ` +
-      `${shift === 1 ? 'colonna' : 'colonne'} a destra si ritrova sempre la stessa figura. ` +
-      `${where(rm, cm)} Nella sua riga, subito prima del ?, c'è ${symArt(prev)}: dopo tocca a ` +
-      `${symArt(sym[ci])}.`
+    L(
+      `Ogni riga contiene le stesse ${k} figure della riga sopra, ma spostate di ${shift} ` +
+        `${shift === 1 ? 'posto' : 'posti'} verso destra (chi esce a destra rientra a sinistra). ` +
+        `Detto in un altro modo: scendendo di una riga e spostandosi di ${shift} ` +
+        `${shift === 1 ? 'colonna' : 'colonne'} a destra si ritrova sempre la stessa figura. ` +
+        `${where(rm, cm)} Nella sua riga, subito prima del ?, c'è ${symArt(prev)}: dopo tocca a ` +
+        `${symArt(sym[ci])}.`,
+      `Each row has the same ${k} shapes as the row above, shifted ${shift} ` +
+        `${shift === 1 ? 'place' : 'places'} to the right (whatever falls off the right side wraps back to ` +
+        `the left). Put another way: moving down one row and ${shift} ` +
+        `${shift === 1 ? 'column' : 'columns'} to the right always lands on the same shape. ` +
+        `${whereEn(rm, cm)} In its row, right before the ?, there's ${symArtEn(prev)}: next comes ` +
+        `${symArtEn(sym[ci])}.`
+    )
   );
 }
 
@@ -966,26 +1095,27 @@ function d3Latin(rng: Rng): Question {
   const rp = shuffle(rng, [0, 1, 2, 3]);
   const cp = shuffle(rng, [0, 1, 2, 3]);
   const sp = shuffle(rng, [0, 1, 2, 3]);
-  const L = (r: number, c: number) => sp[base(rp[r], cp[c])];
-  const at = (r: number, c: number) => symSpec(sym[L(r, c)]);
+  // (rinominata da "L" a "latinIdx": "L" ora è l'helper di localizzazione importato da ../localize)
+  const latinIdx = (r: number, c: number) => sp[base(rp[r], cp[c])];
+  const at = (r: number, c: number) => symSpec(sym[latinIdx(r, c)]);
   const rm = randInt(rng, 0, k - 1);
   const cm = randInt(rng, 0, k - 1);
   const g = gridFrom(k, k, at);
 
   // verifica: ogni riga e ogni colonna contengono tutti i simboli una volta sola
   for (let i = 0; i < k; i++) {
-    const rowSet = new Set(Array.from({ length: k }, (_, j) => L(i, j)));
-    const colSet = new Set(Array.from({ length: k }, (_, j) => L(j, i)));
+    const rowSet = new Set(Array.from({ length: k }, (_, j) => latinIdx(i, j)));
+    const colSet = new Set(Array.from({ length: k }, (_, j) => latinIdx(j, i)));
     if (rowSet.size !== k || colSet.size !== k) throw new Error('quadrato latino non valido');
   }
 
-  const correct = L(rm, cm);
+  const correct = latinIdx(rm, cm);
   const wrong = shuffle(
     rng,
     Array.from({ length: k }, (_, i) => i).filter((i) => i !== correct)
   ).slice(0, 2);
-  const rowOthers = Array.from({ length: k }, (_, c) => L(rm, c)).filter((s) => s !== correct);
-  const colOthers = Array.from({ length: k }, (_, r) => L(r, cm)).filter((s) => s !== correct);
+  const rowOthers = Array.from({ length: k }, (_, c) => latinIdx(rm, c)).filter((s) => s !== correct);
+  const colOthers = Array.from({ length: k }, (_, r) => latinIdx(r, cm)).filter((s) => s !== correct);
 
   return cellQuestion(
     rng,
@@ -994,11 +1124,18 @@ function d3Latin(rng: Rng): Question {
     [rm, cm],
     at(rm, cm),
     [symSpec(sym[wrong[0]]), symSpec(sym[wrong[1]])],
-    `Qui non c'è una successione da indovinare: in ogni riga e in ogni colonna ciascuna delle 4 figure ` +
-      `compare esattamente una volta. Si ragiona per esclusione. ${where(rm, cm)} ` +
-      `Nella sua riga ci sono già ${rowOthers.map((s) => symArt(sym[s])).join(', ')}: manca solo ` +
-      `${symArt(sym[correct])}. Controprova: nella sua colonna ci sono ` +
-      `${colOthers.map((s) => symArt(sym[s])).join(', ')}, e ${symArt(sym[correct])} non c'è ancora.`
+    L(
+      `Qui non c'è una successione da indovinare: in ogni riga e in ogni colonna ciascuna delle 4 figure ` +
+        `compare esattamente una volta. Si ragiona per esclusione. ${where(rm, cm)} ` +
+        `Nella sua riga ci sono già ${rowOthers.map((s) => symArt(sym[s])).join(', ')}: manca solo ` +
+        `${symArt(sym[correct])}. Controprova: nella sua colonna ci sono ` +
+        `${colOthers.map((s) => symArt(sym[s])).join(', ')}, e ${symArt(sym[correct])} non c'è ancora.`,
+      `There's no sequence to guess here: in every row and column, each of the 4 shapes appears exactly ` +
+        `once. It's a game of elimination. ${whereEn(rm, cm)} ` +
+        `Its row already has ${rowOthers.map((s) => symArtEn(sym[s])).join(', ')}: only ` +
+        `${symArtEn(sym[correct])} is missing. Double-check: its column has ` +
+        `${colOthers.map((s) => symArtEn(sym[s])).join(', ')}, and ${symArtEn(sym[correct])} isn't there yet.`
+    )
   );
 }
 
@@ -1025,11 +1162,18 @@ function d3DoubleDiagonal(rng: Rng): Question {
       mk(sh[(si(rm, cm) + 1) % 3].shape, K.idx), // forma della diagonale accanto
       mk(S.shape, cl[(ki(rm, cm) + 1) % 3].idx), // colore della diagonale accanto
     ],
-    `Le due regole viaggiano su diagonali opposte. Le FORME si ripetono lungo le diagonali che salgono ` +
-      `verso destra (↗): ${sh.map((s) => s.many).join(', ')} e poi da capo. I COLORI invece si ripetono ` +
-      `lungo le diagonali che scendono verso destra (↘). ${where(rm, cm)} Seguendo la sua diagonale ↗ ` +
-      `tocca ${unArt(S)} ${S.one}, seguendo la sua diagonale ↘ il colore è ${col(K, S.f, false)}: ` +
-      `${unArt(S)} ${S.one} ${col(K, S.f, false)}.`
+    L(
+      `Le due regole viaggiano su diagonali opposte. Le FORME si ripetono lungo le diagonali che salgono ` +
+        `verso destra (↗): ${sh.map((s) => s.many).join(', ')} e poi da capo. I COLORI invece si ripetono ` +
+        `lungo le diagonali che scendono verso destra (↘). ${where(rm, cm)} Seguendo la sua diagonale ↗ ` +
+        `tocca ${unArt(S)} ${S.one}, seguendo la sua diagonale ↘ il colore è ${col(K, S.f, false)}: ` +
+        `${unArt(S)} ${S.one} ${col(K, S.f, false)}.`,
+      `The two rules run along opposite diagonals. SHAPES repeat along the diagonals rising to the right ` +
+        `(↗): ${sh.map((s) => enOf(s).many).join(', ')}, then it starts over. COLORS repeat along the ` +
+        `diagonals falling to the right (↘) instead. ${whereEn(rm, cm)} Following its ↗ diagonal it's ` +
+        `${unArtEn(enOf(S))} ${enOf(S).one}'s turn; following its ↘ diagonal the color is ${colEn(K)}: ` +
+        `${unArtEn(enOf(S))} ${colEn(K)} ${enOf(S).one}.`
+    )
   );
 }
 
@@ -1063,11 +1207,17 @@ function d3TripleRule(rng: Rng): Question {
     [rm, cm],
     at(rm, cm),
     two,
-    `Tre regole lavorano insieme: la FORMA dipende dalla riga, il COLORE dalla colonna, e pieno/vuoto ` +
-      `si alternano come su una scacchiera. ${where(rm, cm)} La sua riga è la riga ` +
-      `${artPl(S) === 'le' ? 'delle' : 'dei'} ${S.many}, la sua colonna è quella ${col(K, true, false)}, ` +
-      `e le celle vicine (sopra, sotto e di lato) sono ${agr(FILL_ADJ[notF], true)}: quindi ci va ${unArt(S)} ${S.one} ` +
-      `${col(K, S.f, false)} ${agr(FILL_ADJ[F], S.f, false)}.`
+    L(
+      `Tre regole lavorano insieme: la FORMA dipende dalla riga, il COLORE dalla colonna, e pieno/vuoto ` +
+        `si alternano come su una scacchiera. ${where(rm, cm)} La sua riga è la riga ` +
+        `${artPl(S) === 'le' ? 'delle' : 'dei'} ${S.many}, la sua colonna è quella ${col(K, true, false)}, ` +
+        `e le celle vicine (sopra, sotto e di lato) sono ${agr(FILL_ADJ[notF], true)}: quindi ci va ${unArt(S)} ${S.one} ` +
+        `${col(K, S.f, false)} ${agr(FILL_ADJ[F], S.f, false)}.`,
+      `Three rules work together: SHAPE depends on the row, COLOR depends on the column, and full/empty ` +
+        `alternate like a checkerboard. ${whereEn(rm, cm)} Its row is the row of ${enOf(S).many}, its ` +
+        `column is the ${colEn(K)} one, and the neighboring cells (above, below, and beside) are ` +
+        `${FILL_ADJ_EN[notF]}: so it needs ${unArtEn(enOf(S))} ${colEn(K)} ${FILL_ADJ_EN[F]} ${enOf(S).one}.`
+    )
   );
 }
 

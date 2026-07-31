@@ -12,7 +12,14 @@ interface Snap {
   status: string;
   roundIndex: number;
   players: { id: string; nickname: string; score: number }[];
-  current: { prompt: string; payload: unknown; choices: unknown; buzzerId?: string; outcome?: string } | null;
+  current: {
+    qtype: string;
+    prompt: { it: string; en: string };
+    payload: unknown;
+    choices: unknown;
+    buzzerId?: string;
+    outcome?: string;
+  } | null;
 }
 
 async function snap(code: string): Promise<Snap> {
@@ -195,4 +202,42 @@ test('modalità solo con timeout e risposta', async ({ browser }) => {
   expect(s.current?.outcome).toBe('timeout');
   expect(s.players[0].score).toBeLessThan(before);
   await solista.screenshot({ path: `${SHOTS}/11-solo-timeout.png` });
+});
+
+test('pacchetto bandiere in solo: pesca solo domande di tipo flags e si gioca fino in fondo', async ({ browser }) => {
+  const solista = await newPlayer(browser);
+  await solista.goto('/solo');
+  await solista.getByPlaceholder('Come ti chiami?').fill('Flavia');
+  await solista.getByRole('button', { name: '🚩 Bandiere' }).click();
+  await solista.getByRole('button', { name: '5', exact: true }).first().click(); // 5 round
+  await solista.getByRole('button', { name: /Inizia!/ }).click();
+  await solista.waitForURL(/\/g\/[A-Z]{5}/);
+  const code = solista.url().split('/').pop()!;
+
+  for (let round = 0; round < 3; round++) {
+    const s = await waitState(code, (x) => x.phase === 'buzz' && x.roundIndex === round);
+    expect(s.current?.qtype).toBe('flags');
+    const ci = await correctIndex(code);
+    await solista.getByRole('button', { name: 'PRENOTATI!' }).click();
+    await waitState(code, (x) => x.phase === 'answer');
+    await solista.locator('button:has-text("A"), button:has-text("B"), button:has-text("C")').nth(ci).click();
+    await waitState(code, (x) => x.phase === 'reveal');
+  }
+});
+
+test('domande in inglese per chi gioca in inglese: tradotto anche il contenuto, non solo l\'interfaccia', async ({
+  browser,
+}) => {
+  const solista = await newPlayer(browser, 'en-US');
+  await solista.goto('/solo');
+  await solista.getByPlaceholder(/What.?s your name/).fill('Emma');
+  await solista.getByRole('button', { name: /Start!/ }).click();
+  await solista.waitForURL(/\/g\/[A-Z]{5}/);
+  const code = solista.url().split('/').pop()!;
+
+  const s = await waitState(code, (x) => x.phase === 'buzz');
+  expect(s.current?.prompt.en.length).toBeGreaterThan(0);
+  // vera traduzione, non l'italiano ripetuto due volte
+  expect(s.current?.prompt.en).not.toBe(s.current?.prompt.it);
+  await expect(solista.getByText(s.current!.prompt.en, { exact: false })).toBeVisible();
 });

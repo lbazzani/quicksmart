@@ -36,9 +36,10 @@
 // diverso da quello voluto. Così nessun distrattore è difendibile come "altra
 // soluzione" e la risposta corretta è unica.
 
-import type { Difficulty, Question } from '../types';
+import type { Difficulty, LocalizedText, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
 import { balancedNumericDistractors, placeChoices, retry } from './qutils';
+import { L } from '../localize';
 
 const MAX = 400;
 
@@ -302,11 +303,11 @@ function assertUnique(vals: number[], p: number) {
 interface Built {
   /** riga da disegnare: numeri, '?' per l'incognita, '|' come separatore */
   seq: (number | string)[];
-  prompt: string;
+  prompt: LocalizedText;
   correct: number;
   /** due errori tipici, mai numeri a caso */
   distractors: [number, number];
-  explanation: string;
+  explanation: LocalizedText;
   allowNegative?: boolean;
   max?: number;
 }
@@ -385,6 +386,8 @@ interface RuleSeq {
   vals: number[];
   /** frase che descrive la regola, con esempi presi dalla serie stessa */
   rule: string;
+  /** come `rule`, in inglese */
+  ruleEn: string;
   allowNegative?: boolean;
   /** errori tipici di QUESTA regola, provati prima di quelli generici */
   wrong?: (vals: number[]) => number[];
@@ -395,7 +398,11 @@ function rArith(rng: Rng): RuleSeq {
   const n = randInt(rng, 5, 7);
   const s = randInt(rng, 1, 40);
   const vals = Array.from({ length: n }, (_, i) => s + i * k);
-  return { vals, rule: `si aggiunge sempre ${k} (${vals[0]} + ${k} = ${vals[1]}, ${vals[1]} + ${k} = ${vals[2]}, …)` };
+  return {
+    vals,
+    rule: `si aggiunge sempre ${k} (${vals[0]} + ${k} = ${vals[1]}, ${vals[1]} + ${k} = ${vals[2]}, …)`,
+    ruleEn: `you always add ${k} (${vals[0]} + ${k} = ${vals[1]}, ${vals[1]} + ${k} = ${vals[2]}, …)`,
+  };
 }
 
 function rArithDown(rng: Rng): RuleSeq {
@@ -405,7 +412,11 @@ function rArithDown(rng: Rng): RuleSeq {
   // e sotto il 5 non ci sono due distrattori più piccoli credibili
   const end = randInt(rng, 5, 25);
   const vals = Array.from({ length: n }, (_, i) => end + (n - 1 - i) * k);
-  return { vals, rule: `si toglie sempre ${k} (${vals[0]} − ${k} = ${vals[1]}, ${vals[1]} − ${k} = ${vals[2]}, …)` };
+  return {
+    vals,
+    rule: `si toglie sempre ${k} (${vals[0]} − ${k} = ${vals[1]}, ${vals[1]} − ${k} = ${vals[2]}, …)`,
+    ruleEn: `you always subtract ${k} (${vals[0]} − ${k} = ${vals[1]}, ${vals[1]} − ${k} = ${vals[2]}, …)`,
+  };
 }
 
 function rGeom(rng: Rng): RuleSeq {
@@ -417,6 +428,7 @@ function rGeom(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `ogni numero è il ${r === 2 ? 'doppio' : 'triplo'} del precedente (${vals[0]} × ${r} = ${vals[1]}, ${vals[1]} × ${r} = ${vals[2]}, …)`,
+    ruleEn: `each number is ${r === 2 ? 'double' : 'triple'} the one before (${vals[0]} × ${r} = ${vals[1]}, ${vals[1]} × ${r} = ${vals[2]}, …)`,
   };
 }
 
@@ -432,6 +444,7 @@ function rGeomDown(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `ogni numero è ${r === 2 ? 'la metà' : 'la terza parte'} del precedente (${vals[0]} ÷ ${r} = ${vals[1]}, ${vals[1]} ÷ ${r} = ${vals[2]}, …)`,
+    ruleEn: `each number is ${r === 2 ? 'half' : 'a third'} of the one before (${vals[0]} ÷ ${r} = ${vals[1]}, ${vals[1]} ÷ ${r} = ${vals[2]}, …)`,
     // toglie r invece di dividere; divide per il numero sbagliato
     wrong: (v) => [v[v.length - 2] - r, Math.floor(v[v.length - 2] / (r + 1))],
   };
@@ -443,7 +456,11 @@ function rGrow(rng: Rng): RuleSeq {
   const s = randInt(rng, 1, 20);
   const vals = [s];
   for (let i = 0; i < n - 1; i++) vals.push(vals[i] + d0 + i);
-  return { vals, rule: `i salti crescono di 1 ogni volta (+${d0}, +${d0 + 1}, +${d0 + 2}, …)` };
+  return {
+    vals,
+    rule: `i salti crescono di 1 ogni volta (+${d0}, +${d0 + 1}, +${d0 + 2}, …)`,
+    ruleEn: `the jumps grow by 1 each time (+${d0}, +${d0 + 1}, +${d0 + 2}, …)`,
+  };
 }
 
 function rAccel(rng: Rng): RuleSeq {
@@ -453,7 +470,11 @@ function rAccel(rng: Rng): RuleSeq {
   const s = randInt(rng, 1, 30);
   const vals = [s];
   for (let i = 0; i < n - 1; i++) vals.push(vals[i] + d0 + i * c);
-  return { vals, rule: `i salti aumentano di ${c} ogni volta (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)` };
+  return {
+    vals,
+    rule: `i salti aumentano di ${c} ogni volta (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)`,
+    ruleEn: `the jumps increase by ${c} each time (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)`,
+  };
 }
 
 function rAltOps(rng: Rng): RuleSeq {
@@ -470,6 +491,7 @@ function rAltOps(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `si alternano «+${p}» e «×2» (${vals[0]} ${op(0)} = ${vals[1]}, ${vals[1]} ${op(1)} = ${vals[2]}, …)`,
+    ruleEn: `"+${p}" and "×2" alternate (${vals[0]} ${op(0)} = ${vals[1]}, ${vals[1]} ${op(1)} = ${vals[2]}, …)`,
   };
 }
 
@@ -487,6 +509,7 @@ function rZigzag(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `i salti si alternano: prima ${up ? `+${a}` : `−${b}`}, poi ${up ? `−${b}` : `+${a}`}, e così via`,
+    ruleEn: `the jumps alternate: first ${up ? `+${a}` : `−${b}`}, then ${up ? `−${b}` : `+${a}`}, and so on`,
   };
 }
 
@@ -499,6 +522,7 @@ function rSquares(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `sono i quadrati ${step === 1 ? 'dei numeri consecutivi' : 'dei numeri di 2 in 2'} (${ms[0]}×${ms[0]} = ${vals[0]}, ${ms[1]}×${ms[1]} = ${vals[1]}, …)`,
+    ruleEn: `these are the squares of ${step === 1 ? 'consecutive numbers' : 'numbers two apart'} (${ms[0]}×${ms[0]} = ${vals[0]}, ${ms[1]}×${ms[1]} = ${vals[1]}, …)`,
   };
 }
 
@@ -510,6 +534,7 @@ function rCubes(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `sono i cubi dei numeri consecutivi (${ms[0]}×${ms[0]}×${ms[0]} = ${vals[0]}, ${ms[1]}×${ms[1]}×${ms[1]} = ${vals[1]}, …)`,
+    ruleEn: `these are the cubes of consecutive numbers (${ms[0]}×${ms[0]}×${ms[0]} = ${vals[0]}, ${ms[1]}×${ms[1]}×${ms[1]} = ${vals[1]}, …)`,
   };
 }
 
@@ -521,6 +546,7 @@ function rDigitSum(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `a ogni numero si somma la somma delle sue cifre (${vals[0]} + ${digitsOf(vals[0]).join('+')} = ${vals[1]}, ${vals[1]} + ${digitsOf(vals[1]).join('+')} = ${vals[2]}, …)`,
+    ruleEn: `each number gets the sum of its digits added to it (${vals[0]} + ${digitsOf(vals[0]).join('+')} = ${vals[1]}, ${vals[1]} + ${digitsOf(vals[1]).join('+')} = ${vals[2]}, …)`,
     // somma una cifra sola invece di tutte e due
     wrong: (v) => {
       const last = v[v.length - 2];
@@ -542,6 +568,7 @@ function rDigitProd(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `a ogni numero si somma il prodotto delle sue cifre (${vals[0]} + ${digitsOf(vals[0]).join('×')} = ${vals[1]}, ${vals[1]} + ${digitsOf(vals[1]).join('×')} = ${vals[2]}, …)`,
+    ruleEn: `each number gets the product of its digits added to it (${vals[0]} + ${digitsOf(vals[0]).join('×')} = ${vals[1]}, ${vals[1]} + ${digitsOf(vals[1]).join('×')} = ${vals[2]}, …)`,
     // somma le cifre invece di moltiplicarle; somma una cifra sola
     wrong: (v) => {
       const last = v[v.length - 2];
@@ -559,6 +586,7 @@ function rFib(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `ogni numero è la somma dei due precedenti (${vals[0]} + ${vals[1]} = ${vals[2]}, ${vals[1]} + ${vals[2]} = ${vals[3]}, …)`,
+    ruleEn: `each number is the sum of the two before it (${vals[0]} + ${vals[1]} = ${vals[2]}, ${vals[1]} + ${vals[2]} = ${vals[3]}, …)`,
   };
 }
 
@@ -571,6 +599,7 @@ function rAffine(rng: Rng): RuleSeq {
   return {
     vals: vals.slice(0, n),
     rule: `ogni numero è il doppio del precedente ${b > 0 ? `più ${b}` : `meno ${-b}`} (${vals[0]} × 2 ${b > 0 ? '+' : '−'} ${Math.abs(b)} = ${vals[1]}, …)`,
+    ruleEn: `each number is double the one before it, ${b > 0 ? `plus ${b}` : `minus ${-b}`} (${vals[0]} × 2 ${b > 0 ? '+' : '−'} ${Math.abs(b)} = ${vals[1]}, …)`,
   };
 }
 
@@ -590,6 +619,7 @@ function rInter(rng: Rng): RuleSeq {
   return {
     vals: vals.slice(0, 7),
     rule: `si alternano due serie: i numeri in posizione dispari crescono di ${da}, quelli in posizione pari ${desc ? 'calano' : 'crescono'} di ${db}`,
+    ruleEn: `two series alternate: the numbers in odd positions grow by ${da}, the ones in even positions ${desc ? 'shrink' : 'grow'} by ${db}`,
   };
 }
 
@@ -603,6 +633,7 @@ function rPeriod3(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `i salti si ripetono a gruppi di tre: +${steps[0]}, +${steps[1]}, +${steps[2]}, poi di nuovo +${steps[0]}, +${steps[1]}, +${steps[2]}`,
+    ruleEn: `the jumps repeat in groups of three: +${steps[0]}, +${steps[1]}, +${steps[2]}, then +${steps[0]}, +${steps[1]}, +${steps[2]} again`,
   };
 }
 
@@ -613,6 +644,7 @@ function rPrimes(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `sono i numeri primi in fila (${vals[0]}, ${vals[1]}, ${vals[2]}, …): si dividono solo per 1 e per sé stessi`,
+    ruleEn: `these are consecutive prime numbers (${vals[0]}, ${vals[1]}, ${vals[2]}, …): they can only be divided by 1 and themselves`,
     // prende il dispari successivo (che primo non è); salta un primo
     wrong: () => [vals[n - 2] + 2, PRIMES[start + n]],
   };
@@ -626,6 +658,7 @@ function rDownZero(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `si toglie sempre ${k}, anche quando si passa sotto lo zero (${vals[0]} − ${k} = ${vals[1]}, …)`,
+    ruleEn: `you always subtract ${k}, even when it goes below zero (${vals[0]} − ${k} = ${vals[1]}, …)`,
     allowNegative: true,
   };
 }
@@ -646,6 +679,7 @@ function rDownAccel(rng: Rng): RuleSeq {
   return {
     vals,
     rule: `si scende sempre di più: prima ${d0}, poi ${d0 + c}, poi ${d0 + 2 * c}, … (ogni salto in giù aumenta di ${c})`,
+    ruleEn: `it drops more each time: first ${d0}, then ${d0 + c}, then ${d0 + 2 * c}, … (each downward jump grows by ${c})`,
     allowNegative: true,
   };
 }
@@ -670,10 +704,13 @@ function endSeries(rng: Rng, s: RuleSeq): Built {
   const prefer = [...(s.wrong?.(v) ?? []), last + prevDiff, last + 2 * prevDiff, correct + step];
   return {
     seq: [...visible, '?'],
-    prompt: 'Quale numero continua la serie?',
+    prompt: L('Quale numero continua la serie?', 'Which number continues the series?'),
     correct,
     distractors: balancedTwo(rng, correct, prefer, slips(correct), { floor, avoid: visible }),
-    explanation: `Regola: ${s.rule}. Quindi dopo ${last} viene ${correct}.`,
+    explanation: L(
+      `Regola: ${s.rule}. Quindi dopo ${last} viene ${correct}.`,
+      `Rule: ${s.ruleEn}. So after ${last} comes ${correct}.`
+    ),
     allowNegative: s.allowNegative,
   };
 }
@@ -703,10 +740,13 @@ function middleSeries(rng: Rng, s: RuleSeq): Built {
   const hi = between ? Math.max(v[p - 1], v[p + 1]) : Infinity;
   return {
     seq: [...v.slice(0, p), '?', ...v.slice(p + 1)],
-    prompt: 'Quale numero manca?',
+    prompt: L('Quale numero manca?', 'Which number is missing?'),
     correct,
     distractors: balancedTwo(rng, correct, prefer, slips(correct), { floor, avoid: v, lo, hi }),
-    explanation: `Regola: ${s.rule}. Al posto del «?» va ${correct}, perché la serie completa è ${v.join(', ')}.`,
+    explanation: L(
+      `Regola: ${s.rule}. Al posto del «?» va ${correct}, perché la serie completa è ${v.join(', ')}.`,
+      `Rule: ${s.ruleEn}. The "?" is ${correct}, because the full series is ${v.join(', ')}.`
+    ),
     allowNegative: s.allowNegative,
   };
 }
@@ -719,7 +759,9 @@ interface PairRule {
   f: (a: number) => number;
   /** "il secondo numero è il quadrato del primo" */
   text: string;
-  /** "5 × 5 = 25" */
+  /** come `text`, in inglese */
+  textEn: string;
+  /** "5 × 5 = 25" (numeri e simboli: nessuna versione inglese serve) */
   calc: (a: number) => string;
   /** errori tipici su un dato primo elemento */
   wrong: (a: number, prevA: number, prevB: number) => number[];
@@ -733,6 +775,7 @@ function pairRulesD1(rng: Rng): PairRule {
     return {
       f: (a) => a + k,
       text: `il secondo numero è il primo più ${k}`,
+      textEn: `the second number is the first plus ${k}`,
       calc: (a) => `${a} + ${k} = ${a + k}`,
       // continua la serie dei secondi numeri; raddoppia invece di sommare;
       // somma il primo numero a sé stesso; toglie k invece di aggiungerlo
@@ -744,6 +787,7 @@ function pairRulesD1(rng: Rng): PairRule {
   return {
     f: (a) => a * k,
     text: `il secondo numero è il primo moltiplicato per ${k}`,
+    textEn: `the second number is the first times ${k}`,
     calc: (a) => `${a} × ${k} = ${a * k}`,
     // somma invece di moltiplicare; continua la serie dei secondi numeri;
     // moltiplica per il numero sbagliato (uno in più, uno in meno)
@@ -758,6 +802,7 @@ function pairRulesD2(rng: Rng): PairRule {
     return {
       f: (a) => a * a,
       text: 'il secondo numero è il quadrato del primo',
+      textEn: 'the second number is the square of the first',
       calc: (a) => `${a} × ${a} = ${a * a}`,
       // raddoppia invece di elevare al quadrato; quadrato del numero dopo;
       // quadrato del numero prima
@@ -769,6 +814,7 @@ function pairRulesD2(rng: Rng): PairRule {
     return {
       f: (a) => a * (a + 1),
       text: 'il secondo numero è il primo moltiplicato per il numero successivo',
+      textEn: 'the second number is the first times the next number',
       calc: (a) => `${a} × ${a + 1} = ${a * (a + 1)}`,
       // quadrato invece del prodotto; somma invece di prodotto; parte dal
       // numero successivo
@@ -781,6 +827,7 @@ function pairRulesD2(rng: Rng): PairRule {
   return {
     f: (a) => k * a + m,
     text: `il secondo numero è il primo moltiplicato per ${k} e poi aumentato di ${m}`,
+    textEn: `the second number is the first times ${k}, then increased by ${m}`,
     calc: (a) => `${a} × ${k} + ${m} = ${k * a + m}`,
     // dimentica il «+ m»; somma m prima di moltiplicare; somma tutto
     wrong: (a) => [k * a, k * (a + m), a + k + m, k * a + m + k],
@@ -794,6 +841,7 @@ function pairRulesD3(rng: Rng): PairRule {
     return {
       f: (a) => a * a * a,
       text: 'il secondo numero è il cubo del primo',
+      textEn: 'the second number is the cube of the first',
       calc: (a) => `${a} × ${a} × ${a} = ${a * a * a}`,
       // si ferma al quadrato; moltiplica per 3; cubo del numero dopo o di quello prima
       wrong: (a) => [a * a, a * 3, (a + 1) * (a + 1) * (a + 1), (a - 1) * (a - 1) * (a - 1)],
@@ -805,6 +853,7 @@ function pairRulesD3(rng: Rng): PairRule {
     return {
       f: (a) => a * a + m,
       text: `il secondo numero è il quadrato del primo più ${m}`,
+      textEn: `the second number is the square of the first, plus ${m}`,
       calc: (a) => `${a} × ${a} + ${m} = ${a * a + m}`,
       // dimentica il «+ m»; usa il quadrato del numero dopo; raddoppia invece
       // di elevare al quadrato; somma m due volte
@@ -815,6 +864,7 @@ function pairRulesD3(rng: Rng): PairRule {
   return {
     f: (a) => a * (a - 1),
     text: 'il secondo numero è il primo moltiplicato per il numero che lo precede',
+    textEn: 'the second number is the first times the number before it',
     calc: (a) => `${a} × ${a - 1} = ${a * (a - 1)}`,
     // quadrato invece del prodotto; moltiplica per il successivo; scala tutto
     // di uno; somma invece di moltiplicare
@@ -856,14 +906,20 @@ function pairsFamily(rng: Rng, rule: PairRule, holeAtEnd: boolean): Built {
   const prevB = bs[hole === 0 ? 1 : hole - 1];
   return {
     seq,
-    prompt: holeAtEnd ? "Quale numero completa l'ultima coppia?" : 'Quale numero manca?',
+    prompt: L(
+      holeAtEnd ? "Quale numero completa l'ultima coppia?" : 'Quale numero manca?',
+      holeAtEnd ? 'Which number completes the last pair?' : 'Which number is missing?'
+    ),
     correct,
     distractors: balancedTwo(rng, correct, rule.wrong(as[hole], prevA, prevB), slips(correct), {
       avoid: bs, // gli altri secondi numeri sono già sotto gli occhi
     }),
-    explanation:
+    explanation: L(
       `I numeri vanno letti a coppie: in ogni coppia ${rule.text} ` +
-      `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}). Quindi accanto a ${as[hole]} va ${rule.calc(as[hole])}.`,
+        `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}). Quindi accanto a ${as[hole]} va ${rule.calc(as[hole])}.`,
+      `Read the numbers in pairs: in each pair, ${rule.textEn} ` +
+        `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}). So next to ${as[hole]} goes ${rule.calc(as[hole])}.`
+    ),
     max: 999,
   };
 }
@@ -875,35 +931,52 @@ function pairsFamily(rng: Rng, rule: PairRule, holeAtEnd: boolean): Built {
 interface TriRule {
   f: (a: number, b: number) => number;
   text: string;
+  /** come `text`, in inglese */
+  textEn: string;
   calc: (a: number, b: number) => string;
 }
 
 const TRI_RULES: TriRule[] = [
-  { f: (a, b) => a + b, text: 'il terzo numero è la somma dei primi due', calc: (a, b) => `${a} + ${b} = ${a + b}` },
-  { f: (a, b) => a * b, text: 'il terzo numero è il prodotto dei primi due', calc: (a, b) => `${a} × ${b} = ${a * b}` },
+  {
+    f: (a, b) => a + b,
+    text: 'il terzo numero è la somma dei primi due',
+    textEn: 'the third number is the sum of the first two',
+    calc: (a, b) => `${a} + ${b} = ${a + b}`,
+  },
+  {
+    f: (a, b) => a * b,
+    text: 'il terzo numero è il prodotto dei primi due',
+    textEn: 'the third number is the product of the first two',
+    calc: (a, b) => `${a} × ${b} = ${a * b}`,
+  },
   {
     f: (a, b) => a * b + a,
     text: 'il terzo numero è il prodotto dei primi due, più il primo',
+    textEn: 'the third number is the product of the first two, plus the first',
     calc: (a, b) => `${a} × ${b} + ${a} = ${a * b + a}`,
   },
   {
     f: (a, b) => a * b - b,
     text: 'il terzo numero è il prodotto dei primi due, meno il secondo',
+    textEn: 'the third number is the product of the first two, minus the second',
     calc: (a, b) => `${a} × ${b} − ${b} = ${a * b - b}`,
   },
   {
     f: (a, b) => 2 * a + b,
     text: 'il terzo numero è il doppio del primo più il secondo',
+    textEn: 'the third number is double the first, plus the second',
     calc: (a, b) => `${a} × 2 + ${b} = ${2 * a + b}`,
   },
   {
     f: (a, b) => (a + b) * 2,
     text: 'il terzo numero è il doppio della somma dei primi due',
+    textEn: 'the third number is double the sum of the first two',
     calc: (a, b) => `(${a} + ${b}) × 2 = ${(a + b) * 2}`,
   },
   {
     f: (a, b) => b * b - a,
     text: 'il terzo numero è il quadrato del secondo meno il primo',
+    textEn: 'the third number is the square of the second, minus the first',
     calc: (a, b) => `${b} × ${b} − ${a} = ${b * b - a}`,
   },
 ];
@@ -945,12 +1018,15 @@ function triFamily(rng: Rng): Built {
   const prefer = TRI_RULES.filter((r) => r !== rule).map((r) => r.f(as[g], bs[g]));
   return {
     seq,
-    prompt: "Quale numero completa l'ultimo gruppo?",
+    prompt: L("Quale numero completa l'ultimo gruppo?", 'Which number completes the last group?'),
     correct,
     distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: cs }),
-    explanation:
+    explanation: L(
       `I numeri vanno letti a gruppi di tre: ${rule.text} ` +
-      `(${rule.calc(as[0], bs[0])}; ${rule.calc(as[1], bs[1])}). Quindi ${rule.calc(as[g], bs[g])}.`,
+        `(${rule.calc(as[0], bs[0])}; ${rule.calc(as[1], bs[1])}). Quindi ${rule.calc(as[g], bs[g])}.`,
+      `Read the numbers in groups of three: ${rule.textEn} ` +
+        `(${rule.calc(as[0], bs[0])}; ${rule.calc(as[1], bs[1])}). So ${rule.calc(as[g], bs[g])}.`
+    ),
   };
 }
 
@@ -959,7 +1035,10 @@ function triFamily(rng: Rng): Built {
 // ---------------------------------------------------------------------------
 
 /** due righe con la STESSA regola e inizi diversi */
-function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: number[]; rule: string } {
+function twoRowsSameRule(
+  rng: Rng,
+  difficulty: Difficulty
+): { r1: number[]; r2: number[]; rule: string; ruleEn: string } {
   const n = randInt(rng, 3, 4);
   if (difficulty === 1) {
     if (chance(rng, 0.6)) {
@@ -970,6 +1049,7 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
         r1: Array.from({ length: n }, (_, i) => s1 + i * k),
         r2: Array.from({ length: n }, (_, i) => s2 + i * k),
         rule: `in ogni riga si aggiunge ${k} a ogni passo`,
+        ruleEn: `in each row, you add ${k} at every step`,
       };
     }
     const r = pick(rng, [2, 3]);
@@ -979,6 +1059,7 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
       r1: Array.from({ length: n }, (_, i) => s1 * r ** i),
       r2: Array.from({ length: n }, (_, i) => s2 * r ** i),
       rule: `in ogni riga ogni numero è il ${r === 2 ? 'doppio' : 'triplo'} del precedente`,
+      ruleEn: `in each row, each number is ${r === 2 ? 'double' : 'triple'} the one before`,
     };
   }
   if (difficulty === 2) {
@@ -991,7 +1072,12 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
         for (let i = 0; i < n - 1; i++) v.push(v[i] + d0 + i);
         return v;
       };
-      return { r1: mk(s1), r2: mk(s2), rule: `in ogni riga i salti crescono di 1 (+${d0}, +${d0 + 1}, +${d0 + 2}, …)` };
+      return {
+        r1: mk(s1),
+        r2: mk(s2),
+        rule: `in ogni riga i salti crescono di 1 (+${d0}, +${d0 + 1}, +${d0 + 2}, …)`,
+        ruleEn: `in each row the jumps grow by 1 (+${d0}, +${d0 + 1}, +${d0 + 2}, …)`,
+      };
     }
     const p = randInt(rng, 3, 9);
     const mk = (s: number) => {
@@ -1001,7 +1087,12 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
     };
     const s1 = randInt(rng, 1, 9);
     const s2 = s1 + randInt(rng, 1, 9);
-    return { r1: mk(s1), r2: mk(s2), rule: `in ogni riga si alternano «+${p}» e «×2»` };
+    return {
+      r1: mk(s1),
+      r2: mk(s2),
+      rule: `in ogni riga si alternano «+${p}» e «×2»`,
+      ruleEn: `in each row "+${p}" and "×2" alternate`,
+    };
   }
   if (chance(rng, 0.5)) {
     const mk = (a: number, b: number) => {
@@ -1013,7 +1104,12 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
     const b1 = a1 + randInt(rng, 1, 8);
     const a2 = a1 + randInt(rng, 1, 6);
     const b2 = b1 + randInt(rng, 1, 9);
-    return { r1: mk(a1, b1), r2: mk(a2, b2), rule: 'in ogni riga ogni numero è la somma dei due precedenti' };
+    return {
+      r1: mk(a1, b1),
+      r2: mk(a2, b2),
+      rule: 'in ogni riga ogni numero è la somma dei due precedenti',
+      ruleEn: 'in each row, each number is the sum of the two before it',
+    };
   }
   const d0 = randInt(rng, 2, 6);
   const c = randInt(rng, 2, 4);
@@ -1024,11 +1120,16 @@ function twoRowsSameRule(rng: Rng, difficulty: Difficulty): { r1: number[]; r2: 
   };
   const s1 = randInt(rng, 1, 25);
   const s2 = s1 + randInt(rng, 1, 20);
-  return { r1: mk(s1), r2: mk(s2), rule: `in ogni riga i salti aumentano di ${c} (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)` };
+  return {
+    r1: mk(s1),
+    r2: mk(s2),
+    rule: `in ogni riga i salti aumentano di ${c} (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)`,
+    ruleEn: `in each row the jumps increase by ${c} (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …)`,
+  };
 }
 
 function parallelSame(rng: Rng, difficulty: Difficulty): Built {
-  const { r1, r2, rule } = twoRowsSameRule(rng, difficulty);
+  const { r1, r2, rule, ruleEn } = twoRowsSameRule(rng, difficulty);
   const n = r2.length;
   const hole = chance(rng, 0.65) ? n - 1 : randInt(rng, 1, n - 2);
   if (r1.length !== n) throw new Error('righe di lunghezza diversa');
@@ -1044,12 +1145,15 @@ function parallelSame(rng: Rng, difficulty: Difficulty): Built {
   if (hole + 1 < n) prefer.push(Math.round((r2[hole - 1] + r2[hole + 1]) / 2));
   return {
     seq,
-    prompt: 'Quale numero completa la seconda riga?',
+    prompt: L('Quale numero completa la seconda riga?', 'Which number completes the second row?'),
     correct,
     distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: r2 }),
-    explanation:
+    explanation: L(
       `Le due righe (separate dal «|») seguono la stessa regola: ${rule}. ` +
-      `La prima riga lo mostra: ${r1.join(', ')}. Nella seconda, al posto del «?» va ${correct}: ${r2.join(', ')}.`,
+        `La prima riga lo mostra: ${r1.join(', ')}. Nella seconda, al posto del «?» va ${correct}: ${r2.join(', ')}.`,
+      `The two rows (separated by "|") follow the same rule: ${ruleEn}. ` +
+        `The first row shows it: ${r1.join(', ')}. In the second, the "?" is ${correct}: ${r2.join(', ')}.`
+    ),
     max: 999,
   };
 }
@@ -1082,12 +1186,15 @@ function parallelMap(rng: Rng, rule: PairRule): Built {
   const prefer = [...rule.wrong(as[hole], prevA, prevB), as[hole]];
   return {
     seq,
-    prompt: 'Quale numero completa la seconda riga?',
+    prompt: L('Quale numero completa la seconda riga?', 'Which number completes the second row?'),
     correct,
     distractors: balancedTwo(rng, correct, prefer, slips(correct), { avoid: bs }),
-    explanation:
+    explanation: L(
       `Ogni numero della seconda riga si ottiene da quello che sta sopra: ${rule.text} ` +
-      `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}, ${as[2]} → ${bs[2]}). Sotto ${as[hole]} va ${rule.calc(as[hole])}.`,
+        `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}, ${as[2]} → ${bs[2]}). Sotto ${as[hole]} va ${rule.calc(as[hole])}.`,
+      `Each number in the second row comes from the one above it: ${rule.textEn} ` +
+        `(${as[0]} → ${bs[0]}, ${as[1]} → ${bs[1]}, ${as[2]} → ${bs[2]}). Below ${as[hole]} goes ${rule.calc(as[hole])}.`
+    ),
     max: 999,
   };
 }
@@ -1129,7 +1236,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
   const n = randInt(rng, 5, 7);
   let nums: number[] = [];
   let label = '';
+  let labelEn = '';
   let why = '';
+  let whyEn = '';
   let bad = 0;
 
   const kind = difficulty === 1 ? randInt(rng, 0, 2) : difficulty === 2 ? randInt(rng, 3, 5) : randInt(rng, 6, 8);
@@ -1142,7 +1251,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, n - 1);
     nums[bad] += pick(rng, [-2, -1, 1, 2]);
     label = `multipli di ${k}`;
+    labelEn = `multiples of ${k}`;
     why = `${nums[bad]} non si può dividere per ${k}`;
+    whyEn = `${nums[bad]} can't be divided by ${k}`;
   } else if (kind === 1) {
     // numeri pari (o dispari)
     const even = chance(rng, 0.5);
@@ -1155,7 +1266,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, n - 1);
     nums[bad] += 1;
     label = even ? 'numeri pari' : 'numeri dispari';
+    labelEn = even ? 'even numbers' : 'odd numbers';
     why = `${nums[bad]} è ${even ? 'dispari' : 'pari'}`;
+    whyEn = `${nums[bad]} is ${even ? 'odd' : 'even'}`;
   } else if (kind === 2) {
     // numeri che finiscono per 0 o 5
     let x = randInt(rng, 1, 8) * 5;
@@ -1167,7 +1280,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, n - 1);
     nums[bad] += pick(rng, [-2, -1, 1, 2]);
     label = 'numeri che finiscono per 0 o per 5 (la tabellina del 5)';
+    labelEn = 'numbers ending in 0 or 5 (the 5 times table)';
     why = `${nums[bad]} non finisce né per 0 né per 5`;
+    whyEn = `${nums[bad]} doesn't end in 0 or 5`;
   } else if (kind === 4 || kind === 7) {
     // quadrati perfetti
     const m0 = randInt(rng, 2, 4);
@@ -1178,7 +1293,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, n - 1);
     nums[bad] += pick(rng, [-2, -1, 1, 2, 3]);
     label = 'quadrati perfetti (1, 4, 9, 16, 25, …)';
+    labelEn = 'perfect squares (1, 4, 9, 16, 25, …)';
     why = `${nums[bad]} non è il quadrato di nessun numero intero`;
+    whyEn = `${nums[bad]} isn't the square of any whole number`;
   } else if (kind === 5) {
     // stessa somma delle cifre
     const s = randInt(rng, 6, 12);
@@ -1189,7 +1306,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, n - 1);
     nums[bad] += pick(rng, [-1, 1, 2]);
     label = `numeri le cui cifre sommate danno ${s} (per esempio ${nums[bad === 0 ? 1 : 0]}: ${digitsOf(nums[bad === 0 ? 1 : 0]).join('+')} = ${s})`;
+    labelEn = `numbers whose digits add up to ${s} (for example ${nums[bad === 0 ? 1 : 0]}: ${digitsOf(nums[bad === 0 ? 1 : 0]).join('+')} = ${s})`;
     why = `le cifre di ${nums[bad]} danno ${dsum(nums[bad])}`;
+    whyEn = `the digits of ${nums[bad]} add up to ${dsum(nums[bad])}`;
   } else if (kind === 6) {
     // numeri primi
     const start = randInt(rng, 1, 12);
@@ -1198,8 +1317,10 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     nums[bad] += pick(rng, [-2, 2, 4]);
     if (isPrime(nums[bad])) throw new Error('intruso ancora primo');
     label = 'numeri primi (si dividono solo per 1 e per sé stessi)';
+    labelEn = 'prime numbers (only divisible by 1 and themselves)';
     const div = [2, 3, 5, 7, 11, 13].find((d) => nums[bad] % d === 0 && nums[bad] !== d);
     why = `${nums[bad]} si può dividere per ${div}`;
+    whyEn = `${nums[bad]} can be divided by ${div}`;
   } else {
     // cubi perfetti
     const m0 = randInt(rng, 1, 2);
@@ -1208,7 +1329,9 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
     bad = randInt(rng, 0, nums.length - 1);
     nums[bad] += pick(rng, [-2, -1, 1, 2]);
     label = 'cubi perfetti (1, 8, 27, 64, …)';
+    labelEn = 'perfect cubes (1, 8, 27, 64, …)';
     why = `${nums[bad]} non è il cubo di nessun numero intero`;
+    whyEn = `${nums[bad]} isn't the cube of any whole number`;
   }
 
   if (nums.some((x, i) => x <= 0 || (i > 0 && x <= nums[i - 1]))) throw new Error('intruso mal posizionato');
@@ -1226,10 +1349,13 @@ function intruderFamily(rng: Rng, difficulty: Difficulty): Built {
   const rest = nums.filter((_, i) => i !== bad);
   return {
     seq: [...nums],
-    prompt: 'Quale numero NON segue la regola?',
+    prompt: L('Quale numero NON segue la regola?', 'Which number does NOT follow the rule?'),
     correct,
     distractors: balancedTwo(rng, correct, near, rest),
-    explanation: `Tutti i numeri sono ${label}, tranne uno: ${why}. L'intruso è ${correct}.`,
+    explanation: L(
+      `Tutti i numeri sono ${label}, tranne uno: ${why}. L'intruso è ${correct}.`,
+      `All the numbers are ${labelEn}, except one: ${whyEn}. The odd one out is ${correct}.`
+    ),
     max: 999,
   };
 }
@@ -1244,14 +1370,14 @@ interface EndBuilt {
   /** errori tipici della regola, dal più istruttivo in giù (non due soli: servono
    *  candidati sopra E sotto la risposta, altrimenti la posizione è prevedibile) */
   prefer: number[];
-  explanation: string;
+  explanation: LocalizedText;
 }
 
 function fromEndBuilt(rng: Rng, b: EndBuilt): Built {
   assertUnique([...b.visible, b.correct], b.visible.length);
   return {
     seq: [...b.visible, '?'],
-    prompt: 'Quale numero continua la serie?',
+    prompt: L('Quale numero continua la serie?', 'Which number continues the series?'),
     correct: b.correct,
     distractors: balancedTwo(rng, b.correct, b.prefer, slips(b.correct), {
       floor: floorOf([...b.visible, b.correct]),
@@ -1276,7 +1402,10 @@ function legacyD1(rng: Rng): Built {
       correct,
       // applica +k due volte (un passo di troppo); aggiunge k−1 invece di k
       prefer: [last + 2 * k, correct - 1],
-      explanation: `Regola: si aggiunge sempre ${k} (${visible[0]} + ${k} = ${visible[1]}, e così via); quindi ${last} + ${k} = ${correct}.`,
+      explanation: L(
+        `Regola: si aggiunge sempre ${k} (${visible[0]} + ${k} = ${visible[1]}, e così via); quindi ${last} + ${k} = ${correct}.`,
+        `Rule: you always add ${k} (${visible[0]} + ${k} = ${visible[1]}, and so on); so ${last} + ${k} = ${correct}.`
+      ),
     });
   }
   if (kind === 1) {
@@ -1301,7 +1430,10 @@ function legacyD1(rng: Rng): Built {
       // ripete l'ultima differenza invece di moltiplicare; somma r invece di
       // moltiplicare; moltiplica per il numero sbagliato (r+1); moltiplica due volte
       prefer: [last + (last - prev), last + r, last * (r + 1), correct * r],
-      explanation: `Regola: ogni numero è il ${r === 2 ? 'doppio' : 'triplo'} del precedente; quindi ${last} × ${r} = ${correct}.`,
+      explanation: L(
+        `Regola: ogni numero è il ${r === 2 ? 'doppio' : 'triplo'} del precedente; quindi ${last} × ${r} = ${correct}.`,
+        `Rule: each number is ${r === 2 ? 'double' : 'triple'} the one before; so ${last} × ${r} = ${correct}.`
+      ),
     });
   }
   // countdown: −k
@@ -1317,7 +1449,10 @@ function legacyD1(rng: Rng): Built {
     correct,
     // toglie 2k (un passo di troppo); toglie k−1 invece di k
     prefer: [last - 2 * k, correct + 1],
-    explanation: `Regola: si toglie sempre ${k} (${visible[0]} − ${k} = ${visible[1]}, e così via); quindi ${last} − ${k} = ${correct}.`,
+    explanation: L(
+      `Regola: si toglie sempre ${k} (${visible[0]} − ${k} = ${visible[1]}, e così via); quindi ${last} − ${k} = ${correct}.`,
+      `Rule: you always subtract ${k} (${visible[0]} − ${k} = ${visible[1]}, and so on); so ${last} − ${k} = ${correct}.`
+    ),
   });
 }
 
@@ -1339,7 +1474,10 @@ function legacyD2(rng: Rng): Built {
       // ripete l'ultimo salto senza farlo crescere; lo fa crescere di 2 invece
       // che di 1; salta un passo (fa crescere il salto due volte)
       prefer: [correct - 1, correct + 1, correct + step + 1],
-      explanation: `Regola: i salti crescono di 1 a ogni passo (+${d0}, +${d0 + 1}, +${d0 + 2}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
+      explanation: L(
+        `Regola: i salti crescono di 1 a ogni passo (+${d0}, +${d0 + 1}, +${d0 + 2}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
+        `Rule: the jumps grow by 1 at every step (+${d0}, +${d0 + 1}, +${d0 + 2}, …); the last jump is +${step}; so ${last} + ${step} = ${correct}.`
+      ),
     });
   }
   if (kind === 1) {
@@ -1367,7 +1505,10 @@ function legacyD2(rng: Rng): Built {
       visible,
       correct,
       prefer,
-      explanation: `Regola: la serie alterna «+${p}» e «×${q}». Dopo «${nextAdd ? `×${q}` : `+${p}`}» tocca a «${nextAdd ? `+${p}` : `×${q}`}»: ${last} ${nextAdd ? `+ ${p}` : `× ${q}`} = ${correct}.`,
+      explanation: L(
+        `Regola: la serie alterna «+${p}» e «×${q}». Dopo «${nextAdd ? `×${q}` : `+${p}`}» tocca a «${nextAdd ? `+${p}` : `×${q}`}»: ${last} ${nextAdd ? `+ ${p}` : `× ${q}`} = ${correct}.`,
+        `Rule: the series alternates "+${p}" and "×${q}". After "${nextAdd ? `×${q}` : `+${p}`}" it's time for "${nextAdd ? `+${p}` : `×${q}`}": ${last} ${nextAdd ? `+ ${p}` : `× ${q}`} = ${correct}.`
+      ),
     });
   }
   // quadrati o cubi di numeri consecutivi
@@ -1386,7 +1527,10 @@ function legacyD2(rng: Rng): Built {
       // ripete l'ultima differenza (il salto dispari precedente); usa il salto
       // dispari successivo; salta un quadrato; raddoppia l'ultimo numero
       prefer: [last + (last - prev), correct + 2, (M + 2) ** 2, last * 2],
-      explanation: `Regola: sono i quadrati di numeri consecutivi (${m0}² = ${m0 ** 2}, ${m0 + 1}² = ${(m0 + 1) ** 2}, …); il prossimo è ${M + 1}² = ${correct}.`,
+      explanation: L(
+        `Regola: sono i quadrati di numeri consecutivi (${m0}² = ${m0 ** 2}, ${m0 + 1}² = ${(m0 + 1) ** 2}, …); il prossimo è ${M + 1}² = ${correct}.`,
+        `Rule: these are the squares of consecutive numbers (${m0}² = ${m0 ** 2}, ${m0 + 1}² = ${(m0 + 1) ** 2}, …); next comes ${M + 1}² = ${correct}.`
+      ),
     });
   }
   const m0 = randInt(rng, 1, 3);
@@ -1404,7 +1548,10 @@ function legacyD2(rng: Rng): Built {
     // ripete l'ultima differenza; continua le seconde differenze come costanti;
     // salta un cubo; si ferma al quadrato invece del cubo
     prefer: [last + lastDiff, last + lastDiff + lastSd, (M + 2) ** 3, (M + 1) ** 2],
-    explanation: `Regola: sono i cubi di numeri consecutivi (${m0}³ = ${m0 ** 3}, ${m0 + 1}³ = ${(m0 + 1) ** 3}, …); il prossimo è ${M + 1}³ = ${correct}.`,
+    explanation: L(
+      `Regola: sono i cubi di numeri consecutivi (${m0}³ = ${m0 ** 3}, ${m0 + 1}³ = ${(m0 + 1) ** 3}, …); il prossimo è ${M + 1}³ = ${correct}.`,
+      `Rule: these are the cubes of consecutive numbers (${m0}³ = ${m0 ** 3}, ${m0 + 1}³ = ${(m0 + 1) ** 3}, …); next comes ${M + 1}³ = ${correct}.`
+    ),
   });
 }
 
@@ -1429,7 +1576,10 @@ function legacyD3(rng: Rng): Built {
       // continua la serie sbagliata (B); usa il passo di B sulla serie A;
       // continua l'ultimo numero visibile invece della serie A; salta un posto
       prefer: [b[2] + stepB, a[2] + stepB, b[2] + da, correct + da],
-      explanation: `Regola: due serie si alternano: il 1º, 3º e 5º numero (${a[0]}, ${a[1]}, ${a[2]}) crescono di ${da}; il 2º, 4º e 6º (${b[0]}, ${b[1]}, ${b[2]}) ${desc ? 'calano' : 'crescono'} di ${db}. Il «?» continua la prima serie: ${a[2]} + ${da} = ${correct}.`,
+      explanation: L(
+        `Regola: due serie si alternano: il 1º, 3º e 5º numero (${a[0]}, ${a[1]}, ${a[2]}) crescono di ${da}; il 2º, 4º e 6º (${b[0]}, ${b[1]}, ${b[2]}) ${desc ? 'calano' : 'crescono'} di ${db}. Il «?» continua la prima serie: ${a[2]} + ${da} = ${correct}.`,
+        `Rule: two series alternate: the 1st, 3rd and 5th numbers (${a[0]}, ${a[1]}, ${a[2]}) grow by ${da}; the 2nd, 4th and 6th (${b[0]}, ${b[1]}, ${b[2]}) ${desc ? 'shrink' : 'grow'} by ${db}. The "?" continues the first series: ${a[2]} + ${da} = ${correct}.`
+      ),
     });
   }
   if (kind === 1) {
@@ -1450,7 +1600,10 @@ function legacyD3(rng: Rng): Built {
       // precedenti; somma la coppia sbagliata (l'ultimo con il terzultimo);
       // fa un passo di troppo
       prefer: [2 * last - prev, 2 * last, last + visible[n - 3], correct + last],
-      explanation: `Regola: ogni numero è la somma dei due precedenti (${visible[0]} + ${visible[1]} = ${visible[2]}, …); quindi ${prev} + ${last} = ${correct}.`,
+      explanation: L(
+        `Regola: ogni numero è la somma dei due precedenti (${visible[0]} + ${visible[1]} = ${visible[2]}, …); quindi ${prev} + ${last} = ${correct}.`,
+        `Rule: each number is the sum of the two before it (${visible[0]} + ${visible[1]} = ${visible[2]}, …); so ${prev} + ${last} = ${correct}.`
+      ),
     });
   }
   if (kind === 2) {
@@ -1470,7 +1623,10 @@ function legacyD3(rng: Rng): Built {
       // ripete l'ultimo salto (senza accelerare); accelera due volte; salta un
       // passo; accelera di 1 invece che di c
       prefer: [correct - c, correct + c, correct + step + c, correct - c + 1],
-      explanation: `Regola: i salti aumentano di ${c} a ogni passo (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
+      explanation: L(
+        `Regola: i salti aumentano di ${c} a ogni passo (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …); l'ultimo salto è +${step}; quindi ${last} + ${step} = ${correct}.`,
+        `Rule: the jumps increase by ${c} at every step (+${d0}, +${d0 + c}, +${d0 + 2 * c}, …); the last jump is +${step}; so ${last} + ${step} = ${correct}.`
+      ),
     });
   }
   // doppio ±b: v = 2·prec + b
@@ -1491,7 +1647,10 @@ function legacyD3(rng: Rng): Built {
     // dimentica il ±b (raddoppia soltanto); continua con l'ultima differenza;
     // sbaglia il segno del b; fa un passo di troppo
     prefer: [last * 2, last + (last - prev), last * 2 - b, correct * 2 + b],
-    explanation: `Regola: ogni numero è il doppio del precedente ${b > 0 ? `più ${b}` : `meno ${ab}`} (${visible[0]} × 2 ${sign} ${ab} = ${visible[1]}); quindi ${last} × 2 ${sign} ${ab} = ${correct}.`,
+    explanation: L(
+      `Regola: ogni numero è il doppio del precedente ${b > 0 ? `più ${b}` : `meno ${ab}`} (${visible[0]} × 2 ${sign} ${ab} = ${visible[1]}); quindi ${last} × 2 ${sign} ${ab} = ${correct}.`,
+      `Rule: each number is double the one before it, ${b > 0 ? `plus ${b}` : `minus ${ab}`} (${visible[0]} × 2 ${sign} ${ab} = ${visible[1]}); so ${last} × 2 ${sign} ${ab} = ${correct}.`
+    ),
   });
 }
 
@@ -1608,9 +1767,9 @@ export function genNumseries(rng: Rng, difficulty: Difficulty): Question {
     if ([w0, w1].some((x) => !Number.isInteger(x) || x < floor)) throw new Error('distrattore fuori range');
     if (w0 === built.correct || w1 === built.correct || w0 === w1) throw new Error('opzioni non distinte');
     const [a, b] = chance(rng, 0.5) ? [w0, w1] : [w1, w0];
-    const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(built.correct) }, [
-      { kind: 'text', text: String(a) },
-      { kind: 'text', text: String(b) },
+    const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(built.correct)) }, [
+      { kind: 'text', text: L(String(a)) },
+      { kind: 'text', text: L(String(b)) },
     ]);
     return {
       qtype: 'numseries' as const,

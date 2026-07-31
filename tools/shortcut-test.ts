@@ -25,7 +25,7 @@ type Heuristic = { name: string; pick: (q: Question) => number | null };
 function numOf(q: Question, i: number): number | null {
   const c = q.choices[i];
   if (c.kind !== 'text') return null;
-  const m = c.text.match(/-?\d+/);
+  const m = c.text.it.match(/-?\d+/);
   return m ? parseInt(m[0], 10) : null;
 }
 
@@ -140,7 +140,7 @@ const HEURISTICS: Heuristic[] = [
     name: 'la risposta scritta più lunga',
     pick: (q) => {
       if (!q.choices.every((c) => c.kind === 'text')) return null;
-      const lens = q.choices.map((c) => (c.kind === 'text' ? c.text.length : 0));
+      const lens = q.choices.map((c) => (c.kind === 'text' ? c.text.it.length : 0));
       const max = Math.max(...lens);
       return lens.filter((l) => l === max).length === 1 ? lens.indexOf(max) : null;
     },

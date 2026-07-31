@@ -35,8 +35,9 @@
 // parziale (dimentica una piega), buchi non specchiati (restano dove sono
 // stati fatti), un buco in meno, una specchiatura di troppo.
 
-import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeSpec } from '../types';
+import type { CellSpec, ChoiceVisual, Difficulty, LocalizedText, Question, ShapeSpec } from '../types';
 import { pick, randInt, type Rng } from '../rng';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
 
 // ---------------------------------------------------------------------------
@@ -435,7 +436,7 @@ const HOLE_COLORS = [1, 2, 4, 5, 7];
 
 interface CellOpts {
   crease?: Axis;
-  label?: string;
+  label?: LocalizedText;
   highlight?: boolean;
 }
 
@@ -481,12 +482,37 @@ function foldText(f: Fold): string {
     : 'la parte in basso a destra si ribalta lungo la diagonale ↗';
 }
 
+/** come `foldText`, in inglese */
+function foldTextEn(f: Fold): string {
+  if (f.axis === 'V')
+    return f.keep === 1 ? 'the left half flips over onto the right' : 'the right half flips over onto the left';
+  if (f.axis === 'H')
+    return f.keep === 1
+      ? 'the top half flips down onto the bottom'
+      : 'the bottom half flips up onto the top';
+  if (f.axis === 'D')
+    return f.keep === 1
+      ? 'the top-right part flips along the ↘ diagonal'
+      : 'the bottom-left part flips along the ↘ diagonal';
+  return f.keep === 1
+    ? 'the top-left part flips along the ↗ diagonal'
+    : 'the bottom-right part flips along the ↗ diagonal';
+}
+
 /** come si chiamano le caselle attraversate dalla piega (quelle a un solo strato) */
 function creaseText(n: number, axis: Axis): string {
   if (n !== 3) return axis === 'D' ? 'la diagonale ↘' : 'la diagonale ↗';
   if (axis === 'V') return 'la colonna di mezzo';
   if (axis === 'H') return 'la riga di mezzo';
   return axis === 'D' ? 'la diagonale ↘' : 'la diagonale ↗';
+}
+
+/** come `creaseText`, in inglese */
+function creaseTextEn(n: number, axis: Axis): string {
+  if (n !== 3) return axis === 'D' ? 'the ↘ diagonal' : 'the ↗ diagonal';
+  if (axis === 'V') return 'the middle column';
+  if (axis === 'H') return 'the middle row';
+  return axis === 'D' ? 'the ↘ diagonal' : 'the ↗ diagonal';
 }
 
 /**
@@ -506,7 +532,21 @@ function creaseNote(n: number, folds: Fold[]): string {
     .join(' e ')}) non si spostano. `;
 }
 
+/** come `creaseNote`, in inglese */
+function creaseNoteEn(n: number, folds: Fold[]): string {
+  const named = [...new Set(folds.map((f) => f.axis))].filter((axis) => {
+    for (let i = 0; i < n * n; i++) if (sideOf(n, axis, i) === 0) return true;
+    return false;
+  });
+  if (!named.length) return "The dashed line is the fold: everything on one side ends up on the other. ";
+  return `The dashed line is the fold: the squares sitting right on it (${named
+    .map((a) => creaseTextEn(n, a))
+    .join(' and ')}) don't move. `;
+}
+
 const N_WORD = ['zero', 'un', 'due', 'tre'];
+/** come `N_WORD`, in inglese */
+const N_WORD_EN = ['zero', 'one', 'two', 'three'];
 
 /** descrizione della trama finale, quando è riconoscibile a colpo d'occhio */
 const PATTERNS: Record<string, string> = {
@@ -528,9 +568,35 @@ const PATTERNS: Record<string, string> = {
   '2,8': ', nei due angoli di destra',
 };
 
+/** come `PATTERNS`, in inglese */
+const PATTERNS_EN: Record<string, string> = {
+  '0,2,6,8': ', in the four corners',
+  '1,3,5,7': ', at the center of the four sides',
+  '0,2,4,6,8': ', in the four corners and the center',
+  '1,3,4,5,7': ': a cross',
+  '0,2,3,5,6,8': ': the left column and the right column',
+  '0,1,2,6,7,8': ': the top row and the bottom row',
+  '3,4,5': ': the whole middle row',
+  '1,4,7': ': the whole middle column',
+  '0,4,8': ': the whole ↘ diagonal',
+  '2,4,6': ': the whole ↗ diagonal',
+  '0,8': ', on the two ↘ diagonal corners',
+  '2,6': ', on the two ↗ diagonal corners',
+  '0,2': ', in the two top corners',
+  '6,8': ', in the two bottom corners',
+  '0,6': ', in the two left corners',
+  '2,8': ', in the two right corners',
+};
+
 function patternNote(n: number, holes: number[]): string {
   if (n !== 3) return holes.length === 4 ? ', uno per angolo' : '';
   return PATTERNS[KEY(holes)] ?? '';
+}
+
+/** come `patternNote`, in inglese */
+function patternNoteEn(n: number, holes: number[]): string {
+  if (n !== 3) return holes.length === 4 ? ', one per corner' : '';
+  return PATTERNS_EN[KEY(holes)] ?? '';
 }
 
 function explain(spec: Spec, correct: number[]): string {
@@ -555,6 +621,26 @@ function explain(spec: Spec, correct: number[]): string {
   return t;
 }
 
+/** come `explain`, in inglese */
+function explainEn(spec: Spec, correct: number[]): string {
+  const { n, folds, punches } = spec;
+  const nb = punches.length;
+  const creased = punches.filter((i) => onCrease(n, folds, i));
+  const steps = folds
+    .map((f, i) => `${folds.length > 1 ? `Fold ${i + 1}` : 'The fold'}: ${foldTextEn(f)}.`)
+    .join(' ');
+  let t = `${steps} ${creaseNoteEn(n, folds)}`;
+  t += nb === 1 ? 'The hole goes through every layer, ' : `The ${N_WORD_EN[nb]} holes go through every layer, `;
+  t += "so when it's unfolded, every hole reappears mirrored on the other side of the fold";
+  t += creased.length
+    ? `, except ${creased.length === 1 ? 'the one made right ON the line, which stays a single hole' : "the ones made right ON the line, which don't double up"}. `
+    : '. ';
+  const mults = punches.map((i) => multiplicity(n, folds, i));
+  t += nb > 1 ? `Count: ${mults.join(' + ')} = ${correct.length}. ` : `That single hole turns into ${correct.length} holes. `;
+  t += `The unfolded sheet has ${correct.length} holes${patternNoteEn(n, correct)}.`;
+  return t;
+}
+
 /**
  * Il prompt dice esplicitamente che il tratteggio è la piega, ed è QUI che va
  * detta anche la regola della cordonatura quando serve: un buco fatto sulla
@@ -562,17 +648,36 @@ function explain(spec: Spec, correct: number[]): string {
  * dopo aver risposto, e chi contava in modo ingenuo trovava il proprio errore
  * fra le opzioni.
  */
-function makePrompt(rng: Rng, nFolds: number, nPunches: number, onCrease: boolean): string {
+function makePrompt(rng: Rng, nFolds: number, nPunches: number, onCrease: boolean): LocalizedText {
   const linea = nFolds === 1 ? 'la linea tratteggiata' : 'le linee tratteggiate';
+  const lineaEn = nFolds === 1 ? 'the dashed line' : 'the dashed lines';
   const sulla = nFolds === 1 ? 'sulla linea tratteggiata' : 'sulle linee tratteggiate';
+  const sullaEn = nFolds === 1 ? 'along the dashed line' : 'along the dashed lines';
   const buco = nPunches === 1 ? 'un buco' : 'i buchi';
+  const bucoEn = nPunches === 1 ? 'a hole' : 'some holes';
+  // Un solo `pick`: la scelta del prompt deve consumare lo stesso numero di
+  // numeri casuali di prima, o i buchi/distrattori pescati dopo si
+  // sfaserebbero rispetto al seme. Le due lingue viaggiano insieme nello
+  // stesso LocalizedText, pescato in un colpo solo (vedi sequence.ts).
   const base = pick(rng, [
-    `Il foglio si piega lungo ${linea}, poi si ${nPunches === 1 ? 'fa un buco' : 'fanno i buchi'}: come sarà una volta riaperto?`,
-    `Pieghiamo il foglio ${sulla}, facciamo ${buco} e riapriamo tutto: quale foglio viene fuori?`,
-    `${nFolds === 1 ? 'La linea tratteggiata mostra' : 'Le linee tratteggiate mostrano'} dove passa la piega: come sarà il foglio riaperto?`,
+    L(
+      `Il foglio si piega lungo ${linea}, poi si ${nPunches === 1 ? 'fa un buco' : 'fanno i buchi'}: come sarà una volta riaperto?`,
+      `The sheet folds along ${lineaEn}, then we ${nPunches === 1 ? 'punch a hole' : 'punch some holes'} in it: what will it look like once unfolded?`
+    ),
+    L(
+      `Pieghiamo il foglio ${sulla}, facciamo ${buco} e riapriamo tutto: quale foglio viene fuori?`,
+      `We fold the sheet ${sullaEn}, punch ${bucoEn}, and unfold it all: which sheet comes out?`
+    ),
+    L(
+      `${nFolds === 1 ? 'La linea tratteggiata mostra' : 'Le linee tratteggiate mostrano'} dove passa la piega: come sarà il foglio riaperto?`,
+      `${nFolds === 1 ? 'The dashed line shows' : 'The dashed lines show'} where the fold goes: what will the sheet look like once unfolded?`
+    ),
   ]);
   return onCrease
-    ? `${base} (attenzione: un buco fatto proprio SULLA piega resta uno solo)`
+    ? {
+        it: `${base.it} (attenzione: un buco fatto proprio SULLA piega resta uno solo)`,
+        en: `${base.en} (careful: a hole made right ON the fold stays a single hole)`,
+      }
     : base;
 }
 
@@ -592,19 +697,19 @@ function build(rng: Rng, difficulty: Difficulty): Question {
   // foglio → piega (con il tratteggio della piega successiva) → carta bucata → ?
   const F = folds.length;
   const panels: CellSpec[] = [
-    sheetCell(n, [], null, color, { crease: folds[0].axis, label: 'foglio' }),
+    sheetCell(n, [], null, color, { crease: folds[0].axis, label: L('foglio', 'sheet') }),
     sheetCell(n, [], region(n, folds, 1), color, {
       // il tratteggio qui è quello della piega SUCCESSIVA (dove si piegherà
       // ora): l'etichetta deve raccontarlo, altrimenti dice il falso
       crease: folds[Math.min(1, F - 1)].axis,
-      label: F === 1 ? 'piegato' : 'ora piega qui',
+      label: F === 1 ? L('piegato', 'folded') : L('ora piega qui', 'now fold here'),
     }),
     sheetCell(n, punches, region(n, folds), color, {
       crease: folds[F - 1].axis,
-      label: F === 1 ? 'buchi' : 'piegato e bucato',
+      label: F === 1 ? L('buchi', 'holes') : L('piegato e bucato', 'folded and punched'),
       highlight: true,
     }),
-    { shapes: [], unknown: true, label: 'riaperto?' },
+    { shapes: [], unknown: true, label: L('riaperto?', 'reopened?') },
   ];
 
   const asChoice = (holes: number[]): ChoiceVisual => ({ kind: 'cell', cell: sheetCell(n, holes, null, color) });
@@ -617,7 +722,7 @@ function build(rng: Rng, difficulty: Difficulty): Question {
     payload: { kind: 'cells', rows: [panels], arrows: true },
     choices,
     correctIndex,
-    explanation: explain(spec, correct),
+    explanation: L(explain(spec, correct), explainEn(spec, correct)),
   };
 }
 

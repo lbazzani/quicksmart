@@ -18,8 +18,9 @@
 // (risposta in mezzo / più piccola / più grande) pescando da un elenco di errori
 // plausibili abbastanza ricco da averne su entrambi i lati.
 
-import type { Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { balancedNumericDistractors, placeChoices, retry } from './qutils';
 
 type Op = '+' | '-' | 'x';
@@ -28,6 +29,8 @@ type Op = '+' | '-' | 'x';
 interface Sym {
   spec: ShapeSpec;
   name: string;
+  /** come `name`, in inglese */
+  nameEn: string;
   value: number;
 }
 
@@ -37,6 +40,8 @@ interface EqRow {
   result: number;
   /** come si ricava il simbolo nuovo da questa riga (per l'explanation) */
   deduce?: string;
+  /** come `deduce`, in inglese */
+  deduceEn?: string;
 }
 
 const SHAPES: ShapeName[] = [
@@ -56,6 +61,20 @@ const ITA: Record<string, string> = {
   moon: 'luna',
 };
 
+/** come `ITA`, in inglese: i nomi si usano "nudi" (es. "circle + square"), senza genere né articolo */
+const ENG: Record<string, string> = {
+  circle: 'circle',
+  square: 'square',
+  triangle: 'triangle',
+  diamond: 'diamond',
+  star: 'star',
+  pentagon: 'pentagon',
+  hexagon: 'hexagon',
+  heart: 'heart',
+  cross: 'cross',
+  moon: 'moon',
+};
+
 const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 /** crea i simboli: forme distinte, colori distinti, stesso colore per tutta la domanda */
@@ -65,6 +84,7 @@ function makeSymbols(rng: Rng, values: number[]): Sym[] {
   return values.map((v, i) => ({
     spec: { shape: shapes[i], color: colors[i], fillMode: 'solid' as const },
     name: ITA[shapes[i]],
+    nameEn: ENG[shapes[i]],
     value: v,
   }));
 }
@@ -85,6 +105,11 @@ function payloadRow(
 /** "cerchio + quadrato" (nomi dei simboli) */
 function symText(terms: Sym[], ops: Op[]): string {
   return terms.map((t, i) => (i ? ` ${ops[i - 1]} ` : '') + t.name).join('');
+}
+
+/** come `symText`, in inglese */
+function symTextEn(terms: Sym[], ops: Op[]): string {
+  return terms.map((t, i) => (i ? ` ${ops[i - 1]} ` : '') + t.nameEn).join('');
 }
 
 /** "4 + 5" (valori dei simboli) */
@@ -139,16 +164,16 @@ function finish(
   rows: { items: (ShapeSpec | string)[]; result: number | string }[],
   correct: number,
   dists: [number, number],
-  explanation: string
+  explanation: LocalizedText
 ): Question {
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(correct) }, [
-    { kind: 'text', text: String(dists[0]) },
-    { kind: 'text', text: String(dists[1]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(correct)) }, [
+    { kind: 'text', text: L(String(dists[0])) },
+    { kind: 'text', text: L(String(dists[1])) },
   ]);
   return {
     qtype: 'arithgrid' as const,
     difficulty,
-    prompt: "Quanto vale l'ultima riga?",
+    prompt: L("Quanto vale l'ultima riga?", "What's the last row worth?"),
     payload: { kind: 'equation' as const, rows },
     choices,
     correctIndex,
@@ -199,13 +224,17 @@ function makeD1(rng: Rng): Question {
     `Prima riga: ${symText(eq1.terms, eq1.ops)} = ${eq1.result}, quindi ${A.name} = ${eq1.result} : ${n1} = ${va}. ` +
     `Seconda riga: ${symText(eq2.terms, eq2.ops)} = ${eq2.result}, quindi ${B.name} = ${eq2.result} - ${va} = ${vb}. ` +
     `Ultima riga: ${symText(qTerms, qOps)} = ${valText(qTerms, qOps)} = ${correct}.`;
+  const explanationEn =
+    `First row: ${symTextEn(eq1.terms, eq1.ops)} = ${eq1.result}, so ${A.nameEn} = ${eq1.result} ÷ ${n1} = ${va}. ` +
+    `Second row: ${symTextEn(eq2.terms, eq2.ops)} = ${eq2.result}, so ${B.nameEn} = ${eq2.result} - ${va} = ${vb}. ` +
+    `Last row: ${symTextEn(qTerms, qOps)} = ${valText(qTerms, qOps)} = ${correct}.`;
 
   const rows = [
     payloadRow(eq1.terms, eq1.ops, eq1.result),
     payloadRow(eq2.terms, eq2.ops, eq2.result),
     payloadRow(qTerms, qOps, '?'),
   ];
-  return finish(rng, 1, rows, correct, dists, explanation);
+  return finish(rng, 1, rows, correct, dists, L(explanation, explanationEn));
 }
 
 // ---------------------------------------------------------------------------
@@ -221,17 +250,62 @@ function makeD2(rng: Rng): Question {
   // eq2: sottrazione tra A e B (sempre con risultato positivo)
   const eq2: EqRow =
     va > vb
-      ? { terms: [A, B], ops: ['-'], result: va - vb, deduce: `${B.name} = ${va} - ${va - vb} = ${vb}` }
-      : { terms: [B, A], ops: ['-'], result: vb - va, deduce: `${B.name} = ${vb - va} + ${va} = ${vb}` };
+      ? {
+          terms: [A, B],
+          ops: ['-'],
+          result: va - vb,
+          deduce: `${B.name} = ${va} - ${va - vb} = ${vb}`,
+          deduceEn: `${B.nameEn} = ${va} - ${va - vb} = ${vb}`,
+        }
+      : {
+          terms: [B, A],
+          ops: ['-'],
+          result: vb - va,
+          deduce: `${B.name} = ${vb - va} + ${va} = ${vb}`,
+          deduceEn: `${B.nameEn} = ${vb - va} + ${va} = ${vb}`,
+        };
 
   // eq3: ricava C da A o B (a volte con un'altra sottrazione)
   const opts3: EqRow[] = [
-    { terms: [B, C], ops: ['+'], result: vb + vc, deduce: `${C.name} = ${vb + vc} - ${vb} = ${vc}` },
-    { terms: [A, C], ops: ['+'], result: va + vc, deduce: `${C.name} = ${va + vc} - ${va} = ${vc}` },
+    {
+      terms: [B, C],
+      ops: ['+'],
+      result: vb + vc,
+      deduce: `${C.name} = ${vb + vc} - ${vb} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${vb + vc} - ${vb} = ${vc}`,
+    },
+    {
+      terms: [A, C],
+      ops: ['+'],
+      result: va + vc,
+      deduce: `${C.name} = ${va + vc} - ${va} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${va + vc} - ${va} = ${vc}`,
+    },
   ];
-  if (vb > vc) opts3.push({ terms: [B, C], ops: ['-'], result: vb - vc, deduce: `${C.name} = ${vb} - ${vb - vc} = ${vc}` });
-  if (vc > vb) opts3.push({ terms: [C, B], ops: ['-'], result: vc - vb, deduce: `${C.name} = ${vc - vb} + ${vb} = ${vc}` });
-  if (va > vc) opts3.push({ terms: [A, C], ops: ['-'], result: va - vc, deduce: `${C.name} = ${va} - ${va - vc} = ${vc}` });
+  if (vb > vc)
+    opts3.push({
+      terms: [B, C],
+      ops: ['-'],
+      result: vb - vc,
+      deduce: `${C.name} = ${vb} - ${vb - vc} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${vb} - ${vb - vc} = ${vc}`,
+    });
+  if (vc > vb)
+    opts3.push({
+      terms: [C, B],
+      ops: ['-'],
+      result: vc - vb,
+      deduce: `${C.name} = ${vc - vb} + ${vb} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${vc - vb} + ${vb} = ${vc}`,
+    });
+  if (va > vc)
+    opts3.push({
+      terms: [A, C],
+      ops: ['-'],
+      result: va - vc,
+      deduce: `${C.name} = ${va} - ${va - vc} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${va} - ${va - vc} = ${vc}`,
+    });
   const eq3 = pick(rng, opts3);
 
   // ultima riga: tutti e tre i simboli, un più e un meno, mai valori intermedi
@@ -297,6 +371,11 @@ function makeD2(rng: Rng): Question {
     `Seconda riga: ${symText(eq2.terms, eq2.ops)} = ${eq2.result}, quindi ${eq2.deduce}. ` +
     `Terza riga: ${symText(eq3.terms, eq3.ops)} = ${eq3.result}, quindi ${eq3.deduce}. ` +
     `Ultima riga: ${symText([X, Y, Z], qOps)} = ${valText([X, Y, Z], qOps)} = ${correct}.`;
+  const explanationEn =
+    `First row: ${symTextEn(eq1.terms, eq1.ops)} = ${eq1.result}, so ${A.nameEn} = ${eq1.result} ÷ ${n1} = ${va}. ` +
+    `Second row: ${symTextEn(eq2.terms, eq2.ops)} = ${eq2.result}, so ${eq2.deduceEn}. ` +
+    `Third row: ${symTextEn(eq3.terms, eq3.ops)} = ${eq3.result}, so ${eq3.deduceEn}. ` +
+    `Last row: ${symTextEn([X, Y, Z], qOps)} = ${valText([X, Y, Z], qOps)} = ${correct}.`;
 
   const rows = [
     payloadRow(eq1.terms, eq1.ops, eq1.result),
@@ -304,7 +383,7 @@ function makeD2(rng: Rng): Question {
     payloadRow(eq3.terms, eq3.ops, eq3.result),
     payloadRow([X, Y, Z], qOps, '?'),
   ];
-  return finish(rng, 2, rows, correct, dists, explanation);
+  return finish(rng, 2, rows, correct, dists, L(explanation, explanationEn));
 }
 
 // ---------------------------------------------------------------------------
@@ -321,10 +400,34 @@ function makeD3(rng: Rng): Question {
     : { terms: [B, A], ops: ['x'], result: va * vb };
 
   const opts3: EqRow[] = [
-    { terms: [A, C], ops: ['x'], result: va * vc, deduce: `${C.name} = ${va * vc} : ${va} = ${vc}` },
-    { terms: [B, C], ops: ['x'], result: vb * vc, deduce: `${C.name} = ${vb * vc} : ${vb} = ${vc}` },
-    { terms: [B, C], ops: ['+'], result: vb + vc, deduce: `${C.name} = ${vb + vc} - ${vb} = ${vc}` },
-    { terms: [A, C], ops: ['+'], result: va + vc, deduce: `${C.name} = ${va + vc} - ${va} = ${vc}` },
+    {
+      terms: [A, C],
+      ops: ['x'],
+      result: va * vc,
+      deduce: `${C.name} = ${va * vc} : ${va} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${va * vc} ÷ ${va} = ${vc}`,
+    },
+    {
+      terms: [B, C],
+      ops: ['x'],
+      result: vb * vc,
+      deduce: `${C.name} = ${vb * vc} : ${vb} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${vb * vc} ÷ ${vb} = ${vc}`,
+    },
+    {
+      terms: [B, C],
+      ops: ['+'],
+      result: vb + vc,
+      deduce: `${C.name} = ${vb + vc} - ${vb} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${vb + vc} - ${vb} = ${vc}`,
+    },
+    {
+      terms: [A, C],
+      ops: ['+'],
+      result: va + vc,
+      deduce: `${C.name} = ${va + vc} - ${va} = ${vc}`,
+      deduceEn: `${C.nameEn} = ${va + vc} - ${va} = ${vc}`,
+    },
   ];
   const eq3 = pick(rng, opts3);
 
@@ -374,6 +477,17 @@ function makeD3(rng: Rng): Question {
       ? `Leggendo da sinistra a destra verrebbe ${leftToRight}: è la trappola!`
       : `Leggendo da sinistra a destra verrebbe ${leftToRight}, un numero diverso: ` +
         `l'ordine delle operazioni cambia il risultato.`);
+  const explanationEn =
+    `First row: ${A.nameEn} + ${A.nameEn} = ${2 * va}, so ${A.nameEn} = ${va}. ` +
+    `Second row: ${symTextEn(eq2.terms, eq2.ops)} = ${va * vb}, so ${B.nameEn} = ${va * vb} ÷ ${va} = ${vb}. ` +
+    `Third row: ${symTextEn(eq3.terms, eq3.ops)} = ${eq3.result}, so ${eq3.deduceEn}. ` +
+    `In the last row, multiplication is calculated BEFORE addition: ` +
+    `${Y.nameEn} x ${Z.nameEn} = ${Y.value} x ${Z.value} = ${Y.value * Z.value}, ` +
+    `then ${X.value} + ${Y.value * Z.value} = ${correct}. ` +
+    (dists.includes(leftToRight)
+      ? `Reading left to right would give ${leftToRight}: that's the trap!`
+      : `Reading left to right would give ${leftToRight}, a different number: ` +
+        `the order of operations changes the result.`);
 
   const rows = [
     payloadRow(eq1.terms, eq1.ops, eq1.result),
@@ -381,7 +495,7 @@ function makeD3(rng: Rng): Question {
     payloadRow(eq3.terms, eq3.ops, eq3.result),
     payloadRow([X, Y, Z], qOps, '?'),
   ];
-  return finish(rng, 3, rows, correct, dists, explanation);
+  return finish(rng, 3, rows, correct, dists, L(explanation, explanationEn));
 }
 
 export function genArithgrid(rng: Rng, difficulty: Difficulty): Question {

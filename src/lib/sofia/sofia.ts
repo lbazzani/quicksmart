@@ -16,9 +16,10 @@ import { existsSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import os from 'os';
-import type { QuestionType, RoundOutcome, SofiaMood } from '../types';
+import type { LocalizedText, QuestionType, RoundOutcome, SofiaMood } from '../types';
 import { T } from '../i18n';
-import { HINTS, LINES, MOODS, fillLine, type SofiaLineKind } from './lines';
+import { L } from '../localize';
+import { HINTS, LINES, MOODS, fillLineL, type SofiaLineKind } from './lines';
 
 export type SofiaEventCtx =
   | { kind: 'welcome'; nickname: string }
@@ -42,7 +43,7 @@ export type SofiaEventCtx =
 
 // Il tipo Room vive nell'engine; qui bastano i campi che tocchiamo.
 interface SofiaRoom {
-  sofia: { text: string; mood: SofiaMood; roundIndex: number; ai: boolean; seq: number } | null;
+  sofia: { text: LocalizedText; mood: SofiaMood; roundIndex: number; ai: boolean; seq: number } | null;
   sofiaSeq: number;
   sofiaBusy: boolean;
   sofiaPending?: { ctx: SofiaEventCtx; seq: number; onUpdate: () => void };
@@ -75,7 +76,7 @@ const AI_ENABLED = () => process.env.SOFIA_AI === '1';
 /** al massimo 8 giocatori nel prompt: tiene corto il testo e limita la superficie */
 const MAX_STANDINGS = 8;
 
-function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; n?: number; tip?: string } {
+function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; n?: number; tip?: LocalizedText } {
   switch (ctx.kind) {
     case 'welcome':
       return { kind: 'welcome', name: ctx.nickname };
@@ -497,9 +498,12 @@ export async function sofiaOnEvent(room: SofiaRoom, ctx: SofiaEventCtx, onUpdate
   // se l'AI ne ha preparata una per questo momento si usa quella, altrimenti
   // la pre-scritta: in entrambi i casi compare SUBITO, il gioco non aspetta.
   // I consigli (hint) invece sono SEMPRE pre-scritti: devono essere veri.
+  // Le battute preparate dall'AI sono sempre in italiano (vedi aiPrompt/
+  // warmupPrompt più sotto): L() le porta alla stessa forma bilingue del pool.
   const preparata = kind === 'hint' ? undefined : room.sofiaFresh?.[kind]?.shift();
   const pool = LINES[kind];
-  const testo = fillLine(preparata ?? pool[Math.floor(Math.random() * pool.length)], name, n, tip);
+  const template = preparata !== undefined ? L(preparata) : pool[Math.floor(Math.random() * pool.length)];
+  const testo = fillLineL(template, name, n, tip);
   const seq = ++room.sofiaSeq;
   room.sofia = { text: testo, mood: MOODS[kind], roundIndex: room.roundIndex, ai: preparata !== undefined, seq };
   onUpdate();
@@ -553,9 +557,10 @@ async function runAi(room: SofiaRoom, ctx: SofiaEventCtx, seq: number, onUpdate:
     const t0 = Date.now();
     const text = deAlias(await askOneLine(prompt, (kill) => (room.sofiaKill = kill)), alias);
     console.warn(`[SofAI] AI ok (${ctx.kind}) in ${Date.now() - t0}ms`);
-    // sostituisce solo se nel frattempo non è uscita una battuta più recente
+    // sostituisce solo se nel frattempo non è uscita una battuta più recente.
+    // Il testo dell'AI è sempre in italiano: L() lo porta alla forma bilingue.
     if (room.sofia && (room.sofia.seq === seq || ctx.kind === 'podium')) {
-      room.sofia = { text, mood: room.sofia.mood, roundIndex: room.sofia.roundIndex, ai: true, seq: ++room.sofiaSeq };
+      room.sofia = { text: L(text), mood: room.sofia.mood, roundIndex: room.sofia.roundIndex, ai: true, seq: ++room.sofiaSeq };
       onUpdate();
     }
   } catch (e) {

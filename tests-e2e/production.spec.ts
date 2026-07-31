@@ -14,10 +14,10 @@ interface Snap {
   phase: string;
   status: string;
   roundIndex: number;
-  sofia: { text: string; ai: boolean } | null;
+  sofia: { text: { it: string; en: string }; ai: boolean } | null;
   players: { id: string; nickname: string; score: number; stats: { correct: number; wrong: number } }[];
   current: {
-    prompt: string;
+    prompt: { it: string; en: string };
     buzzerId?: string;
     outcome?: string;
     choices: unknown[];
@@ -146,8 +146,8 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
   await answering.waitForTimeout(600);
   await answering.screenshot({ path: `${SHOTS}/04-reveal.png` });
 
-  // SofAI commenta (battuta pre-scritta o AI)
-  expect(s.sofia?.text?.length ?? 0).toBeGreaterThan(4);
+  // SofAI commenta (battuta pre-scritta o AI) — sempre in italiano, il browser di questo test è it-IT
+  expect(s.sofia?.text?.it?.length ?? 0).toBeGreaterThan(4);
 
   // qualche round automatico, poi il capitano chiude
   await waitState(code, (x) => x.roundIndex >= 1, 60_000);
@@ -161,18 +161,18 @@ test('sito pubblico: partita a squadre completa', async ({ browser }) => {
   // in partita non si nota nulla — resta quella pre-scritta — ed è proprio
   // per questo che il test deve accorgersene al posto nostro.
   s = await waitState(code, (x) => x.sofia?.ai === true, 60_000);
-  expect(s.sofia!.text.length).toBeGreaterThan(4);
+  expect(s.sofia!.text.it.length).toBeGreaterThan(4);
   // e soprattutto: deve arrivare FINO ALLO SCHERMO. Il client chiudeva lo
   // stream appena la partita finiva, quindi la battuta esisteva sul server e
   // sul telefono restava quella pre-scritta: un controllo solo sull'API non
   // se ne sarebbe accorto.
-  await expect(anna.getByText(s.sofia!.text, { exact: false })).toBeVisible({ timeout: 15_000 });
+  await expect(anna.getByText(s.sofia!.text.it, { exact: false })).toBeVisible({ timeout: 15_000 });
   await anna.screenshot({ path: `${SHOTS}/05-podio.png` });
 
   // la classifica è ordinata e i punteggi sono coerenti con le statistiche
   const scores = s.players.map((p) => p.score);
   expect([...scores].sort((a, b) => b - a)).toEqual(scores);
-  console.log('SofAI al podio:', s.sofia?.ai ? `[AI] ${s.sofia.text}` : `[canned] ${s.sofia?.text}`);
+  console.log('SofAI al podio:', s.sofia?.ai ? `[AI] ${s.sofia.text.it}` : `[canned] ${s.sofia?.text.it}`);
 });
 
 test('sito pubblico: si entra col QR anche a partita già avviata', async ({ browser }) => {

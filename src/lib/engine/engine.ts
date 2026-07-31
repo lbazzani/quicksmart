@@ -9,9 +9,11 @@ import type {
   ChatMsg,
   Difficulty,
   GameMode,
+  GamePack,
   GameSettings,
   GameSnapshot,
   GameStatus,
+  LocalizedText,
   Phase,
   PlayerPublic,
   PlayerStats,
@@ -36,8 +38,10 @@ import { dbAddPlayer, dbCreateGame, dbLoadQuestions, dbSavePlayer, dbSaveRound, 
 import { sofiaOnEvent, sofiaWarmup, type SofiaEventCtx } from '../sofia/sofia';
 import type { SofiaLineKind } from '../sofia/lines';
 import { LiveQuestions, freshSeed, reshuffleChoices } from '../questions/live';
+import { PACK_TYPES } from '../questions';
 import { TwinPool } from '../questions/twin';
 import { mulberry32, type Rng } from '../rng';
+import { L } from '../localize';
 
 const COUNTDOWN_MS = 3000;
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // sweep partite morte dopo 2h
@@ -217,9 +221,14 @@ function newStats(): PlayerStats {
  * Durata del reveal: la base scelta nelle impostazioni più il tempo di leggere
  * la spiegazione sul telefono. 25 ms per carattere oltre gli 80 è una lettura
  * senza fretta; il tetto evita che una spiegazione prolissa congeli il gioco.
+ *
+ * Il timer è unico per tutta la stanza (round sincroni per tutti), ma la
+ * spiegazione ha una lunghezza diversa in ogni lingua: si dimensiona sulla
+ * più lunga delle due, così a nessuno viene tolto tempo di lettura.
  */
-export function revealDurationMs(base: number, explanation: string): number {
-  return Math.min(12_000, base + Math.max(0, explanation.length - 80) * 25);
+export function revealDurationMs(base: number, explanation: LocalizedText): number {
+  const longest = Math.max(...Object.values(explanation).map((s) => s.length));
+  return Math.min(12_000, base + Math.max(0, longest - 80) * 25);
 }
 
 /** difficoltà del round i: rampa facile → difficile */
@@ -279,6 +288,7 @@ export class GameEngine {
   async createGame(opts: {
     name: string;
     mode: GameMode;
+    pack?: GamePack;
     nickname: string;
     avatar: string;
     roundsTotal: number | null;
@@ -288,8 +298,10 @@ export class GameEngine {
   }): Promise<{ code: string; playerId: string; token: string }> {
     this.sweep();
     if (this.rooms.size >= MAX_ROOMS) throw new Error('too_many_rooms');
+    const pack: GamePack = opts.pack ?? 'logic';
     const settings: GameSettings = {
       mode: opts.mode,
+      pack,
       roundsTotal: opts.roundsTotal,
       buzzWindowMs: opts.buzzWindowMs,
       answerMs: opts.answerMs,
@@ -316,7 +328,7 @@ export class GameEngine {
       pendingNicknames: new Set(),
       questions: [],
       usedQuestionIds: new Set(),
-      live: new LiveQuestions(seed),
+      live: new LiveQuestions(seed, { types: PACK_TYPES[pack] }),
       twins: new TwinPool(),
       rng: mulberry32(seed ^ 0x5eed),
       lastTwinRound: -99,
@@ -972,7 +984,7 @@ export class GameEngine {
             // durante il countdown la domanda non è ancora visibile a nessuno, e
             // le opzioni escono solo quando si può rispondere: chi guarda lo
             // stream grezzo non ha vantaggio su chi guarda lo schermo
-            prompt: room.phase === 'countdown' ? '' : cur.q.prompt,
+            prompt: room.phase === 'countdown' ? L('') : cur.q.prompt,
             payload: room.phase === 'countdown' ? { kind: 'cells', rows: [] } : cur.q.payload,
             choices: room.phase === 'answer' || revealing || reopenPeek ? cur.q.choices : [],
             value: cur.value,

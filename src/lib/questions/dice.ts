@@ -33,9 +33,10 @@
 
 import type { CellSpec, ChoiceVisual, Difficulty, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { balancedNumericDistractors, placeChoices, retry } from './qutils';
 
-const txt = (n: number | string): ChoiceVisual => ({ kind: 'text', text: String(n) });
+const txt = (n: number | string): ChoiceVisual => ({ kind: 'text', text: L(String(n)) });
 
 const total = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
@@ -243,6 +244,10 @@ const NOTE_BLOCK =
   `Il trucco: contano anche i cubi nascosti dietro le pile più alte, non solo quelli che si vedono!`;
 const NOTE_LINE =
   `Il trucco: ogni pila vale quanti cubi è alta, non uno solo. Conta le pile una per una e somma.`;
+const NOTE_BLOCK_EN =
+  `The trick: the cubes hidden behind the taller stacks count too, not just the ones you can see!`;
+const NOTE_LINE_EN =
+  `The trick: each stack counts for as many cubes as it's tall, not just one. Count the stacks one by one and add them up.`;
 
 /**
  * Sotto questa soglia non esistono due valori PIÙ PICCOLI plausibili (il minimo
@@ -252,7 +257,13 @@ const NOTE_LINE =
  */
 const MIN_CUBES = 6;
 
-function countQuestion(rng: Rng, difficulty: Difficulty, grid: number[][], note = NOTE_BLOCK): Question {
+function countQuestion(
+  rng: Rng,
+  difficulty: Difficulty,
+  grid: number[][],
+  note = NOTE_BLOCK,
+  noteEn = NOTE_BLOCK_EN
+): Question {
   const sum = gridSum(grid);
   if (sum < MIN_CUBES) throw new Error('troppi pochi cubi per distrattori equilibrati');
   const heights = grid.flat();
@@ -266,11 +277,14 @@ function countQuestion(rng: Rng, difficulty: Difficulty, grid: number[][], note 
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: 'Quanti cubi ci sono in totale?',
+    prompt: L('Quanti cubi ci sono in totale?', 'How many cubes are there in total?'),
     payload: { kind: 'dicestack' as const, grid },
     choices,
     correctIndex,
-    explanation: `Somma le altezze di tutte le colonne, riga per riga: ${sumText(grid)} = ${sum} cubi. ` + note,
+    explanation: L(
+      `Somma le altezze di tutte le colonne, riga per riga: ${sumText(grid)} = ${sum} cubi. ` + note,
+      `Add up the heights of all the columns, row by row: ${sumText(grid)} = ${sum} cubes. ` + noteEn
+    ),
   };
 }
 
@@ -305,23 +319,33 @@ function missingQuestion(rng: Rng, grid: number[][]): Question {
   const what = wall
     ? `il muro (una fila di ${rows * cols} colonne, alto quanto la colonna più alta)`
     : `il parallelepipedo (base ${rows}×${cols}, alto quanto la colonna più alta)`;
+  const whatEn = wall
+    ? `the wall (a row of ${rows * cols} columns, as tall as the tallest column)`
+    : `the block (base ${rows}×${cols}, as tall as the tallest column)`;
   const empty = holes;
   return {
     qtype: 'dice' as const,
     difficulty: 3,
-    prompt: `Quanti cubi mancano per completare ${what}?`,
+    prompt: L(`Quanti cubi mancano per completare ${what}?`, `How many cubes are missing to complete ${whatEn}?`),
     payload: { kind: 'dicestack' as const, grid },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Completo, ${wall ? 'il muro' : 'il parallelepipedo'} sarebbe ${rows}×${cols}×${maxH} = ${box} cubi. ` +
-      `Adesso ce ne sono ${sumText(grid)} = ${sum}, quindi ne mancano ${box} − ${sum} = ${missing}. ` +
-      (empty > 0 ? `Occhio ai ${empty === 1 ? 'posto vuoto' : `${empty} posti vuoti`} della base: ${empty === 1 ? 'anche quello va riempito' : 'vanno riempiti anche quelli'} fino in cima. ` : '') +
-      // se per caso i cubi presenti sono tanti quanti i mancanti la "trappola"
-      // non esiste: dirlo lo stesso confonderebbe e basta
-      (sum === missing
-        ? `Curiosità: qui i cubi che mancano sono esattamente quanti quelli che ci sono già.`
-        : `Il trucco: la domanda chiede i cubi mancanti, non quelli presenti (${sum}).`),
+        `Adesso ce ne sono ${sumText(grid)} = ${sum}, quindi ne mancano ${box} − ${sum} = ${missing}. ` +
+        (empty > 0 ? `Occhio ai ${empty === 1 ? 'posto vuoto' : `${empty} posti vuoti`} della base: ${empty === 1 ? 'anche quello va riempito' : 'vanno riempiti anche quelli'} fino in cima. ` : '') +
+        // se per caso i cubi presenti sono tanti quanti i mancanti la "trappola"
+        // non esiste: dirlo lo stesso confonderebbe e basta
+        (sum === missing
+          ? `Curiosità: qui i cubi che mancano sono esattamente quanti quelli che ci sono già.`
+          : `Il trucco: la domanda chiede i cubi mancanti, non quelli presenti (${sum}).`),
+      `If it were complete, ${wall ? 'the wall' : 'the block'} would be ${rows}×${cols}×${maxH} = ${box} cubes. ` +
+        `Right now there are ${sumText(grid)} = ${sum}, so ${box} − ${sum} = ${missing} are missing. ` +
+        (empty > 0 ? `Watch out for the ${empty === 1 ? 'empty spot' : `${empty} empty spots`} in the base: ${empty === 1 ? 'it needs filling too' : 'they need filling too'}, all the way to the top. ` : '') +
+        (sum === missing
+          ? `Fun fact: here the missing cubes are exactly as many as the ones already there.`
+          : `The trick: the question asks for the missing cubes, not the ones already there (${sum}).`)
+    ),
   };
 }
 
@@ -350,14 +374,18 @@ function touchQuestion(rng: Rng, difficulty: Difficulty, grid: number[][]): Ques
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: 'Quanti cubi toccano il tavolo?',
+    prompt: L('Quanti cubi toccano il tavolo?', 'How many cubes are touching the table?'),
     payload: { kind: 'dicestack' as const, grid },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Ogni pila appoggia sul tavolo con un cubo solo, quello in fondo: basta quindi contare le pile, ` +
-      `e le pile sono ${piles}. Il trucco: i cubi in tutto sono ${cubes}, ma quelli appoggiati sopra ` +
-      `un altro cubo (${cubes - piles}) il tavolo non lo toccano.`,
+        `e le pile sono ${piles}. Il trucco: i cubi in tutto sono ${cubes}, ma quelli appoggiati sopra ` +
+        `un altro cubo (${cubes - piles}) il tavolo non lo toccano.`,
+      `Each stack touches the table with just one cube, the bottom one: so all you have to do is count the ` +
+        `stacks, and there are ${piles} of them. The trick: there are ${cubes} cubes in total, but the ones ` +
+        `sitting on top of another cube (${cubes - piles}) never touch the table.`
+    ),
   };
 }
 
@@ -390,18 +418,26 @@ function facesQuestion(rng: Rng, difficulty: Difficulty, heights: number[], vert
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: 'Quante facce dei cubi si vedono da questa angolazione?',
+    prompt: L('Quante facce dei cubi si vedono da questa angolazione?', 'How many cube faces can you see from this angle?'),
     payload: { kind: 'dicestack' as const, grid: towersGrid(heights, vertical) },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Di ogni cubo si vedono al massimo tre facce: il coperchio e i due fianchi. Ma il coperchio di un ` +
-      `cubo che ne ha un altro sopra è coperto: in una torre alta h si vedono h fianchi a sinistra, ` +
-      `h fianchi a destra e UN solo coperchio, cioè 2×h+1 facce. ` +
-      (towers === 1
-        ? `Qui la torre è alta ${heights[0]}: ${perTower} facce.`
-        : `Qui: ${perTower}, in tutto ${faces} facce.`) +
-      ` Il trucco: 3 facce per cubo (${3 * cubes}) sarebbe giusto solo con i cubi tutti staccati.`,
+        `cubo che ne ha un altro sopra è coperto: in una torre alta h si vedono h fianchi a sinistra, ` +
+        `h fianchi a destra e UN solo coperchio, cioè 2×h+1 facce. ` +
+        (towers === 1
+          ? `Qui la torre è alta ${heights[0]}: ${perTower} facce.`
+          : `Qui: ${perTower}, in tutto ${faces} facce.`) +
+        ` Il trucco: 3 facce per cubo (${3 * cubes}) sarebbe giusto solo con i cubi tutti staccati.`,
+      `You can see at most three faces of each cube: the top and the two sides. But the top of a ` +
+        `cube that has another cube stacked on it is hidden: in a tower h cubes tall you see h side faces on ` +
+        `the left, h side faces on the right, and just ONE top — that's 2×h+1 faces. ` +
+        (towers === 1
+          ? `Here the tower is ${heights[0]} cubes tall: ${perTower} faces.`
+          : `Here: ${perTower}, ${faces} faces in total.`) +
+        ` The trick: 3 faces per cube (${3 * cubes}) would only be right if all the cubes were separate.`
+    ),
   };
 }
 
@@ -473,29 +509,41 @@ function groupsQuestion(
   const grid = lineGrid([...first, 0, 0, ...second], vertical);
   const labA = vertical ? 'in alto a destra' : 'in alto a sinistra';
   const labB = vertical ? 'in basso a sinistra' : 'in basso a destra';
+  const labAEn = vertical ? 'top right' : 'top left';
+  const labBEn = vertical ? 'bottom left' : 'bottom right';
   const win = winnerFirst ? 'A' : 'B';
   const lose = winnerFirst ? 'B' : 'A';
   const intro = `Due gruppi di cubi: il gruppo A (${labA}) e il gruppo B (${labB}).`;
+  const introEn = `Two groups of cubes: group A (${labAEn}) and group B (${labBEn}).`;
   const conti =
     `Il gruppo ${win} ha ${g.winner.join('+')} = ${g.winnerSum} cubi, ` +
     `il gruppo ${lose} ne ha ${g.loser.join('+')} = ${g.loserSum}.`;
+  const contiEn =
+    `Group ${win} has ${g.winner.join('+')} = ${g.winnerSum} cubes, ` +
+    `group ${lose} has ${g.loser.join('+')} = ${g.loserSum}.`;
   const trap =
     ` Due trappole: i gruppi hanno lo stesso numero di pile (${g.n} e ${g.n}), e la pila più alta ` +
     `(${g.tall} cubi) sta nel gruppo ${lose}, quello che ne ha di meno. Bisogna contare i cubi, non le pile!`;
+  const trapEn =
+    ` Two traps: the groups have the same number of stacks (${g.n} and ${g.n}), and the tallest stack ` +
+    `(${g.tall} cubes) is in group ${lose}, the one with fewer cubes overall. You have to count the cubes, not the stacks!`;
 
   if (form === 'which') {
     const other: ChoiceVisual = txt(lose);
-    const pari: ChoiceVisual = txt('Pari');
+    const pari: ChoiceVisual = { kind: 'text', text: L('Pari', 'Tie') };
     const distr: [ChoiceVisual, ChoiceVisual] = chance(rng, 0.5) ? [other, pari] : [pari, other];
     const { choices, correctIndex } = placeChoices(rng, txt(win), distr);
     return {
       qtype: 'dice' as const,
       difficulty,
-      prompt: `${intro} Quale gruppo ha più cubi? (Rispondi A, B oppure "Pari" se ne hanno uguali.)`,
+      prompt: L(
+        `${intro} Quale gruppo ha più cubi? (Rispondi A, B oppure "Pari" se ne hanno uguali.)`,
+        `${introEn} Which group has more cubes? (Answer A, B, or "Tie" if they have the same number.)`
+      ),
       payload: { kind: 'dicestack' as const, grid },
       choices,
       correctIndex,
-      explanation: `${conti} Quindi ne ha di più il gruppo ${win}.` + trap,
+      explanation: L(`${conti} Quindi ne ha di più il gruppo ${win}.` + trap, `${contiEn} So group ${win} has more.` + trapEn),
     };
   }
 
@@ -512,11 +560,17 @@ function groupsQuestion(
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: `${intro} Quanti cubi ha in più il gruppo ${win} rispetto all'altro?`,
+    prompt: L(
+      `${intro} Quanti cubi ha in più il gruppo ${win} rispetto all'altro?`,
+      `${introEn} How many more cubes does group ${win} have than the other?`
+    ),
     payload: { kind: 'dicestack' as const, grid },
     choices,
     correctIndex,
-    explanation: `${conti} La differenza è ${g.winnerSum} − ${g.loserSum} = ${g.diff} cubi.` + trap,
+    explanation: L(
+      `${conti} La differenza è ${g.winnerSum} − ${g.loserSum} = ${g.diff} cubi.` + trap,
+      `${contiEn} The difference is ${g.winnerSum} − ${g.loserSum} = ${g.diff} cubes.` + trapEn
+    ),
   };
 }
 
@@ -547,19 +601,28 @@ function netQuestion(rng: Rng, difficulty: Difficulty, faces: number[], deceptiv
   const trap = deceptive
     ? ` I numeri consecutivi messi vicini ingannano l'occhio: conta le posizioni, non i valori.`
     : '';
+  const trapEn = deceptive
+    ? ` Consecutive numbers placed next to each other trick the eye: count the positions, not the values.`
+    : '';
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: `Nel dado piegato, quale faccia è opposta al ${x}?`,
+    prompt: L(`Nel dado piegato, quale faccia è opposta al ${x}?`, `When you fold up the die, which face ends up opposite the ${x}?`),
     payload: { kind: 'dicenet' as const, net },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Piegando la croce, nella riga centrale sono opposte le facce a due caselle di distanza ` +
-      `(${faces[1]}–${faces[3]} e ${faces[2]}–${faces[4]}), mentre l'aletta in alto (${faces[0]}) ` +
-      `è opposta a quella in basso (${faces[5]}). Quindi il ${x} è opposto al ${opp}. ` +
-      `Attenzione: la "regola del 7" (opposte che sommano 7) vale solo per i dadi standard, ` +
-      `non per questo sviluppo: ${seven} qui è una faccia adiacente al ${x}.` + trap,
+        `(${faces[1]}–${faces[3]} e ${faces[2]}–${faces[4]}), mentre l'aletta in alto (${faces[0]}) ` +
+        `è opposta a quella in basso (${faces[5]}). Quindi il ${x} è opposto al ${opp}. ` +
+        `Attenzione: la "regola del 7" (opposte che sommano 7) vale solo per i dadi standard, ` +
+        `non per questo sviluppo: ${seven} qui è una faccia adiacente al ${x}.` + trap,
+      `When you fold the cross shape, the faces in the middle row that are two squares apart end up opposite ` +
+        `each other (${faces[1]}–${faces[3]} and ${faces[2]}–${faces[4]}), while the top flap (${faces[0]}) ` +
+        `ends up opposite the bottom one (${faces[5]}). So the ${x} is opposite the ${opp}. ` +
+        `Watch out: the "rule of 7" (opposite faces add up to 7) only works for standard dice, ` +
+        `not for this net: here the ${seven} is a face adjacent to the ${x}.` + trapEn
+    ),
   };
 }
 
@@ -632,15 +695,26 @@ function netGeneralQuestion(
   const seven = 7 - x;
   const payload = { kind: 'dicenet' as const, net: buildNet(layout, faces) };
   const dir = layout.vertical ? 'colonna' : 'fila';
+  const dirEn = layout.vertical ? 'column' : 'row';
   const regola =
     `Nello sviluppo, due facce della ${dir} lunga separate da una casella finiscono una di fronte ` +
     `all'altra: ${faces[0]}–${faces[2]} e ${faces[1]}–${faces[3]}. Restano le due alette, ${faces[4]} e ` +
     `${faces[5]}: per forza sono opposte fra loro. Quindi il ${x} è opposto al ${opp}.`;
+  const regolaEn =
+    `In the net, two faces of the long ${dirEn} with one square between them end up opposite ` +
+    `each other: ${faces[0]}–${faces[2]} and ${faces[1]}–${faces[3]}. That leaves the two flaps, ${faces[4]} and ` +
+    `${faces[5]}: they must be opposite each other. So the ${x} is opposite the ${opp}.`;
   const sette =
     ` Attenzione alla "regola del 7" (facce opposte che sommano 7): vale sui dadi veri, ma qui i numeri ` +
     `sono messi in un altro ordine e il ${seven} è una faccia che TOCCA il ${x}.`;
+  const setteEn =
+    ` Watch out for the "rule of 7" (opposite faces add up to 7): it holds for real dice, but here the ` +
+    `numbers are arranged in a different order, and the ${seven} is a face that TOUCHES the ${x}.`;
   const inganno = deceptive
     ? ` I numeri consecutivi messi vicini ingannano l'occhio: conta le caselle, non i valori.`
+    : '';
+  const ingannoEn = deceptive
+    ? ` Consecutive numbers placed next to each other trick the eye: count the squares, not the values.`
     : '';
 
   if (form === 'sum') {
@@ -660,15 +734,23 @@ function netGeneralQuestion(
     return {
       qtype: 'dice' as const,
       difficulty,
-      prompt: `Piega lo sviluppo: quanto fa la somma delle 4 facce che toccano il ${x}?`,
+      prompt: L(
+        `Piega lo sviluppo: quanto fa la somma delle 4 facce che toccano il ${x}?`,
+        `Fold up the net: what's the sum of the 4 faces touching the ${x}?`
+      ),
       payload,
       choices,
       correctIndex,
-      explanation:
+      explanation: L(
         `${regola} Le sei facce insieme fanno 1+2+3+4+5+6 = 21: togli il ${x} e la sua opposta ` +
-        `(${opp}) e restano le 4 facce che lo toccano, 21 − ${x} − ${opp} = ${answer}.` +
-        ` Chi usa la regola del 7 trova sempre 14, ma qui l'opposta del ${x} non è il ${seven}.` +
-        inganno,
+          `(${opp}) e restano le 4 facce che lo toccano, 21 − ${x} − ${opp} = ${answer}.` +
+          ` Chi usa la regola del 7 trova sempre 14, ma qui l'opposta del ${x} non è il ${seven}.` +
+          inganno,
+        `${regolaEn} All six faces together add up to 1+2+3+4+5+6 = 21: take away the ${x} and its opposite ` +
+          `(${opp}) and you're left with the 4 faces touching it, 21 − ${x} − ${opp} = ${answer}.` +
+          ` Anyone using the rule of 7 always gets 14, but here the opposite of the ${x} isn't the ${seven}.` +
+          ingannoEn
+      ),
     };
   }
 
@@ -684,19 +766,29 @@ function netGeneralQuestion(
     under: `Pieghi lo sviluppo e appoggi il dado con il ${x} rivolto in alto: quale numero si trova sotto, contro il tavolo?`,
     nottouch: `Piegando lo sviluppo, quale faccia NON tocca mai il ${x}?`,
   };
+  const promptsEn: Record<Exclude<NetForm, 'sum'>, string> = {
+    opposite: `Fold up the net and rebuild the die: which face ends up opposite the ${x}?`,
+    under: `Fold up the net and set the die down with the ${x} facing up: which number ends up on the bottom, against the table?`,
+    nottouch: `When you fold up the net, which face NEVER touches the ${x}?`,
+  };
   const codas: Record<Exclude<NetForm, 'sum'>, string> = {
     opposite: '',
     under: ` Il numero contro il tavolo è sempre quello opposto alla faccia rivolta in alto.`,
     nottouch: ` Ogni faccia del dado tocca le altre quattro: l'unica che non tocca mai il ${x} è la sua opposta. Il ${adj}, per esempio, gli sta proprio accanto già sul foglio.`,
   };
+  const codasEn: Record<Exclude<NetForm, 'sum'>, string> = {
+    opposite: '',
+    under: ` The number against the table is always the one opposite the face pointing up.`,
+    nottouch: ` Every face of the die touches the other four: the only one that never touches the ${x} is its opposite. The ${adj}, for example, is already right next to it on the sheet.`,
+  };
   return {
     qtype: 'dice' as const,
     difficulty,
-    prompt: prompts[form],
+    prompt: L(prompts[form], promptsEn[form]),
     payload,
     choices,
     correctIndex,
-    explanation: regola + codas[form] + sette + inganno,
+    explanation: L(regola + codas[form] + sette + inganno, regolaEn + codasEn[form] + setteEn + ingannoEn),
   };
 }
 
@@ -750,13 +842,16 @@ function tilesSumQuestion(rng: Rng, counts: number[]): Question {
   return {
     qtype: 'dice' as const,
     difficulty: 1,
-    prompt: 'Quanti pallini ci sono in tutto sulle tessere?',
+    prompt: L('Quanti pallini ci sono in tutto sulle tessere?', 'How many dots are there in total on the tiles?'),
     payload: { kind: 'cells' as const, rows: [counts.map((n) => dotCell(n, color))] },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Conta i pallini tessera per tessera e somma: ${counts.join(' + ')} = ${sum}. ` +
-      `Il trucco: nessuna tessera va saltata (nemmeno quella da ${smallest}) e nessuna va contata due volte.`,
+        `Il trucco: nessuna tessera va saltata (nemmeno quella da ${smallest}) e nessuna va contata due volte.`,
+      `Count the dots tile by tile and add them up: ${counts.join(' + ')} = ${sum}. ` +
+        `The trick: no tile should be skipped (not even the one with ${smallest}) and none should be counted twice.`
+    ),
   };
 }
 
@@ -784,14 +879,21 @@ function tilesMissingQuestion(rng: Rng, visible: number[], hidden: number, at: n
   return {
     qtype: 'dice' as const,
     difficulty: 2,
-    prompt: `Le ${counts.length} tessere hanno in tutto ${sum} pallini. Quanti pallini ha la tessera coperta?`,
+    prompt: L(
+      `Le ${counts.length} tessere hanno in tutto ${sum} pallini. Quanti pallini ha la tessera coperta?`,
+      `The ${counts.length} tiles have ${sum} dots in total. How many dots does the covered tile have?`
+    ),
     payload: { kind: 'cells' as const, rows: [row] },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Le tessere scoperte hanno ${visible.join(' + ')} = ${seen} pallini. Alla tessera coperta tocca ` +
-      `tutto il resto: ${sum} − ${seen} = ${hidden}. ` +
-      `Il trucco: prima si somma quello che si vede, poi si sottrae dal totale (non il contrario).`,
+        `tutto il resto: ${sum} − ${seen} = ${hidden}. ` +
+        `Il trucco: prima si somma quello che si vede, poi si sottrae dal totale (non il contrario).`,
+      `The uncovered tiles have ${visible.join(' + ')} = ${seen} dots. The covered tile gets ` +
+        `whatever's left: ${sum} − ${seen} = ${hidden}. ` +
+        `The trick: first add up what you can see, then subtract it from the total (not the other way round).`
+    ),
   };
 }
 
@@ -828,14 +930,21 @@ function tilesRowsQuestion(rng: Rng, top: number[], bottom: number[], at: number
   return {
     qtype: 'dice' as const,
     difficulty: 3,
-    prompt: 'Le due file devono avere lo stesso numero di pallini in tutto. Quale tessera va al posto del punto interrogativo?',
+    prompt: L(
+      'Le due file devono avere lo stesso numero di pallini in tutto. Quale tessera va al posto del punto interrogativo?',
+      'The two rows need to have the same total number of dots. Which tile goes in place of the question mark?'
+    ),
     payload: { kind: 'cells' as const, rows },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La fila di sopra ha ${top.join(' + ')} = ${sumTop} pallini. La fila di sotto ne ha già ` +
-      `${bottom.join(' + ')} = ${seen}, quindi alla tessera coperta ne servono ${sumTop} − ${seen} = ${hidden}. ` +
-      `Il trucco: non bisogna pareggiare colonna per colonna (lì sopra c'è ${colWise}), ma il TOTALE della fila.`,
+        `${bottom.join(' + ')} = ${seen}, quindi alla tessera coperta ne servono ${sumTop} − ${seen} = ${hidden}. ` +
+        `Il trucco: non bisogna pareggiare colonna per colonna (lì sopra c'è ${colWise}), ma il TOTALE della fila.`,
+      `The top row has ${top.join(' + ')} = ${sumTop} dots. The bottom row already has ` +
+        `${bottom.join(' + ')} = ${seen}, so the covered tile needs ${sumTop} − ${seen} = ${hidden}. ` +
+        `The trick: you don't need to match column by column (the one above has ${colWise}), just the ROW TOTAL.`
+    ),
   };
 }
 
@@ -859,20 +968,31 @@ function hiddenFacesQuestion(rng: Rng, visible: number[]): Question {
   return {
     qtype: 'dice' as const,
     difficulty: 3,
-    prompt:
+    prompt: L(
       'Di un dado vero (facce opposte che sommano sempre 7) vedi queste tre facce. ' +
-      'Quanti pallini hanno in tutto le tre facce che NON vedi?',
+        'Quanti pallini hanno in tutto le tre facce che NON vedi?',
+      'On a real die (opposite faces always add up to 7), you can see these three faces. ' +
+        'How many dots do the three faces you CANNOT see have in total?'
+    ),
     payload: { kind: 'cells' as const, rows: [visible.map((n) => dotCell(n, color))] },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Le tre facce nascoste sono le opposte di quelle che vedi: 7−${visible[0]} = ${opposites[0]}, ` +
-      `7−${visible[1]} = ${opposites[1]} e 7−${visible[2]} = ${opposites[2]}, che sommate fanno ${answer}. ` +
-      `Più veloce ancora: tutte e sei le facce insieme fanno 1+2+3+4+5+6 = 21, e quelle che vedi ne ` +
-      `prendono ${visible.join('+')} = ${seen}, quindi alle nascoste restano 21 − ${seen} = ${answer}. ` +
-      (dA === seen || dB === seen
-        ? `Il trucco: la somma delle tre facce visibili (${seen}) è la risposta sbagliata più tentatrice.`
-        : `Il trucco: le tre facce nascoste vanno sommate tutte e tre, e nessuna va contata due volte.`),
+        `7−${visible[1]} = ${opposites[1]} e 7−${visible[2]} = ${opposites[2]}, che sommate fanno ${answer}. ` +
+        `Più veloce ancora: tutte e sei le facce insieme fanno 1+2+3+4+5+6 = 21, e quelle che vedi ne ` +
+        `prendono ${visible.join('+')} = ${seen}, quindi alle nascoste restano 21 − ${seen} = ${answer}. ` +
+        (dA === seen || dB === seen
+          ? `Il trucco: la somma delle tre facce visibili (${seen}) è la risposta sbagliata più tentatrice.`
+          : `Il trucco: le tre facce nascoste vanno sommate tutte e tre, e nessuna va contata due volte.`),
+      `The three hidden faces are the opposites of the ones you can see: 7−${visible[0]} = ${opposites[0]}, ` +
+        `7−${visible[1]} = ${opposites[1]} and 7−${visible[2]} = ${opposites[2]}, which add up to ${answer}. ` +
+        `Even faster: all six faces together add up to 1+2+3+4+5+6 = 21, and the ones you can see ` +
+        `take up ${visible.join('+')} = ${seen}, so the hidden ones are left with 21 − ${seen} = ${answer}. ` +
+        (dA === seen || dB === seen
+          ? `The trick: the sum of the three visible faces (${seen}) is the most tempting wrong answer.`
+          : `The trick: all three hidden faces need to be added up, and none should be counted twice.`)
+    ),
   };
 }
 
@@ -900,7 +1020,7 @@ function genD1(rng: Rng): Question {
     case 'count-line': {
       const n = pick(rng, [3, 4, 5]);
       const heights = Array.from({ length: n }, () => randInt(rng, 1, 3));
-      return countQuestion(rng, 1, lineGrid(heights, chance(rng, 0.5)), NOTE_LINE);
+      return countQuestion(rng, 1, lineGrid(heights, chance(rng, 0.5)), NOTE_LINE, NOTE_LINE_EN);
     }
     case 'touch': {
       // Fila di pile con due buchi. Serve una base LUNGA: distinctPiles() vieta

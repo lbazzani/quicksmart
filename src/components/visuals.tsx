@@ -8,9 +8,12 @@ import type {
   ClockSpec,
   CountedShapes,
   DominoTile,
+  FlagColorName,
+  FlagSpec,
   ShapeSpec,
   VisualPayload,
 } from '@/lib/types';
+import { useLoc } from '@/lib/lang';
 
 /** I colori delle figure. I nomi italiani stanno in src/lib/colors.ts, nello stesso ordine. */
 export const PALETTE = [
@@ -23,6 +26,23 @@ export const PALETTE = [
   '#38bdf8', // 6 azzurro
   '#f5f0e8', // 7 panna
 ];
+
+/**
+ * Colori delle bandiere (src/lib/questions/flags.ts): una tavolozza a parte
+ * da PALETTE, che è tarata per i puzzle di logica (pastello, leggibile a
+ * 56px) e non ha un blu vero né un bianco/nero puri — proprio i colori che
+ * una bandiera deve avere per essere riconoscibile.
+ */
+const FLAG_HEX: Record<FlagColorName, string> = {
+  red: '#d21f26',
+  white: '#f4efe6',
+  blue: '#1f3a8f',
+  lightblue: '#4aa3df',
+  green: '#0f8a3c',
+  yellow: '#f7c600',
+  black: '#171310',
+  orange: '#f97316',
+};
 
 /**
  * L'"arredo" delle figure: cornici, punti interrogativi, aste delle bilance,
@@ -167,6 +187,7 @@ function Crease({ dir }: { dir: NonNullable<CellSpec['crease']> }) {
  * sui telefoni stretti una riga da 5 celle fisse usciva dal bordo.
  */
 export function Cell({ cell, size = 76, fluid = false }: { cell: CellSpec; size?: number; fluid?: boolean }) {
+  const loc = useLoc();
   const n = cell.shapes.length;
   let content: React.ReactNode;
   if (cell.unknown || n === 0) {
@@ -237,7 +258,7 @@ export function Cell({ cell, size = 76, fluid = false }: { cell: CellSpec; size?
   if (!cell.label) return svg;
   return (
     <div className={`flex flex-col items-center gap-0.5 ${fluid ? 'w-full min-w-0' : ''}`}>
-      <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">{cell.label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">{loc(cell.label)}</span>
       {svg}
     </div>
   );
@@ -277,6 +298,7 @@ export function Domino({ tile, size = 62 }: { tile: DominoTile; size?: number })
 }
 
 export function Clock({ clock, size = 110 }: { clock: ClockSpec; size?: number }) {
+  const loc = useLoc();
   const hourAngle = (clock.h % 12) * 30 + clock.m * 0.5;
   const minAngle = clock.m * 6;
   const ticks = Array.from({ length: 12 }, (_, i) => {
@@ -313,9 +335,61 @@ export function Clock({ clock, size = 110 }: { clock: ClockSpec; size?: number }
           </g>
         )}
       </svg>
-      {clock.label && <span className="text-xs text-stone-400">{clock.label}</span>}
+      {clock.label && <span className="text-xs text-stone-400">{loc(clock.label)}</span>}
       {clock.mirrored && !clock.unknown && <span className="text-lg">🪞</span>}
     </div>
+  );
+}
+
+/** Una bandiera nazionale semplificata: bande piatte o un disco centrato. */
+export function Flag({ flag, width = 160 }: { flag: FlagSpec; width?: number }) {
+  const w = 150;
+  const h = 100;
+  let content: React.ReactNode;
+  if (flag.kind === 'bands') {
+    const n = flag.colors.length;
+    const step = flag.dir === 'h' ? h / n : w / n;
+    content = flag.colors.map((c, i) =>
+      flag.dir === 'h' ? (
+        <rect key={i} x={0} y={i * step} width={w} height={step} fill={FLAG_HEX[c]} />
+      ) : (
+        <rect key={i} x={i * step} y={0} width={step} height={h} fill={FLAG_HEX[c]} />
+      )
+    );
+  } else if (flag.kind === 'disc') {
+    content = (
+      <>
+        <rect x={0} y={0} width={w} height={h} fill={FLAG_HEX[flag.field]} />
+        <circle cx={w / 2} cy={h / 2} r={h * 0.3} fill={FLAG_HEX[flag.disc]} />
+      </>
+    );
+  } else {
+    // croce nordica: spostata verso l'asta (mai centrata, altrimenti è una
+    // croce greca), con una fimbriatura opzionale (il bordo sottile intorno
+    // alla croce, come in Norvegia/Islanda) disegnata PRIMA e più larga.
+    const vx = w * 0.35;
+    const barW = h * 0.24;
+    const barH = h * 0.5;
+    const fim = flag.fimbriation ? h * 0.06 : 0;
+    content = (
+      <>
+        <rect x={0} y={0} width={w} height={h} fill={FLAG_HEX[flag.field]} />
+        {flag.fimbriation && (
+          <>
+            <rect x={vx - barW / 2 - fim} y={0} width={barW + fim * 2} height={h} fill={FLAG_HEX[flag.fimbriation]} />
+            <rect x={0} y={h / 2 - barH / 2 - fim} width={w} height={barH + fim * 2} fill={FLAG_HEX[flag.fimbriation]} />
+          </>
+        )}
+        <rect x={vx - barW / 2} y={0} width={barW} height={h} fill={FLAG_HEX[flag.cross]} />
+        <rect x={0} y={h / 2 - barH / 2} width={w} height={barH} fill={FLAG_HEX[flag.cross]} />
+      </>
+    );
+  }
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={width} height={(width * h) / w} className="mx-auto shrink-0 drop-shadow-lg">
+      {content}
+      <rect x={1} y={1} width={w - 2} height={h - 2} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={2} />
+    </svg>
   );
 }
 
@@ -575,6 +649,8 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
       return <BalanceScales scales={payload.scales} />;
     case 'equation':
       return <EquationRows rows={payload.rows} />;
+    case 'flag':
+      return <Flag flag={payload.flag} width={200} />;
     default:
       return null;
   }
@@ -582,6 +658,7 @@ export function QuestionView({ payload }: { payload: VisualPayload }) {
 
 /** Renderer di una singola opzione di risposta. */
 export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
+  const loc = useLoc();
   switch (choice.kind) {
     case 'cell': {
       // una fila di tre forme in una cella da 72px le rende minuscole: la cella
@@ -598,11 +675,12 @@ export function ChoiceView({ choice }: { choice: ChoiceVisual }) {
       // le risposte testuali possono essere parole lunghe ("pentagono") o
       // espressioni ("1 h 25 min"): rimpiccioliscono invece di uscire dal bordo.
       // Taglie riviste verso l'alto dopo i test in famiglia: si gioca dal telefono
-      const n = choice.text.length;
+      const text = loc(choice.text);
+      const n = text.length;
       const size = n <= 4 ? 'text-3xl' : n <= 7 ? 'text-2xl' : n <= 11 ? 'text-lg' : 'text-base';
       return (
         <span className={`font-display w-full break-words px-0.5 text-center font-extrabold leading-tight ${size}`}>
-          {choice.text}
+          {text}
         </span>
       );
     }

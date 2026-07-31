@@ -25,6 +25,7 @@
 
 import type { CountedShapes, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
 
 interface ShapeInfo {
@@ -73,6 +74,67 @@ function UNO(s: ShapeInfo): string {
 /** accordo del verbo: "1 luna VALE", "3 lune VALGONO" */
 function val(n: number): string {
   return n === 1 ? 'vale' : 'valgono';
+}
+
+/**
+ * Stessa tabella in inglese. Niente `un`/`pl`/`quanti`: un nome di forma
+ * inglese non ha genere, l'articolo indeterminativo è sempre "a" per queste
+ * dieci forme (nessuna comincia per suono vocalico) e "how many" non si
+ * accorda mai col numero.
+ */
+interface ShapeInfoEn {
+  name: string; // "diamond"
+  plural: string; // "diamonds"
+}
+
+const SHAPES_EN: Record<ShapeName, ShapeInfoEn> = {
+  circle: { name: 'circle', plural: 'circles' },
+  square: { name: 'square', plural: 'squares' },
+  triangle: { name: 'triangle', plural: 'triangles' },
+  diamond: { name: 'diamond', plural: 'diamonds' },
+  star: { name: 'star', plural: 'stars' },
+  pentagon: { name: 'pentagon', plural: 'pentagons' },
+  hexagon: { name: 'hexagon', plural: 'hexagons' },
+  arrow: { name: 'arrow', plural: 'arrows' },
+  heart: { name: 'heart', plural: 'hearts' },
+  cross: { name: 'cross', plural: 'crosses' },
+  moon: { name: 'moon', plural: 'moons' },
+  dot: { name: 'dot', plural: 'dots' },
+};
+
+/** l'informazione inglese sulla forma, a partire dallo ShapeInfo italiano già scelto */
+function shapeEn(s: ShapeInfo): ShapeInfoEn {
+  return SHAPES_EN[s.shape];
+}
+
+/** "1 moon" / "3 moons" */
+function cntEn(n: number, s: ShapeInfoEn): string {
+  return `${n} ${n === 1 ? s.name : s.plural}`;
+}
+
+/** "a moon" */
+function oneEn(s: ShapeInfoEn): string {
+  return `a ${s.name}`;
+}
+
+/** "ONE moon" (con enfasi, per i prompt — come UNO()) */
+function ONE_EN(s: ShapeInfoEn): string {
+  return `ONE ${s.name}`;
+}
+
+/** accordo del verbo: "1 moon IS worth", "3 moons ARE worth" */
+function valEn(n: number): string {
+  return n === 1 ? 'is worth' : 'are worth';
+}
+
+/**
+ * Come `valEn`, ma senza "worth": serve ai prompt del tipo "How many X is/are
+ * Y worth?", dove l'importo noto Y va incastrato FRA l'ausiliare e "worth"
+ * (altrimenti "How many diamonds are worth 3 stars?" si legge come "quali
+ * diamanti valgono 3 stelle", non come la conversione che si vuole chiedere).
+ */
+function auxEn(n: number): string {
+  return n === 1 ? 'is' : 'are';
 }
 
 // ---------------------------------------------------------------------------
@@ -247,28 +309,32 @@ function chooseDistractors(
 interface Built {
   scales: Scale[];
   prompt: string;
+  /** come `prompt`, in inglese */
+  promptEn: string;
   answer: number;
   /** candidati distrattori in ordine di plausibilità */
   wrong: number[];
   explanation: string;
+  /** come `explanation`, in inglese */
+  explanationEn: string;
 }
 
 function finish(rng: Rng, difficulty: Difficulty, b: Built): Question {
   checkPlates(b.scales);
   const printed = new Set<number>([...printedNumbers(b.scales), ...promptNumbers(b.prompt)]);
   const [w1, w2] = chooseDistractors(rng, b.answer, b.wrong, printed);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(b.answer) }, [
-    { kind: 'text', text: String(w1) },
-    { kind: 'text', text: String(w2) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(b.answer)) }, [
+    { kind: 'text', text: L(String(w1)) },
+    { kind: 'text', text: L(String(w2)) },
   ]);
   return {
     qtype: 'weights',
     difficulty,
-    prompt: b.prompt,
+    prompt: L(b.prompt, b.promptEn),
     payload: { kind: 'balance', scales: b.scales },
     choices,
     correctIndex,
-    explanation: b.explanation,
+    explanation: L(b.explanation, b.explanationEn),
   };
 }
 
@@ -279,6 +345,8 @@ function finish(rng: Rng, difficulty: Difficulty, b: Built): Question {
 /** 1 A = k B → "quante B valgono m A?" (moltiplicare) */
 function d1Mul(rng: Rng): Built {
   const [A, B] = pickN(rng, SHAPES, 2);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
   const [cA, cB] = pickN(rng, COLORS, 2);
   const k = randInt(rng, 2, 5);
   const m = randInt(rng, 2, 3);
@@ -289,17 +357,23 @@ function d1Mul(rng: Rng): Built {
   return {
     scales: [eqScale(rng, w, [g(A, cA, 1)], [g(B, cB, k)])],
     prompt: `${B.quanti} ${B.plural} valgono ${cnt(m, A)}?`,
+    promptEn: `How many ${BEn.plural} ${auxEn(m)} ${cntEn(m, AEn)} worth?`,
     answer: k * m,
     wrong: [k + m, k, k * (m + 1), k * m - k, m],
     explanation:
       `La bilancia è in equilibrio: ${cnt(1, A)} ${val(1)} ${cnt(k, B)}. ` +
       `Allora ${cnt(m, A)} valgono ${m} volte tanto: ${m}×${k} = ${cnt(k * m, B)}.`,
+    explanationEn:
+      `The scale is balanced: ${cntEn(1, AEn)} ${valEn(1)} ${cntEn(k, BEn)}. ` +
+      `So ${cntEn(m, AEn)} ${valEn(m)} ${m} times as much: ${m}×${k} = ${cntEn(k * m, BEn)}.`,
   };
 }
 
 /** a A = a·k B → "quante B valgono UN A?" (dividere) */
 function d1Div(rng: Rng): Built {
   const [A, B] = pickN(rng, SHAPES, 2);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
   const [cA, cB] = pickN(rng, COLORS, 2);
   const a = randInt(rng, 2, 3);
   // il piatto delle B non deve diventare un muro: a·k resta dentro MAX_COUNT
@@ -311,17 +385,24 @@ function d1Div(rng: Rng): Built {
   return {
     scales: [eqScale(rng, w, [g(A, cA, a)], [g(B, cB, a * k)])],
     prompt: `${B.quanti} ${B.plural} valgono ${UNO(A)}?`,
+    promptEn: `How many ${BEn.plural} ${auxEn(1)} ${ONE_EN(AEn)} worth?`,
     answer: k,
     wrong: [a * k, k + 1, k - 1, a * k - a, a + k],
     explanation:
       `I due piatti valgono uguale: ${cnt(a, A)} valgono ${cnt(a * k, B)}. ` +
       `Divido tutto per ${a}: ${uno(A)} ${val(1)} ${a * k}÷${a} = ${cnt(k, B)}.`,
+    explanationEn:
+      `Both pans are worth the same: ${cntEn(a, AEn)} ${valEn(a)} ${cntEn(a * k, BEn)}. ` +
+      `Divide by ${a}: ${oneEn(AEn)} is worth ${a * k}÷${a} = ${cntEn(k, BEn)}.`,
   };
 }
 
 /** 1 A = a B, 1 B = b C → "quante C valgono UN A?" (catena, moltiplicare) */
 function d1ChainDown(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const a = randInt(rng, 2, 4);
   const b = randInt(rng, 2, 3);
@@ -336,17 +417,24 @@ function d1ChainDown(rng: Rng): Built {
       eqScale(rng, w, [g(B, cB, 1)], [g(C, cC, b)]),
     ],
     prompt: `${C.quanti} ${C.plural} valgono ${UNO(A)}?`,
+    promptEn: `How many ${CEn.plural} ${auxEn(1)} ${ONE_EN(AEn)} worth?`,
     answer: a * b,
     wrong: [a + b, a * b + a, a, b],
     explanation:
       `${cnt(1, A)} ${val(1)} ${cnt(a, B)}, e ${cnt(1, B)} ${val(1)} ${cnt(b, C)}. ` +
       `Quindi ${uno(A)} vale ${a} gruppi da ${b}: ${a}×${b} = ${cnt(a * b, C)}.`,
+    explanationEn:
+      `${cntEn(1, AEn)} ${valEn(1)} ${cntEn(a, BEn)}, and ${cntEn(1, BEn)} ${valEn(1)} ${cntEn(b, CEn)}. ` +
+      `So ${oneEn(AEn)} is worth ${a} groups of ${b}: ${a}×${b} = ${cntEn(a * b, CEn)}.`,
   };
 }
 
 /** stessa catena, domanda inversa: "quanti A valgono N C?" (dividere) */
 function d1ChainUp(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const a = randInt(rng, 2, 3);
   const b = randInt(rng, 2, 3);
@@ -364,17 +452,24 @@ function d1ChainUp(rng: Rng): Built {
       eqScale(rng, w, [g(B, cB, 1)], [g(C, cC, b)]),
     ],
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${C.plural}?`,
+    promptEn: `How many ${AEn.plural} ${auxEn(N)} ${N} ${CEn.plural} worth?`,
     answer: m,
     wrong: [m + 1, unit, a * m, N - unit],
     explanation:
       `Prima il cambio: ${cnt(1, A)} ${val(1)} ${cnt(a, B)} = ${cnt(unit, C)}. ` +
       `Poi divido: ${N}÷${unit} = ${cnt(m, A)}.`,
+    explanationEn:
+      `First the conversion: ${cntEn(1, AEn)} ${valEn(1)} ${cntEn(a, BEn)} = ${cntEn(unit, CEn)}. ` +
+      `Then divide: ${N}÷${unit} = ${cntEn(m, AEn)}.`,
   };
 }
 
 /** 1 A = a C, 1 B = b C → "quante C valgono in tutto un A e un B?" (sommare) */
 function d1Sum(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   // a e b sono due conteggi della STESSA forma: o tutti e due disegnati (2-3)
   // o tutti e due scritti (4-7), mai uno per tipo
@@ -390,6 +485,7 @@ function d1Sum(rng: Rng): Built {
       eqScale(rng, w, [g(B, cB, 1)], [g(C, cC, b)]),
     ],
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${uno(A)} e ${uno(B)}?`,
+    promptEn: `How many ${CEn.plural} are ${oneEn(AEn)} and ${oneEn(BEn)} worth in total?`,
     answer: a + b,
     // errori tipici: moltiplicare invece di sommare, contare due volte lo stesso
     // cambio, fermarsi al più grande, sbagliare di uno
@@ -397,6 +493,9 @@ function d1Sum(rng: Rng): Built {
     explanation:
       `${cnt(1, A)} ${val(1)} ${cnt(a, C)} e ${cnt(1, B)} ${val(1)} ${cnt(b, C)}. ` +
       `Messi insieme: ${a}+${b} = ${cnt(a + b, C)}.`,
+    explanationEn:
+      `${cntEn(1, AEn)} ${valEn(1)} ${cntEn(a, CEn)} and ${cntEn(1, BEn)} ${valEn(1)} ${cntEn(b, CEn)}. ` +
+      `Put together: ${a}+${b} = ${cntEn(a + b, CEn)}.`,
   };
 }
 
@@ -428,6 +527,10 @@ const TRIPLES_18 = TRIPLES_24.filter(([a, b, c]) => a * b * c <= 18);
 /** 1 A = a B, 1 B = b C, 1 C = c D → "quante D valgono UN A?" */
 function d2Chain3Down(rng: Rng): Built {
   const [A, B, C, D] = pickN(rng, SHAPES, 4);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
+  const DEn = shapeEn(D);
   const [cA, cB, cC, cD] = pickN(rng, COLORS, 4);
   const [a, b, c] = pick(rng, TRIPLES_24);
   const w: Weights = new Map([
@@ -445,18 +548,25 @@ function d2Chain3Down(rng: Rng): Built {
   return {
     scales,
     prompt: `${D.quanti} ${D.plural} valgono ${UNO(A)}?`,
+    promptEn: `How many ${DEn.plural} ${auxEn(1)} ${ONE_EN(AEn)} worth?`,
     answer: a * b * c,
     wrong: [a + b + c, a * b, b * c, a * c, a * b * c + c],
     explanation:
       `Metto in fila i cambi: ${cnt(1, A)} = ${cnt(a, B)}, ${cnt(1, B)} = ${cnt(b, C)}, ` +
       `${cnt(1, C)} = ${cnt(c, D)}. Si moltiplica lungo la catena: ` +
       `${a}×${b}×${c} = ${cnt(a * b * c, D)}.`,
+    explanationEn:
+      `Line up the conversions: ${cntEn(1, AEn)} = ${cntEn(a, BEn)}, ${cntEn(1, BEn)} = ${cntEn(b, CEn)}, ` +
+      `${cntEn(1, CEn)} = ${cntEn(c, DEn)}. Multiply along the chain: ` +
+      `${a}×${b}×${c} = ${cntEn(a * b * c, DEn)}.`,
   };
 }
 
 /** stessa catena a 3 livelli, domanda inversa */
 function d2Chain3Up(rng: Rng): Built {
   const [A, B, C, D] = pickN(rng, SHAPES, 4);
+  const AEn = shapeEn(A);
+  const DEn = shapeEn(D);
   const [cA, cB, cC, cD] = pickN(rng, COLORS, 4);
   const [a, b, c] = pick(rng, TRIPLES_18);
   const unit = a * b * c;
@@ -477,17 +587,24 @@ function d2Chain3Up(rng: Rng): Built {
   return {
     scales,
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${D.plural}?`,
+    promptEn: `How many ${AEn.plural} ${auxEn(N)} ${N} ${DEn.plural} worth?`,
     answer: m,
     wrong: [m + 1, unit, a * m, a * b * m, N - unit],
     explanation:
       `${cnt(1, A)} ${val(1)} ${a}×${b}×${c} = ${cnt(unit, D)}. ` +
       `Con ${N} ${D.plural} faccio ${N}÷${unit} = ${cnt(m, A)}.`,
+    explanationEn:
+      `${cntEn(1, AEn)} ${valEn(1)} ${a}×${b}×${c} = ${cntEn(unit, DEn)}. ` +
+      `With ${N} ${DEn.plural}, that's ${N}÷${unit} = ${cntEn(m, AEn)}.`,
   };
 }
 
 /** p A = p·u B (serve dividere), 1 B = c C → "quante C valgono UN A?" */
 function d2ChainDiv(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const p = randInt(rng, 2, 3);
   const u = randInt(rng, 2, Math.floor(8 / p)); // p·u pezzi sul piatto: max 8
@@ -505,18 +622,26 @@ function d2ChainDiv(rng: Rng): Built {
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono ${UNO(A)}?`,
+    promptEn: `How many ${CEn.plural} ${auxEn(1)} ${ONE_EN(AEn)} worth?`,
     answer: u * c,
     wrong: [p * u * c, u + c, p * u, u, u * c + c],
     explanation:
       `Attenzione al primo cambio: ${cnt(p, A)} valgono ${cnt(p * u, B)}, quindi ` +
       `${uno(A)} ${val(1)} ${p * u}÷${p} = ${cnt(u, B)}. ` +
       `E ${cnt(1, B)} ${val(1)} ${cnt(c, C)}: in tutto ${u}×${c} = ${cnt(u * c, C)}.`,
+    explanationEn:
+      `Careful with the first conversion: ${cntEn(p, AEn)} ${valEn(p)} ${cntEn(p * u, BEn)}, so ` +
+      `${oneEn(AEn)} is worth ${p * u}÷${p} = ${cntEn(u, BEn)}. ` +
+      `And ${cntEn(1, BEn)} ${valEn(1)} ${cntEn(c, CEn)}: in total ${u}×${c} = ${cntEn(u * c, CEn)}.`,
   };
 }
 
 /** 1 A = 1 B + k C (piatto misto), 1 B = d C → "quante C valgono m A?" */
 function d2Combo(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   // k=1 sta bene con qualunque d (il pezzo singolo non si conta); con k=2 anche
   // d resta fra i conteggi disegnati, così le C si leggono sempre allo stesso modo
@@ -537,18 +662,26 @@ function d2Combo(rng: Rng): Built {
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono ${m === 1 ? UNO(A) : cnt(m, A)}?`,
+    promptEn: `How many ${CEn.plural} ${auxEn(m)} ${m === 1 ? ONE_EN(AEn) : cntEn(m, AEn)} worth?`,
     answer: unit * m,
     wrong: [unit, k * d, d, 2 * d, d - k, unit * m + 1],
     explanation:
       `Sul piatto misto ${cnt(1, A)} ${val(1)} ${cnt(1, B)} più ${cnt(k, C)}. ` +
       `Siccome ${cnt(1, B)} ${val(1)} ${cnt(d, C)}, sostituisco: ${d}+${k} = ${cnt(unit, C)}` +
       (m === 1 ? '.' : `. E ${cnt(m, A)} valgono il doppio: ${m}×${unit} = ${cnt(unit * m, C)}.`),
+    explanationEn:
+      `On the mixed pan, ${cntEn(1, AEn)} ${valEn(1)} ${cntEn(1, BEn)} plus ${cntEn(k, CEn)}. ` +
+      `Since ${cntEn(1, BEn)} ${valEn(1)} ${cntEn(d, CEn)}, substitute: ${d}+${k} = ${cntEn(unit, CEn)}` +
+      (m === 1 ? '.' : `. And ${cntEn(m, AEn)} ${valEn(m)} twice as much: ${m}×${unit} = ${cntEn(unit * m, CEn)}.`),
   };
 }
 
 /** 1 A = a C, 1 B = b C → "quante C valgono in tutto m A e n B?" */
 function d2SumMul(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   // stessa forma C su due bilance: conteggi tutti disegnati o tutti scritti
   const [a, b] = pickN(rng, chance(rng, 0.5) ? [2, 3] : [4, 5, 6], 2);
@@ -568,6 +701,7 @@ function d2SumMul(rng: Rng): Built {
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${cnt(m, A)} e ${cnt(n, B)}?`,
+    promptEn: `How many ${CEn.plural} are ${cntEn(m, AEn)} and ${cntEn(n, BEn)} worth in total?`,
     answer,
     // errori tipici: incrociare i cambi, usare un cambio solo per tutti i pezzi,
     // dimenticarsi metà del conto, un pezzo in più o in meno
@@ -576,6 +710,10 @@ function d2SumMul(rng: Rng): Built {
       `${cnt(1, A)} ${val(1)} ${cnt(a, C)}, quindi ${cnt(m, A)} valgono ${m}×${a} = ${m * a}. ` +
       `${cnt(1, B)} ${val(1)} ${cnt(b, C)}, quindi ${cnt(n, B)} ${val(n)} ${n}×${b} = ${n * b}. ` +
       `Sommo: ${m * a}+${n * b} = ${cnt(answer, C)}.`,
+    explanationEn:
+      `${cntEn(1, AEn)} ${valEn(1)} ${cntEn(a, CEn)}, so ${cntEn(m, AEn)} ${valEn(m)} ${m}×${a} = ${m * a}. ` +
+      `${cntEn(1, BEn)} ${valEn(1)} ${cntEn(b, CEn)}, so ${cntEn(n, BEn)} ${valEn(n)} ${n}×${b} = ${n * b}. ` +
+      `Add them up: ${m * a}+${n * b} = ${cntEn(answer, CEn)}.`,
   };
 }
 
@@ -627,6 +765,9 @@ function bridgeScales(
 /** p A = q B, q B = t C → "quante C valgono m·p A?" (scambio del blocco) */
 function d3Bridge(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [p, q, t] = pick(rng, BRIDGES);
   // m ≥ 2: se no la risposta sarebbe già stampata su un piatto e basterebbe copiarla
   const m = randInt(rng, 2, 3);
@@ -636,6 +777,7 @@ function d3Bridge(rng: Rng): Built {
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono ${cnt(nA, A)}?`,
+    promptEn: `How many ${CEn.plural} ${auxEn(nA)} ${cntEn(nA, AEn)} worth?`,
     answer,
     wrong: [t, m * q, m * p, t + m, answer + t, answer - t],
     explanation:
@@ -643,12 +785,20 @@ function d3Bridge(rng: Rng): Built {
       `Allora posso scambiarlo: ${cnt(p, A)} valgono ${cnt(q, B)}, che valgono ${cnt(t, C)}. ` +
       `Quindi ${cnt(p, A)} = ${cnt(t, C)}. E ${cnt(nA, A)} sono ${m} gruppi da ${p}: ` +
       `${m}×${t} = ${cnt(answer, C)}.`,
+    explanationEn:
+      `Both scales have the exact same group: ${cntEn(q, BEn)}. ` +
+      `So it can be swapped: ${cntEn(p, AEn)} ${valEn(p)} ${cntEn(q, BEn)}, which ${valEn(q)} ${cntEn(t, CEn)}. ` +
+      `So ${cntEn(p, AEn)} = ${cntEn(t, CEn)}. And ${cntEn(nA, AEn)} are ${m} groups of ${p}: ` +
+      `${m}×${t} = ${cntEn(answer, CEn)}.`,
   };
 }
 
 /** stesse bilance a ponte, domanda inversa: "quanti A valgono N C?" */
 function d3BridgeUp(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [p, q, t] = pick(rng, BRIDGES);
   const m = randInt(rng, 2, 3);
   const scales = bridgeScales(rng, A, B, C, p, q, t);
@@ -657,12 +807,17 @@ function d3BridgeUp(rng: Rng): Built {
   return {
     scales,
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${C.plural}?`,
+    promptEn: `How many ${AEn.plural} ${auxEn(N)} ${N} ${CEn.plural} worth?`,
     answer,
     wrong: [m * q, m * t, p, N - answer, answer + 1, answer + p],
     explanation:
       `Le due bilance hanno lo stesso gruppo di ${cnt(q, B)}: posso scambiarlo. ` +
       `Così ${cnt(t, C)} valgono ${cnt(q, B)}, che valgono ${cnt(p, A)}. ` +
       `${N} ${C.plural} sono ${m} gruppi da ${t}, quindi ${m}×${p} = ${cnt(answer, A)}.`,
+    explanationEn:
+      `Both scales have the same group of ${cntEn(q, BEn)}: it can be swapped. ` +
+      `So ${cntEn(t, CEn)} ${valEn(t)} ${cntEn(q, BEn)}, which ${valEn(q)} ${cntEn(p, AEn)}. ` +
+      `${N} ${CEn.plural} are ${m} groups of ${t}, so ${m}×${p} = ${cntEn(answer, AEn)}.`,
   };
 }
 
@@ -683,6 +838,8 @@ for (let wQ = 2; wQ <= 5; wQ++) {
 /** 1 Q + 1 R = z₁ C e 2 Q + 1 R = z₂ C → la differenza dice quanto vale Q */
 function d3Difference(rng: Rng): Built {
   const [Q, R, C] = pickN(rng, SHAPES, 3);
+  const QEn = shapeEn(Q);
+  const CEn = shapeEn(C);
   const [cQ, cR, cC] = pickN(rng, COLORS, 3);
   const [wQ, wR] = pick(rng, NEARLY_EQUAL);
   const m = randInt(rng, 1, 2);
@@ -703,24 +860,36 @@ function d3Difference(rng: Rng): Built {
     : [eqScaleLeft(w, [g(C, cC, z1)], row(1)), eqScaleLeft(w, [g(C, cC, z2)], row(2))];
   const qui = mixedLeft ? 'a sinistra' : 'a destra';
   const là = mixedLeft ? 'a destra' : 'a sinistra';
+  const hereEn = mixedLeft ? 'on the left' : 'on the right';
+  const thereEn = mixedLeft ? 'on the right' : 'on the left';
   const answer = m * wQ;
   const step =
     m === 1 ? '' : ` ${cnt(m, Q)} valgono il doppio: ${m}×${wQ} = ${cnt(answer, C)}.`;
+  const stepEn =
+    m === 1 ? '' : ` ${cntEn(m, QEn)} ${valEn(m)} twice as much: ${m}×${wQ} = ${cntEn(answer, CEn)}.`;
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono ${m === 1 ? UNO(Q) : cnt(m, Q)}?`,
+    promptEn: `How many ${CEn.plural} ${auxEn(m)} ${m === 1 ? ONE_EN(QEn) : cntEn(m, QEn)} worth?`,
     answer,
     wrong: [m * wR, wQ, m * z1, wQ + wR, answer + 1, answer - 1],
     explanation:
       `Le due bilance sono quasi uguali: la seconda ha ${uno(Q)} in più ${qui}, ` +
       `e ${là} ha ${cnt(wQ, C)} in più (${z2} invece di ${z1}). ` +
       `Quel pezzo in più è tutta la differenza: ${uno(Q)} ${val(1)} ${cnt(wQ, C)}.${step}`,
+    explanationEn:
+      `The two scales are almost equal: the second one has an extra ${QEn.name} ${hereEn}, ` +
+      `and ${thereEn} it has ${wQ} extra ${CEn.plural} (${z2} instead of ${z1}). ` +
+      `That extra piece is the whole difference: ${oneEn(QEn)} ${valEn(1)} ${cntEn(wQ, CEn)}.${stepEn}`,
   };
 }
 
 /** p A = p·u B, 1 B = c C → "quante C valgono in tutto m A e n B?" */
 function d3MixedTotal(rng: Rng): Built {
   const [A, B, C] = pickN(rng, SHAPES, 3);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
   const [cA, cB, cC] = pickN(rng, COLORS, 3);
   const p = randInt(rng, 2, 3);
   const u = randInt(rng, 2, Math.floor(6 / p));
@@ -743,6 +912,7 @@ function d3MixedTotal(rng: Rng): Built {
   return {
     scales,
     prompt: `${C.quanti} ${C.plural} valgono in tutto ${cnt(m, A)} e ${cnt(n, B)}?`,
+    promptEn: `How many ${CEn.plural} are ${cntEn(m, AEn)} and ${cntEn(n, BEn)} worth in total?`,
     answer,
     // errori tipici: saltare la divisione, fermarsi alla valuta di mezzo,
     // dimenticare un pezzo, mescolare le due valute
@@ -751,6 +921,10 @@ function d3MixedTotal(rng: Rng): Built {
       `${cnt(p, A)} valgono ${cnt(p * u, B)}, quindi ${uno(A)} ${val(1)} ${p * u}÷${p} = ${cnt(u, B)}. ` +
       `Allora ${cnt(m, A)} valgono ${m}×${u} = ${m * u} ${B.plural}, che con ${cnt(n, B)} fanno ${cnt(midB, B)}. ` +
       `Infine ${cnt(1, B)} ${val(1)} ${cnt(c, C)}: ${midB}×${c} = ${cnt(answer, C)}.`,
+    explanationEn:
+      `${cntEn(p, AEn)} ${valEn(p)} ${cntEn(p * u, BEn)}, so ${oneEn(AEn)} is worth ${p * u}÷${p} = ${cntEn(u, BEn)}. ` +
+      `So ${cntEn(m, AEn)} ${valEn(m)} ${m}×${u} = ${m * u} ${BEn.plural}; add ${cntEn(n, BEn)} and that's ${cntEn(midB, BEn)}. ` +
+      `Finally, ${cntEn(1, BEn)} ${valEn(1)} ${cntEn(c, CEn)}: ${midB}×${c} = ${cntEn(answer, CEn)}.`,
   };
 }
 
@@ -765,6 +939,10 @@ const DEEP_TRIPLES = [
 /** 1 A = a B, b B = b·v C, 1 C = c D → "quanti A valgono N D?" */
 function d3DeepUp(rng: Rng): Built {
   const [A, B, C, D] = pickN(rng, SHAPES, 4);
+  const AEn = shapeEn(A);
+  const BEn = shapeEn(B);
+  const CEn = shapeEn(C);
+  const DEn = shapeEn(D);
   const [cA, cB, cC, cD] = pickN(rng, COLORS, 4);
   const [a, v, c] = pick(rng, DEEP_TRIPLES);
   const b = randInt(rng, 2, Math.floor(6 / v)); // b·v pezzi sul piatto: max 6
@@ -786,12 +964,17 @@ function d3DeepUp(rng: Rng): Built {
   return {
     scales,
     prompt: `${A.quanti} ${A.plural} valgono ${N} ${D.plural}?`,
+    promptEn: `How many ${AEn.plural} ${auxEn(N)} ${N} ${DEn.plural} worth?`,
     answer: m,
     wrong: [m + 1, unit, a * m, a * v * m, N - unit],
     explanation:
       `La bilancia con ${cnt(b, B)} va semplificata: ${cnt(b, B)} valgono ${cnt(b * v, C)}, cioè ` +
       `${cnt(1, B)} ${val(1)} ${cnt(v, C)}. Allora ${cnt(1, A)} = ${cnt(a, B)} = ` +
       `${cnt(a * v, C)} = ${cnt(unit, D)}. Infine ${N}÷${unit} = ${cnt(m, A)}.`,
+    explanationEn:
+      `The scale with ${cntEn(b, BEn)} needs simplifying: ${cntEn(b, BEn)} ${valEn(b)} ${cntEn(b * v, CEn)}, meaning ` +
+      `${cntEn(1, BEn)} ${valEn(1)} ${cntEn(v, CEn)}. So ${cntEn(1, AEn)} = ${cntEn(a, BEn)} = ` +
+      `${cntEn(a * v, CEn)} = ${cntEn(unit, DEn)}. Finally, ${N}÷${unit} = ${cntEn(m, AEn)}.`,
   };
 }
 

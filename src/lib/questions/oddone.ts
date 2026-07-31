@@ -22,8 +22,9 @@
 // Tre indizi che si contraddicono: per sapere quale proprietà conta davvero
 // bisogna tornare a leggere la riga.
 
-import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { CellSpec, ChoiceVisual, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { normRot, placeChoices, retry } from './qutils';
 
 const PLAIN: ShapeName[] = ['circle', 'square', 'diamond', 'star', 'pentagon', 'hexagon', 'heart', 'cross'];
@@ -45,11 +46,27 @@ const IT: Record<ShapeName, string> = {
   dot: 'pallino',
 };
 
+/** stessa tabella in inglese: nomi singolari, senza genere da accordare */
+const EN: Record<ShapeName, string> = {
+  circle: 'circle',
+  square: 'square',
+  triangle: 'triangle',
+  diamond: 'diamond',
+  star: 'star',
+  pentagon: 'pentagon',
+  hexagon: 'hexagon',
+  arrow: 'arrow',
+  heart: 'heart',
+  cross: 'cross',
+  moon: 'moon',
+  dot: 'dot',
+};
+
 interface Built {
   cells: CellSpec[];
   intruderIdx: number;
   /** spiegazione della regola (il "trucco") */
-  rule: string;
+  rule: LocalizedText;
   /**
    * Vincolo che la riga impone alla coppia di distrattori. Ce ne sono due tipi:
    *  - `everyoneStandsOut`: ogni opzione deve avere una sua ragione per sembrare
@@ -310,8 +327,14 @@ function buildStraightVsDiagonal(rng: Rng): Built {
   }
   const rule =
     shape === 'arrow'
-      ? "Tutte le frecce puntano dritte (su, giù, a destra o a sinistra): solo l'intrusa è inclinata in diagonale."
-      : "Tutte le lune sono ruotate di un quarto di giro esatto (0°, 90°, 180° o 270°): solo l'intrusa è inclinata in diagonale (45° in più).";
+      ? L(
+          "Tutte le frecce puntano dritte (su, giù, a destra o a sinistra): solo l'intrusa è inclinata in diagonale.",
+          'All the arrows point straight (up, down, left, or right): only the odd one out is tilted diagonally.'
+        )
+      : L(
+          "Tutte le lune sono ruotate di un quarto di giro esatto (0°, 90°, 180° o 270°): solo l'intrusa è inclinata in diagonale (45° in più).",
+          'All the moons are rotated by an exact quarter turn (0°, 90°, 180°, or 270°): only the odd one out is tilted diagonally (45° extra).'
+        );
   return { cells, intruderIdx, rule };
 }
 
@@ -355,9 +378,12 @@ function buildCount(rng: Rng): Built {
       }))
     )
   );
-  const rule =
+  const rule = L(
     `Ogni casella contiene esattamente ${k} figure: le forme (${IT[s1]} e ${IT[s2]}) e i colori si ripetono ` +
-    `a gruppi apposta, per confondere, ma è il numero che conta. L'intrusa ne contiene ${kBad}.`;
+      `a gruppi apposta, per confondere, ma è il numero che conta. L'intrusa ne contiene ${kBad}.`,
+    `Every cell has exactly ${k} shapes: the shapes (${EN[s1]} and ${EN[s2]}) and the colors repeat in groups ` +
+      `on purpose, to throw you off, but what matters is the count. The odd one out has ${kBad}.`
+  );
   return { cells, intruderIdx, rule, pairOk: everyoneStandsOut };
 }
 
@@ -385,8 +411,14 @@ function buildParity(rng: Rng): Built {
     );
   }
   const rule = even
-    ? `In ogni casella il numero di figure è pari (${lo} o ${hi}): solo l'intrusa ne ha ${bad}, un numero dispari.`
-    : `In ogni casella il numero di figure è dispari (${lo} o ${hi}): solo l'intrusa ne ha ${bad}, un numero pari.`;
+    ? L(
+        `In ogni casella il numero di figure è pari (${lo} o ${hi}): solo l'intrusa ne ha ${bad}, un numero dispari.`,
+        `Every cell has an even number of shapes (${lo} or ${hi}): only the odd one out has ${bad}, an odd number.`
+      )
+    : L(
+        `In ogni casella il numero di figure è dispari (${lo} o ${hi}): solo l'intrusa ne ha ${bad}, un numero pari.`,
+        `Every cell has an odd number of shapes (${lo} or ${hi}): only the odd one out has ${bad}, an even number.`
+      );
   return { cells, intruderIdx, rule, pairOk: allCountsApart };
 }
 
@@ -444,7 +476,10 @@ function buildTwins(rng: Rng): Built {
       });
     }
   }
-  const rule = `In ogni casella le due figure sono gemelle (identiche): solo l'intrusa contiene due figure diverse tra loro (${IT[x]} e ${IT[y]}). Colori e grandezze cambiano a gruppi solo per confondere.`;
+  const rule = L(
+    `In ogni casella le due figure sono gemelle (identiche): solo l'intrusa contiene due figure diverse tra loro (${IT[x]} e ${IT[y]}). Colori e grandezze cambiano a gruppi solo per confondere.`,
+    `In every cell the two shapes are twins (identical): only the odd one out has two different shapes (${EN[x]} and ${EN[y]}). Colors and sizes change in groups just to throw you off.`
+  );
   return { cells, intruderIdx, rule, pairOk: everyoneStandsOut };
 }
 
@@ -480,8 +515,14 @@ function buildFillPair(rng: Rng): Built {
   }
   const rule =
     bothMode === 'solid'
-      ? "In ogni casella una figura è piena e l'altra è solo contorno (l'ordine non conta): nell'intrusa sono entrambe piene."
-      : "In ogni casella una figura è piena e l'altra è solo contorno (l'ordine non conta): nell'intrusa sono entrambe vuote.";
+      ? L(
+          "In ogni casella una figura è piena e l'altra è solo contorno (l'ordine non conta): nell'intrusa sono entrambe piene.",
+          "In every cell one shape is filled in and the other is just an outline (the order doesn't matter): in the odd one out, both are filled in."
+        )
+      : L(
+          "In ogni casella una figura è piena e l'altra è solo contorno (l'ordine non conta): nell'intrusa sono entrambe vuote.",
+          "In every cell one shape is filled in and the other is just an outline (the order doesn't matter): in the odd one out, both are empty."
+        );
   return { cells, intruderIdx, rule, pairOk: everyoneStandsOut };
 }
 
@@ -512,10 +553,14 @@ function buildHiddenParity(rng: Rng): Built {
       )
     );
   }
-  const rule =
+  const rule = L(
     `Forme e colori diversi sono una falsa pista: la vera regola è il conteggio. ` +
-    `Ogni casella ha un numero ${even ? 'pari' : 'dispari'} di figure (${lo} o ${hi}); ` +
-    `solo l'intrusa ne ha ${bad}, un numero ${even ? 'dispari' : 'pari'}.`;
+      `Ogni casella ha un numero ${even ? 'pari' : 'dispari'} di figure (${lo} o ${hi}); ` +
+      `solo l'intrusa ne ha ${bad}, un numero ${even ? 'dispari' : 'pari'}.`,
+    `Different shapes and colors are a red herring: the real rule is the count. ` +
+      `Every cell has an ${even ? 'even' : 'odd'} number of shapes (${lo} or ${hi}); ` +
+      `only the odd one out has ${bad}, an ${even ? 'odd' : 'even'} number.`
+  );
   return { cells, intruderIdx, rule, pairOk: allCountsApart };
 }
 
@@ -535,7 +580,10 @@ function buildEcho(rng: Rng): Built {
     ],
     layout: 'row',
   }));
-  const rule = `In ogni casella la figura piccola è la copia in miniatura di quella grande; solo nell'intrusa la piccola (${IT[small]}) è diversa dalla grande (${IT[bigs[intruderIdx]]}). Le forme, i colori e le grandezze che cambiano servono solo a confondere.`;
+  const rule = L(
+    `In ogni casella la figura piccola è la copia in miniatura di quella grande; solo nell'intrusa la piccola (${IT[small]}) è diversa dalla grande (${IT[bigs[intruderIdx]]}). Le forme, i colori e le grandezze che cambiano servono solo a confondere.`,
+    `In every cell the small shape is a mini copy of the big one; only in the odd one out is the small shape (${EN[small]}) different from the big one (${EN[bigs[intruderIdx]]}). The shapes, colors, and sizes that change are just there to throw you off.`
+  );
   return { cells, intruderIdx, rule, pairOk: everyoneStandsOut };
 }
 
@@ -574,8 +622,14 @@ function buildOutlineCount(rng: Rng): Built {
     cells.push(countedCell(fills.map((fillMode) => ({ shape: shapes[i], color: colors[i], fillMode }))));
   }
   const rule = zeroOutline
-    ? "In ogni casella esattamente una figura è vuota (solo contorno) e le altre sono piene; l'intrusa non ne ha nessuna vuota. Numero di figure, forme e colori cambiano apposta per depistarti."
-    : "In ogni casella esattamente una figura è vuota (solo contorno) e le altre sono piene; l'intrusa ne ha due vuote. Numero di figure, forme e colori cambiano apposta per depistarti.";
+    ? L(
+        "In ogni casella esattamente una figura è vuota (solo contorno) e le altre sono piene; l'intrusa non ne ha nessuna vuota. Numero di figure, forme e colori cambiano apposta per depistarti.",
+        "In every cell exactly one shape is empty (just an outline) and the rest are filled in; the odd one out has none empty — they're all filled in. The count, shapes, and colors change on purpose to throw you off."
+      )
+    : L(
+        "In ogni casella esattamente una figura è vuota (solo contorno) e le altre sono piene; l'intrusa ne ha due vuote. Numero di figure, forme e colori cambiano apposta per depistarti.",
+        "In every cell exactly one shape is empty (just an outline) and the rest are filled in; the odd one out has two empty ones. The count, shapes, and colors change on purpose to throw you off."
+      );
   const split = balancedCountSplit(rng);
   return {
     cells,
@@ -614,11 +668,14 @@ function assemble(rng: Rng, difficulty: Difficulty, built: Built): Question {
   return {
     qtype: 'oddone',
     difficulty,
-    prompt: "Quale figura è l'intrusa?",
+    prompt: L("Quale figura è l'intrusa?", 'Which shape is the odd one out?'),
     payload: { kind: 'cells', rows: [cells] },
     choices,
     correctIndex,
-    explanation: `L'intrusa è la ${intruderIdx + 1}ª casella della riga. ${rule}`,
+    explanation: L(
+      `L'intrusa è la ${intruderIdx + 1}ª casella della riga. ${rule.it}`,
+      `The odd one out is cell #${intruderIdx + 1} in the row. ${rule.en}`
+    ),
   };
 }
 

@@ -70,4 +70,4 @@ tools/               seed, validatore generatori, test integrazione, export audi
 
 ## i18n
 
-Tutte le stringhe UI vivono in `src/lib/i18n.ts` (oggi solo italiano, struttura pronta per altre lingue).
+Interfaccia (`src/lib/i18n.ts`) e contenuto delle domande (`LocalizedText` in `src/lib/types.ts`, risolto con `loc()`/`useLoc()` in `src/lib/localize.ts`) sono in italiano e inglese: ogni giocatore vede la propria lingua, anche nella stessa partita. Le battute di SofAI restano in italiano, tranne i suoi consigli sul tipo di domanda.

@@ -2,17 +2,17 @@
 // partita; qui salviamo archivio domande, partite, giocatori e round.
 
 import { query } from '../db';
-import type { Difficulty, GameSettings, PlayerStats, Question } from '../types';
+import type { Difficulty, GameSettings, LocalizedText, PlayerStats, Question } from '../types';
 
 interface QuestionRow {
   id: number;
   qtype: string;
   difficulty: number;
-  prompt: string;
+  prompt: LocalizedText;
   payload: unknown;
   choices: unknown;
   correct_index: number;
-  explanation: string;
+  explanation: LocalizedText;
 }
 
 export async function dbCreateGame(

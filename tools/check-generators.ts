@@ -11,7 +11,7 @@ import { mulberry32 } from '../src/lib/rng';
 import { hashQuestion } from '../src/lib/questions/qutils';
 import type { Difficulty, Question } from '../src/lib/types';
 
-const PAYLOAD_KINDS = new Set(['cells', 'numbers', 'clock', 'dicestack', 'dicenet', 'balance', 'equation', 'dominoes']);
+const PAYLOAD_KINDS = new Set(['cells', 'numbers', 'clock', 'dicestack', 'dicenet', 'balance', 'equation', 'dominoes', 'flag']);
 const CHOICE_KINDS = new Set(['cell', 'text', 'clock', 'domino']);
 const N = 40;
 
@@ -101,8 +101,10 @@ async function main() {
         }
         if (q.qtype !== t) fail(ctx, `qtype "${q.qtype}" ≠ "${t}"`, q);
         if (q.difficulty !== d) fail(ctx, `difficulty ${q.difficulty} ≠ ${d}`, q);
-        if (!q.prompt?.trim()) fail(ctx, 'prompt vuoto', q);
-        if (!q.explanation?.trim()) fail(ctx, 'explanation vuota', q);
+        if (!q.prompt?.it?.trim()) fail(ctx, 'prompt vuoto (it)', q);
+        if (!q.prompt?.en?.trim()) fail(ctx, 'prompt vuoto (en)', q);
+        if (!q.explanation?.it?.trim()) fail(ctx, 'explanation vuota (it)', q);
+        if (!q.explanation?.en?.trim()) fail(ctx, 'explanation vuota (en)', q);
         if (!PAYLOAD_KINDS.has(q.payload?.kind)) fail(ctx, `payload.kind non supportato: ${q.payload?.kind}`, q);
         if (!Array.isArray(q.choices) || q.choices.length !== 3) {
           fail(ctx, `servono esattamente 3 opzioni (trovate ${q.choices?.length})`, q);

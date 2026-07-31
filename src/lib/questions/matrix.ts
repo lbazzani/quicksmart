@@ -12,8 +12,9 @@
 // modo plausibile (attributo della riga/colonna sbagliata, un passo indietro,
 // conteggio ±1), mai a caso.
 
-import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { CellSpec, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { normRot, placeChoices, retry } from './qutils';
 
 const ROTATABLE: ShapeName[] = ['triangle', 'arrow', 'moon'];
@@ -37,7 +38,24 @@ const IT: Record<ShapeName, string> = {
   dot: 'il puntino',
 };
 
+/** English name, article included (English "the" needs no gender/number agreement) */
+const EN: Record<ShapeName, string> = {
+  circle: 'the circle',
+  square: 'the square',
+  triangle: 'the triangle',
+  diamond: 'the diamond',
+  star: 'the star',
+  pentagon: 'the pentagon',
+  hexagon: 'the hexagon',
+  arrow: 'the arrow',
+  heart: 'the heart',
+  cross: 'the cross',
+  moon: 'the moon',
+  dot: 'the dot',
+};
+
 const FILL_IT: Record<string, string> = { solid: 'pieno', outline: 'solo contorno', half: 'colorato a metà' };
+const FILL_EN: Record<string, string> = { solid: 'full', outline: 'outline', half: 'half-filled' };
 
 type Fill = 'solid' | 'outline' | 'half';
 const FILLS: Fill[] = ['solid', 'outline', 'half'];
@@ -91,7 +109,7 @@ interface Built {
   dA: CellSpec;
   /** distrattore B: altro errore plausibile (passo in più, conteggio ±1, …) */
   dB: CellSpec;
-  explanation: string;
+  explanation: LocalizedText;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +131,10 @@ function buildD1(rng: Rng): Built {
       correct: at(2),
       dA: at(1), // un passo in meno: è la cella della colonna centrale
       dB: mono(shape, color, { rot: normRot(start + 3 * step) }), // un passo in più
-      explanation: `Regola unica: da una colonna alla successiva la figura ruota di ${step}° in senso orario (ogni riga ripete lo stesso schema). Nella cella mancante ${IT[shape]} ha una rotazione di ${normRot(start + 2 * step)}°.`,
+      explanation: L(
+        `Regola unica: da una colonna alla successiva la figura ruota di ${step}° in senso orario (ogni riga ripete lo stesso schema). Nella cella mancante ${IT[shape]} ha una rotazione di ${normRot(start + 2 * step)}°.`,
+        `One rule only: from one column to the next, the shape rotates ${step}° clockwise (every row repeats the same pattern). In the missing cell, ${EN[shape]} is rotated ${normRot(start + 2 * step)}°.`
+      ),
     };
   }
 
@@ -128,7 +149,10 @@ function buildD1(rng: Rng): Built {
       correct: at(2),
       dA: at(1), // una figura in meno
       dB: mono(shape, color, { count: base + 3 }), // una figura in più
-      explanation: `Regola unica: in ogni riga il numero di figure cresce di uno a ogni colonna (${base}, ${base + 1}, ${base + 2}). Nella cella mancante servono ${base + 2} figure.`,
+      explanation: L(
+        `Regola unica: in ogni riga il numero di figure cresce di uno a ogni colonna (${base}, ${base + 1}, ${base + 2}). Nella cella mancante servono ${base + 2} figure.`,
+        `One rule only: in every row, the number of shapes grows by one with each column (${base}, ${base + 1}, ${base + 2}). The missing cell needs ${base + 2} shapes.`
+      ),
     };
   }
 
@@ -142,7 +166,10 @@ function buildD1(rng: Rng): Built {
       correct: at(2, 2), // colors[1]
       dA: mono(shape, colors[0]), // colore della cella accanto (colonna sbagliata)
       dB: mono(shape, colors[2]), // colore dell'altra cella della riga
-      explanation: `Regola unica: i tre colori scalano di una posizione a ogni riga, così in ogni riga e in ogni colonna ciascun colore compare una sola volta. Nella cella mancante va l'unico colore che ancora manca nell'ultima riga.`,
+      explanation: L(
+        `Regola unica: i tre colori scalano di una posizione a ogni riga, così in ogni riga e in ogni colonna ciascun colore compare una sola volta. Nella cella mancante va l'unico colore che ancora manca nell'ultima riga.`,
+        `One rule only: the three colors shift by one position with each row, so every color appears exactly once in every row and column. The missing cell needs the one color still missing from the last row.`
+      ),
     };
   }
 
@@ -158,7 +185,10 @@ function buildD1(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(2, 1), // la forma della cella accanto (colonna sbagliata)
       dB: at(2, 0), // la forma dell'altra cella della riga
-      explanation: `Regola unica: le tre forme scorrono di un posto a ogni riga, così in ogni riga e in ogni colonna ciascuna forma compare una sola volta. Nell'ultima riga ci sono già ${IT[shapes[idx(2, 0)]]} e ${IT[shapes[idx(2, 1)]]}: manca ${IT[shapes[idx(2, 2)]]}. Le altre due opzioni ripetono una forma già presente nella riga.`,
+      explanation: L(
+        `Regola unica: le tre forme scorrono di un posto a ogni riga, così in ogni riga e in ogni colonna ciascuna forma compare una sola volta. Nell'ultima riga ci sono già ${IT[shapes[idx(2, 0)]]} e ${IT[shapes[idx(2, 1)]]}: manca ${IT[shapes[idx(2, 2)]]}. Le altre due opzioni ripetono una forma già presente nella riga.`,
+        `One rule only: the three shapes shift by one spot with each row, so every shape appears exactly once in every row and column. The last row already has ${EN[shapes[idx(2, 0)]]} and ${EN[shapes[idx(2, 1)]]}: ${EN[shapes[idx(2, 2)]]} is missing. The other two options repeat a shape already in the row.`
+      ),
     };
   }
 
@@ -172,12 +202,17 @@ function buildD1(rng: Rng): Built {
     const at = (r: number, c: number) => mono(shape, color, { size: sz(byRow ? r : c) });
     const dir = byRow ? 'scendendo di una riga' : 'passando da una colonna alla successiva';
     const uguali = byRow ? 'le celle di una stessa riga sono tutte uguali' : 'tutte le righe sono uguali';
+    const dirEn = byRow ? 'going down a row' : 'moving to the next column';
+    const ugualiEn = byRow ? 'the cells in the same row are all identical' : 'every row looks the same';
     return {
       rows: grid(at),
       correct: at(2, 2),
       dA: mono(shape, color, { size: sz(1) }), // la dimensione del gradino precedente
       dB: mono(shape, color, { size: sz(3) }), // un gradino di troppo
-      explanation: `Regola unica: cambia solo la dimensione. ${dir[0].toUpperCase() + dir.slice(1)} la figura ${grow ? 'cresce' : 'si rimpicciolisce'} sempre dello stesso passo, mentre ${uguali}. Nella cella mancante va ${IT[shape]} al terzo gradino: un passo ${grow ? 'più grande' : 'più piccolo'} ${byRow ? 'della cella sopra' : 'della cella accanto'}. Un'opzione ripete il gradino precedente, l'altra ne fa uno di troppo.`,
+      explanation: L(
+        `Regola unica: cambia solo la dimensione. ${dir[0].toUpperCase() + dir.slice(1)} la figura ${grow ? 'cresce' : 'si rimpicciolisce'} sempre dello stesso passo, mentre ${uguali}. Nella cella mancante va ${IT[shape]} al terzo gradino: un passo ${grow ? 'più grande' : 'più piccolo'} ${byRow ? 'della cella sopra' : 'della cella accanto'}. Un'opzione ripete il gradino precedente, l'altra ne fa uno di troppo.`,
+        `One rule only: only the size changes. ${dirEn[0].toUpperCase() + dirEn.slice(1)}, the shape ${grow ? 'grows' : 'shrinks'} by the same amount each time, while ${ugualiEn}. The missing cell needs ${EN[shape]} at the third step: one step ${grow ? 'bigger' : 'smaller'} than ${byRow ? 'the cell above' : 'the cell before it'}. One option repeats the previous step, the other overshoots by one.`
+      ),
     };
   }
 
@@ -194,7 +229,10 @@ function buildD1(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(2, 1), // riempimento della cella accanto
       dB: at(2, 0), // riempimento dell'altra cella della riga
-      explanation: `Regola unica: forma e colore non cambiano mai, cambia solo il riempimento. Nella prima riga l'ordine è ${FILL_IT[fills[idx(0, 0)]]} → ${FILL_IT[fills[idx(0, 1)]]} → ${FILL_IT[fills[idx(0, 2)]]}, e a ogni riga lo stesso giro scorre di un posto. Così in ogni riga e in ogni colonna ciascun riempimento compare una sola volta: nell'ultima riga manca "${FILL_IT[fills[idx(2, 2)]]}".`,
+      explanation: L(
+        `Regola unica: forma e colore non cambiano mai, cambia solo il riempimento. Nella prima riga l'ordine è ${FILL_IT[fills[idx(0, 0)]]} → ${FILL_IT[fills[idx(0, 1)]]} → ${FILL_IT[fills[idx(0, 2)]]}, e a ogni riga lo stesso giro scorre di un posto. Così in ogni riga e in ogni colonna ciascun riempimento compare una sola volta: nell'ultima riga manca "${FILL_IT[fills[idx(2, 2)]]}".`,
+        `One rule only: the shape and color never change, only the fill does. In the first row the order is ${FILL_EN[fills[idx(0, 0)]]} → ${FILL_EN[fills[idx(0, 1)]]} → ${FILL_EN[fills[idx(0, 2)]]}, and with each row the same cycle shifts by one spot. So every fill appears exactly once in every row and column: the last row is missing "${FILL_EN[fills[idx(2, 2)]]}".`
+      ),
     };
   }
 
@@ -210,9 +248,14 @@ function buildD1(rng: Rng): Built {
       correct: at(2, 2),
       dA: mono(shape, color, { fill: fills[1] }), // riempimento della riga/colonna di mezzo
       dB: mono(shape, color, { fill: fills[0] }), // riempimento della prima riga/colonna
-      explanation: byRow
-        ? `Regola unica: il riempimento dipende solo dalla riga (le tre celle di una stessa riga sono identiche): prima riga ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza riga (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una riga sbagliata.`
-        : `Regola unica: il riempimento dipende solo dalla colonna (le tre righe sono identiche): prima colonna ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza colonna (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una colonna sbagliata.`,
+      explanation: L(
+        byRow
+          ? `Regola unica: il riempimento dipende solo dalla riga (le tre celle di una stessa riga sono identiche): prima riga ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza riga (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una riga sbagliata.`
+          : `Regola unica: il riempimento dipende solo dalla colonna (le tre righe sono identiche): prima colonna ${FILL_IT[fills[0]]}, seconda ${FILL_IT[fills[1]]}, terza ${FILL_IT[fills[2]]}. Nella cella mancante serve quindi il riempimento della terza colonna (${FILL_IT[fills[2]]}); le altre opzioni prendono il riempimento da una colonna sbagliata.`,
+        byRow
+          ? `One rule only: the fill depends only on the row (the three cells in a row are identical): first row ${FILL_EN[fills[0]]}, second ${FILL_EN[fills[1]]}, third ${FILL_EN[fills[2]]}. The missing cell needs the third row's fill (${FILL_EN[fills[2]]}); the other options take the fill from the wrong row.`
+          : `One rule only: the fill depends only on the column (the three rows are identical): first column ${FILL_EN[fills[0]]}, second ${FILL_EN[fills[1]]}, third ${FILL_EN[fills[2]]}. The missing cell needs the third column's fill (${FILL_EN[fills[2]]}); the other options take the fill from the wrong column.`
+      ),
     };
   }
 
@@ -234,7 +277,10 @@ function buildD1(rng: Rng): Built {
     correct: at(2, 2),
     dA: mono(shape, color, { count: triple[1], arrange }), // il conteggio del passo precedente
     dB: mono(shape, color, { count: dBn, arrange }),
-    explanation: `Regola unica: ${byRow ? 'scendendo di una riga' : 'passando da una colonna alla successiva'} il numero di figure ${step > 0 ? 'cresce' : 'cala'} di ${Math.abs(step)} (${triple.join(', ')}), mentre ${byRow ? 'le celle di una stessa riga sono tutte uguali' : 'tutte le righe sono uguali'}. Nella cella mancante servono ${triple[2]} figure.`,
+    explanation: L(
+      `Regola unica: ${byRow ? 'scendendo di una riga' : 'passando da una colonna alla successiva'} il numero di figure ${step > 0 ? 'cresce' : 'cala'} di ${Math.abs(step)} (${triple.join(', ')}), mentre ${byRow ? 'le celle di una stessa riga sono tutte uguali' : 'tutte le righe sono uguali'}. Nella cella mancante servono ${triple[2]} figure.`,
+      `One rule only: ${byRow ? 'going down a row' : 'moving to the next column'}, the number of shapes ${step > 0 ? 'grows' : 'shrinks'} by ${Math.abs(step)} (${triple.join(', ')}), while ${byRow ? 'the cells in the same row are all identical' : 'every row looks the same'}. The missing cell needs ${triple[2]} shapes.`
+    ),
   };
 }
 
@@ -257,7 +303,10 @@ function buildD2(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(1, 2), // forma della riga sbagliata
       dB: at(2, 1), // rotazione un passo indietro
-      explanation: `Due regole insieme: la forma resta la stessa lungo ogni riga, mentre la rotazione cresce di ${step}° a ogni colonna. Serve quindi la forma della terza riga (${IT[shapes[2]]}) con la rotazione della terza colonna (${normRot(start + 2 * step)}°).`,
+      explanation: L(
+        `Due regole insieme: la forma resta la stessa lungo ogni riga, mentre la rotazione cresce di ${step}° a ogni colonna. Serve quindi la forma della terza riga (${IT[shapes[2]]}) con la rotazione della terza colonna (${normRot(start + 2 * step)}°).`,
+        `Two rules together: the shape stays the same across each row, while the rotation grows by ${step}° with each column. So we need the third row's shape (${EN[shapes[2]]}) with the third column's rotation (${normRot(start + 2 * step)}°).`
+      ),
     };
   }
 
@@ -271,7 +320,10 @@ function buildD2(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(1, 2), // forma della riga sbagliata
       dB: at(2, 1), // colore della colonna sbagliata
-      explanation: `Due regole insieme: ogni riga ha la sua forma e ogni colonna il suo colore. La cella mancante combina la forma della terza riga (${IT[shapes[2]]}) con il colore della terza colonna.`,
+      explanation: L(
+        `Due regole insieme: ogni riga ha la sua forma e ogni colonna il suo colore. La cella mancante combina la forma della terza riga (${IT[shapes[2]]}) con il colore della terza colonna.`,
+        `Two rules together: each row has its own shape and each column its own color. The missing cell combines the third row's shape (${EN[shapes[2]]}) with the third column's color.`
+      ),
     };
   }
 
@@ -286,7 +338,10 @@ function buildD2(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(1, 2), // forma della riga sbagliata
       dB: at(2, 1), // conteggio della colonna precedente
-      explanation: `Due regole insieme: ogni riga ha la sua forma, e il numero di figure cresce lungo le colonne (${base}, ${base + 1}, ${base + 2}). Mancano ${base + 2} copie della figura della terza riga (${IT[shapes[2]]}).`,
+      explanation: L(
+        `Due regole insieme: ogni riga ha la sua forma, e il numero di figure cresce lungo le colonne (${base}, ${base + 1}, ${base + 2}). Mancano ${base + 2} copie della figura della terza riga (${IT[shapes[2]]}).`,
+        `Two rules together: each row has its own shape, and the number of shapes grows across the columns (${base}, ${base + 1}, ${base + 2}). The missing cell needs ${base + 2} copies of the third row's shape (${EN[shapes[2]]}).`
+      ),
     };
   }
 
@@ -302,7 +357,10 @@ function buildD2(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(1, 2), // colore della riga sbagliata
       dB: at(2, 1), // rotazione un passo indietro
-      explanation: `Due regole insieme: ogni riga ha il suo colore, mentre la rotazione cresce di ${step}° a ogni colonna. La cella mancante ha il colore della terza riga e la rotazione della terza colonna (${normRot(start + 2 * step)}°).`,
+      explanation: L(
+        `Due regole insieme: ogni riga ha il suo colore, mentre la rotazione cresce di ${step}° a ogni colonna. La cella mancante ha il colore della terza riga e la rotazione della terza colonna (${normRot(start + 2 * step)}°).`,
+        `Two rules together: each row has its own color, while the rotation grows by ${step}° with each column. The missing cell has the third row's color and the third column's rotation (${normRot(start + 2 * step)}°).`
+      ),
     };
   }
 
@@ -317,7 +375,10 @@ function buildD2(rng: Rng): Built {
       correct: at(2, 2),
       dA: at(1, 2), // riempimento della riga sbagliata
       dB: at(2, 1), // colore della colonna sbagliata
-      explanation: `Due regole insieme: ogni riga ha il suo riempimento (${FILL_IT[fills[0]]}, ${FILL_IT[fills[1]]}, ${FILL_IT[fills[2]]}) e ogni colonna il suo colore. La cella mancante unisce il riempimento della terza riga (${FILL_IT[fills[2]]}) e il colore della terza colonna.`,
+      explanation: L(
+        `Due regole insieme: ogni riga ha il suo riempimento (${FILL_IT[fills[0]]}, ${FILL_IT[fills[1]]}, ${FILL_IT[fills[2]]}) e ogni colonna il suo colore. La cella mancante unisce il riempimento della terza riga (${FILL_IT[fills[2]]}) e il colore della terza colonna.`,
+        `Two rules together: each row has its own fill (${FILL_EN[fills[0]]}, ${FILL_EN[fills[1]]}, ${FILL_EN[fills[2]]}) and each column its own color. The missing cell combines the third row's fill (${FILL_EN[fills[2]]}) with the third column's color.`
+      ),
     };
   }
 
@@ -337,7 +398,10 @@ function buildD2(rng: Rng): Built {
       dA: mono(shapes[si(2, 2)], cols[ci(2, 1)]),
       // colore giusto ma forma presa dalla riga sopra (ciclo delle forme sbagliato)
       dB: mono(shapes[si(1, 2)], cols[ci(2, 2)]),
-      explanation: `Due regole insieme, e i due cicli girano in versi opposti: le forme scalano di un posto in una direzione, i colori nell'altra. Il risultato è che in ogni riga e in ogni colonna compaiono tutte e tre le forme e tutti e tre i colori, una volta sola. Nella cella mancante servono la forma che manca nell'ultima riga (${IT[shapes[si(2, 2)]]}) e il colore che manca nell'ultima riga. Le due opzioni sbagliate ne azzeccano solo uno dei due.`,
+      explanation: L(
+        `Due regole insieme, e i due cicli girano in versi opposti: le forme scalano di un posto in una direzione, i colori nell'altra. Il risultato è che in ogni riga e in ogni colonna compaiono tutte e tre le forme e tutti e tre i colori, una volta sola. Nella cella mancante servono la forma che manca nell'ultima riga (${IT[shapes[si(2, 2)]]}) e il colore che manca nell'ultima riga. Le due opzioni sbagliate ne azzeccano solo uno dei due.`,
+        `Two rules together, cycling in opposite directions: the shapes shift by one spot one way, the colors the other way. The result is that all three shapes and all three colors each appear exactly once in every row and column. The missing cell needs the shape missing from the last row (${EN[shapes[si(2, 2)]]}) and the color missing from the last row. Each wrong option gets only one of the two right.`
+      ),
     };
   }
 
@@ -354,7 +418,10 @@ function buildD2(rng: Rng): Built {
     correct: at(2, 2),
     dA: mono(shape, rowColors[2], { rot: rot(2, 1) }), // colore giusto, rotazione un passo indietro
     dB: mono(shape, rowColors[1], { rot: rot(2, 2) }), // rotazione giusta, colore della riga sbagliata
-    explanation: `Due regole insieme: ogni riga ha il suo colore, e la rotazione cresce di ${step}° andando verso destra ma cala di ${step}° scendendo di una riga. Nella cella mancante ${IT[shape]} torna quindi alla rotazione di ${normRot(start)}° (la stessa della cella in alto a sinistra e di quella centrale) con il colore della terza riga. Un'opzione è indietro di un passo, l'altra ha il colore della riga sbagliata.`,
+    explanation: L(
+      `Due regole insieme: ogni riga ha il suo colore, e la rotazione cresce di ${step}° andando verso destra ma cala di ${step}° scendendo di una riga. Nella cella mancante ${IT[shape]} torna quindi alla rotazione di ${normRot(start)}° (la stessa della cella in alto a sinistra e di quella centrale) con il colore della terza riga. Un'opzione è indietro di un passo, l'altra ha il colore della riga sbagliata.`,
+      `Two rules together: each row has its own color, and the rotation grows by ${step}° moving right but shrinks by ${step}° going down a row. So in the missing cell ${EN[shape]} goes back to a rotation of ${normRot(start)}° (the same as the top-left cell and the center one) with the third row's color. One option is one step behind, the other has the wrong row's color.`
+    ),
   };
 }
 
@@ -383,7 +450,10 @@ function buildD3(rng: Rng): Built {
       correct: at(2, 2),
       dA: mono(shape, rowColors[2], { count: sums[2] - 1 }), // errore di conto: -1
       dB: mono(shape, rowColors[2], { count: sums[2] + 1 }), // errore di conto: +1
-      explanation: `Il trucco: in ogni riga il numero di figure della terza cella è la SOMMA delle prime due. Nell'ultima riga ${a3} + ${b3} = ${sums[2]}, quindi servono ${sums[2]} figure. Le altre opzioni sbagliano il conto di uno.`,
+      explanation: L(
+        `Il trucco: in ogni riga il numero di figure della terza cella è la SOMMA delle prime due. Nell'ultima riga ${a3} + ${b3} = ${sums[2]}, quindi servono ${sums[2]} figure. Le altre opzioni sbagliano il conto di uno.`,
+        `The trick: in every row, the third cell's shape count is the SUM of the first two. In the last row, ${a3} + ${b3} = ${sums[2]}, so it needs ${sums[2]} shapes. The other options are off by one.`
+      ),
     };
   }
 
@@ -419,12 +489,17 @@ function buildD3(rng: Rng): Built {
     );
     const desc = (h: [boolean, boolean]) =>
       h[0] && h[1] ? `${IT[sx]} e ${IT[sy]} insieme` : h[0] ? `soltanto ${IT[sx]}` : `soltanto ${IT[sy]}`;
+    const descEn = (h: [boolean, boolean]) =>
+      h[0] && h[1] ? `${EN[sx]} and ${EN[sy]} together` : h[0] ? `only ${EN[sx]}` : `only ${EN[sy]}`;
     return {
       rows: grid(at),
       correct: at(2, 2),
       dA: cellOf(others[0][0], others[0][1]), // combinazione già presente nella riga
       dB: cellOf(others[1][0], others[1][1]), // l'altra combinazione della riga
-      explanation: `Il trucco: in ogni riga la terza cella contiene solo le figure presenti in UNA delle prime due celle; se una figura compare in entrambe, sparisce (regola XOR). Ogni riga mostra quindi: soltanto ${IT[sx]}, soltanto ${IT[sy]} e le due insieme. Nell'ultima riga manca ${desc(has)}; le altre opzioni ripetono celle già visibili nella riga.`,
+      explanation: L(
+        `Il trucco: in ogni riga la terza cella contiene solo le figure presenti in UNA delle prime due celle; se una figura compare in entrambe, sparisce (regola XOR). Ogni riga mostra quindi: soltanto ${IT[sx]}, soltanto ${IT[sy]} e le due insieme. Nell'ultima riga manca ${desc(has)}; le altre opzioni ripetono celle già visibili nella riga.`,
+        `The trick: in every row, the third cell only contains shapes that appear in ONE of the first two cells; if a shape is in both, it disappears (the XOR rule). So every row shows: only ${EN[sx]}, only ${EN[sy]}, and the two together. The last row is missing ${descEn(has)}; the other options repeat cells already visible in the row.`
+      ),
     };
   }
 
@@ -442,7 +517,10 @@ function buildD3(rng: Rng): Built {
       correct: at(2, 2),
       dA: mono(shape, rowColors[2], { rot: normRot(start + 3 * step) }), // un passo indietro: quasi identico
       dB: mono(shape, rowColors[1], { rot: normRot(start + 4 * step) }), // colore della riga sbagliata
-      explanation: `Il trucco: la rotazione aumenta di ${step}° sia spostandosi a destra sia scendendo di una riga (regola diagonale), e ogni riga ha il suo colore. Nella cella mancante ${IT[shape]} ruota di ${normRot(start + 4 * step)}° con il colore della terza riga. Attenzione all'opzione quasi uguale: è indietro di un passo.`,
+      explanation: L(
+        `Il trucco: la rotazione aumenta di ${step}° sia spostandosi a destra sia scendendo di una riga (regola diagonale), e ogni riga ha il suo colore. Nella cella mancante ${IT[shape]} ruota di ${normRot(start + 4 * step)}° con il colore della terza riga. Attenzione all'opzione quasi uguale: è indietro di un passo.`,
+        `The trick: the rotation increases by ${step}° both moving right and going down a row (a diagonal rule), and each row has its own color. In the missing cell, ${EN[shape]} is rotated ${normRot(start + 4 * step)}° with the third row's color. Watch out for the option that looks almost identical: it's one step behind.`
+      ),
     };
   }
 
@@ -480,7 +558,10 @@ function buildD3(rng: Rng): Built {
       correct: at(2, 2),
       dA: mono(shape, rowColors[2], { count: diffs[2] - 1 }), // errore di conto: -1
       dB: mono(shape, rowColors[2], { count: dBn }),
-      explanation: `Il trucco: in ogni riga il numero di figure della terza cella è la DIFFERENZA fra le prime due (la prima meno la seconda). Nell'ultima riga ${a3} − ${b3} = ${diffs[2]}, quindi servono ${diffs[2]} figure. ${sum3 <= 6 ? `Attenzione all'opzione con ${sum3} figure: è la somma, non la differenza.` : `Le altre opzioni sbagliano il conto di uno.`}`,
+      explanation: L(
+        `Il trucco: in ogni riga il numero di figure della terza cella è la DIFFERENZA fra le prime due (la prima meno la seconda). Nell'ultima riga ${a3} − ${b3} = ${diffs[2]}, quindi servono ${diffs[2]} figure. ${sum3 <= 6 ? `Attenzione all'opzione con ${sum3} figure: è la somma, non la differenza.` : `Le altre opzioni sbagliano il conto di uno.`}`,
+        `The trick: in every row, the third cell's shape count is the DIFFERENCE between the first two (the first minus the second). In the last row, ${a3} − ${b3} = ${diffs[2]}, so it needs ${diffs[2]} shapes. ${sum3 <= 6 ? `Watch out for the option with ${sum3} shapes: that's the sum, not the difference.` : `The other options are off by one.`}`
+      ),
     };
   }
 
@@ -497,7 +578,10 @@ function buildD3(rng: Rng): Built {
     correct: at(2, 2),
     dA: mono(shapes[2], cols[2], { fill: fills[fi(2, 1)] }), // riempimento della cella accanto
     dB: mono(shapes[1], cols[2], { fill: fills[fi(2, 2)] }), // forma della riga sbagliata
-    explanation: `Il trucco: qui lavorano tre regole diverse insieme. La forma dipende dalla riga, il colore dipende dalla colonna e il riempimento scorre in diagonale, comparendo una volta sola per riga e per colonna. La cella mancante prende quindi la forma della terza riga (${IT[shapes[2]]}), il colore della terza colonna e l'unico riempimento che manca nell'ultima riga (${FILL_IT[fills[fi(2, 2)]]}). Ogni opzione sbagliata ne azzecca due su tre.`,
+    explanation: L(
+      `Il trucco: qui lavorano tre regole diverse insieme. La forma dipende dalla riga, il colore dipende dalla colonna e il riempimento scorre in diagonale, comparendo una volta sola per riga e per colonna. La cella mancante prende quindi la forma della terza riga (${IT[shapes[2]]}), il colore della terza colonna e l'unico riempimento che manca nell'ultima riga (${FILL_IT[fills[fi(2, 2)]]}). Ogni opzione sbagliata ne azzecca due su tre.`,
+      `The trick: three different rules are at work here. The shape depends on the row, the color depends on the column, and the fill cycles diagonally, appearing exactly once per row and column. The missing cell takes the third row's shape (${EN[shapes[2]]}), the third column's color, and the one fill still missing from the last row (${FILL_EN[fills[fi(2, 2)]]}). Each wrong option gets two out of three right.`
+    ),
   };
 }
 
@@ -514,7 +598,7 @@ export function genMatrix(rng: Rng, difficulty: Difficulty): Question {
     return {
       qtype: 'matrix' as const,
       difficulty,
-      prompt: 'Quale figura completa la matrice?',
+      prompt: L('Quale figura completa la matrice?', 'Which shape completes the matrix?'),
       payload: { kind: 'cells' as const, rows: b.rows },
       choices,
       correctIndex,

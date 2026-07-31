@@ -69,3 +69,30 @@ export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export function pickColors(rng: Rng, n: number): ColorInfo[] {
   return distinctColors(rng, n).map((idx) => COLORS[idx]);
 }
+
+// ---------------------------------------------------------------------------
+// English. Stessi ShapeName di SHAPES, stesso ordine — ma senza genere: in
+// inglese un nome di forma ha solo singolare/plurale, mai maschile/femminile,
+// quindi niente `f` e niente `agr()`.
+// ---------------------------------------------------------------------------
+
+export interface ShapeInfoEn {
+  shape: ShapeName;
+  one: string; // "star"
+  many: string; // "stars"
+}
+
+export const SHAPES_EN: ShapeInfoEn[] = [
+  { shape: 'star', one: 'star', many: 'stars' },
+  { shape: 'circle', one: 'circle', many: 'circles' },
+  { shape: 'square', one: 'square', many: 'squares' },
+  { shape: 'triangle', one: 'triangle', many: 'triangles' },
+  { shape: 'heart', one: 'heart', many: 'hearts' },
+  { shape: 'diamond', one: 'diamond', many: 'diamonds' },
+  { shape: 'moon', one: 'moon', many: 'moons' },
+  { shape: 'cross', one: 'cross', many: 'crosses' },
+];
+
+/** aggettivi di riempimento/dimensione in inglese: invariabili, mai accordati */
+export const FILL_ADJ_EN = { solid: 'full', outline: 'empty' } as const;
+export const SIZE_ADJ_EN = { big: 'big', small: 'small' } as const;

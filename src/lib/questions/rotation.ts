@@ -13,6 +13,7 @@
 
 import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { normRot, placeChoices, retry } from './qutils';
 
 interface Slot {
@@ -119,6 +120,20 @@ function explain(theta: 90 | 180 | 270, keepRotsTrap: boolean): string {
   return rotText + ' ' + trapText;
 }
 
+/** come `explain`, in inglese */
+function explainEn(theta: 90 | 180 | 270, keepRotsTrap: boolean): string {
+  const rotText =
+    theta === 90
+      ? 'The composition is rotated 90° clockwise, like turning a card a quarter turn: the shape in the top-left ends up top-right, and every shape spins 90° in place.'
+      : theta === 180
+        ? 'The composition is rotated 180°, like flipping a card upside down: every shape jumps to the opposite corner and lands upside down.'
+        : 'The composition is rotated 270° clockwise — the same as a quarter turn counterclockwise: the shape in the top-left ends up bottom-left, and every shape spins in place.';
+  const trapText = keepRotsTrap
+    ? "Watch out for the traps: one option is the mirror image (left and right swapped — that's not a rotation!), and in the other the shapes are in the right spots but haven't spun in place."
+    : "Watch out for the traps: one option is the mirror image (left and right swapped — that's not a rotation!), and in the other two shapes have swapped places.";
+  return rotText + ' ' + trapText;
+}
+
 export function genRotation(rng: Rng, difficulty: Difficulty): Question {
   return retry(() => {
     const theta: 90 | 180 | 270 =
@@ -171,11 +186,11 @@ export function genRotation(rng: Rng, difficulty: Difficulty): Question {
     return {
       qtype: 'rotation' as const,
       difficulty,
-      prompt: 'Quale opzione mostra la STESSA figura ruotata?',
+      prompt: L('Quale opzione mostra la STESSA figura ruotata?', 'Which option shows the SAME shape rotated?'),
       payload: { kind: 'cells' as const, rows: [[toCell(base, size)]] },
       choices,
       correctIndex,
-      explanation: explain(theta, useKeepRots),
+      explanation: L(explain(theta, useKeepRots), explainEn(theta, useKeepRots)),
     };
   });
 }

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEngine } from '@/lib/engine/engine';
 import { clientIp, rateLimit, tooMany } from '@/lib/ratelimit';
-import type { GameMode } from '@/lib/types';
+import type { GameMode, GamePack } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 interface CreateBody {
   name?: string;
   mode?: GameMode;
+  pack?: GamePack;
   nickname?: string;
   avatar?: string;
   roundsTotal?: number | null;
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad_json' }, { status: 400 });
   }
   const mode: GameMode = body.mode === 'solo' ? 'solo' : 'team';
+  const pack: GamePack = body.pack === 'flags' ? 'flags' : 'logic';
   const nickname = (body.nickname ?? '').trim().slice(0, 20);
   const name = (body.name ?? '').trim().slice(0, 30) || (mode === 'solo' ? 'Allenamento' : 'QuickSmart');
   const avatar = (body.avatar ?? '🦊').slice(0, 8);
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
     const { code, playerId, token } = await engine.createGame({
       name,
       mode,
+      pack,
       nickname,
       avatar,
       roundsTotal,

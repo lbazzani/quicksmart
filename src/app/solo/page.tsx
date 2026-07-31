@@ -7,12 +7,14 @@ import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
 import { AvatarPicker, Field, Segmented, Stepper, inputCls } from '@/components/AvatarPicker';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
+import type { GamePack } from '@/lib/types';
 
 export default function SoloPage() {
   const T = useT();
   const router = useRouter();
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState('🦄');
+  const [pack, setPack] = useState<GamePack>('logic');
   const [rounds, setRounds] = useState<number>(10);
   const [decisionSec, setDecisionSec] = useState(20);
   const [answerSec, setAnswerSec] = useState(12);
@@ -27,6 +29,7 @@ export default function SoloPage() {
         nickname,
         avatar,
         mode: 'solo',
+        pack,
         roundsTotal: rounds,
         buzzWindowSec: decisionSec,
         answerSec,
@@ -57,6 +60,17 @@ export default function SoloPage() {
       </Field>
       <Field label={T.new.avatar}>
         <AvatarPicker value={avatar} onChange={setAvatar} />
+      </Field>
+      <Field label={T.new.pack}>
+        <Segmented
+          options={[
+            { label: T.new.packLogic, value: 'logic' as GamePack },
+            { label: T.new.packFlags, value: 'flags' as GamePack },
+          ]}
+          value={pack}
+          onChange={setPack}
+        />
+        {pack === 'flags' && <span className="text-xs text-stone-400">{T.new.packFlagsHint}</span>}
       </Field>
       <Field label={T.new.rounds}>
         <Segmented

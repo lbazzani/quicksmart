@@ -19,9 +19,10 @@
 // diversa dalle altre due" vinceva il 52,8% delle volte a d2 senza guardare la
 // regola (tools/shortcut-test.ts). Ora rende il 29%, cioè quanto il caso.
 
-import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { CellSpec, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { pick, pickN, randInt, shuffle, type Rng } from '../rng';
 import { tooSimilar } from '../colors';
+import { L } from '../localize';
 import { normRot, placeChoices, retry } from './qutils';
 
 const ROTATABLE: ShapeName[] = ['triangle', 'arrow', 'moon'];
@@ -88,7 +89,7 @@ function applyAll(m: Model, ts: TransformId[]): Model {
 /** un errore plausibile: il modello sbagliato e il perché (finisce nella spiegazione) */
 interface Slip {
   m: Model;
-  why: string;
+  why: LocalizedText;
 }
 
 /**
@@ -116,49 +117,73 @@ function slips(c: Model, k: Model, t: TransformId): Slip[] {
   switch (t) {
     case 'rot90':
       return [
-        { m: { ...k, rot: normRot(c.rot - 90) }, why: 'ruota dalla parte sbagliata' },
-        { m: { ...k, rot: normRot(c.rot + 180) }, why: 'fa mezzo giro invece di un quarto' },
-        { m: { ...k, rot: c.rot }, why: 'si dimentica di ruotare' },
+        { m: { ...k, rot: normRot(c.rot - 90) }, why: L('ruota dalla parte sbagliata', 'rotates the wrong way') },
+        {
+          m: { ...k, rot: normRot(c.rot + 180) },
+          why: L('fa mezzo giro invece di un quarto', 'does a half turn instead of a quarter'),
+        },
+        { m: { ...k, rot: c.rot }, why: L('si dimentica di ruotare', 'forgets to rotate') },
       ];
     case 'rot180':
       return [
-        { m: { ...k, rot: normRot(c.rot + 90) }, why: 'fa solo un quarto di giro' },
-        { m: { ...k, rot: normRot(c.rot + 270) }, why: 'gira di tre quarti invece che di mezzo giro' },
-        { m: { ...k, rot: c.rot }, why: 'si dimentica di ruotare' },
+        { m: { ...k, rot: normRot(c.rot + 90) }, why: L('fa solo un quarto di giro', 'only does a quarter turn') },
+        {
+          m: { ...k, rot: normRot(c.rot + 270) },
+          why: L('gira di tre quarti invece che di mezzo giro', 'does three-quarters of a turn instead of half'),
+        },
+        { m: { ...k, rot: c.rot }, why: L('si dimentica di ruotare', 'forgets to rotate') },
       ];
     case 'double':
       return [
-        { m: { ...k, count: c.count }, why: 'si dimentica di raddoppiare' },
-        { m: { ...k, count: c.count + 1 }, why: 'aggiunge una figura invece di raddoppiare' },
-        { m: { ...k, count: c.count * 4 }, why: 'raddoppia due volte' },
+        { m: { ...k, count: c.count }, why: L('si dimentica di raddoppiare', 'forgets to double it') },
+        {
+          m: { ...k, count: c.count + 1 },
+          why: L('aggiunge una figura invece di raddoppiare', 'adds one shape instead of doubling'),
+        },
+        { m: { ...k, count: c.count * 4 }, why: L('raddoppia due volte', 'doubles it twice') },
       ];
     case 'half':
       return [
-        { m: { ...k, count: c.count }, why: 'si dimentica di dimezzare' },
-        { m: { ...k, count: c.count - 1 }, why: 'toglie una figura invece di dimezzare' },
-        { m: { ...k, count: c.count / 4 }, why: 'dimezza due volte' },
+        { m: { ...k, count: c.count }, why: L('si dimentica di dimezzare', 'forgets to halve it') },
+        {
+          m: { ...k, count: c.count - 1 },
+          why: L('toglie una figura invece di dimezzare', 'removes one shape instead of halving'),
+        },
+        { m: { ...k, count: c.count / 4 }, why: L('dimezza due volte', 'halves it twice') },
       ];
     case 'add':
       return [
-        { m: { ...k, count: c.count }, why: 'si dimentica di aggiungere la figura' },
-        { m: { ...k, count: c.count + 2 }, why: 'ne aggiunge due invece di una' },
-        { m: { ...k, count: c.count - 1 }, why: 'ne toglie una invece di aggiungerla' },
+        { m: { ...k, count: c.count }, why: L('si dimentica di aggiungere la figura', 'forgets to add the shape') },
+        { m: { ...k, count: c.count + 2 }, why: L('ne aggiunge due invece di una', 'adds two instead of one') },
+        {
+          m: { ...k, count: c.count - 1 },
+          why: L('ne toglie una invece di aggiungerla', 'removes one instead of adding it'),
+        },
       ];
     case 'grow':
       return [
-        { m: { ...k, size: c.size }, why: 'si dimentica di ingrandire' },
-        { m: { ...k, size: SIZE_S }, why: 'rimpicciolisce invece di ingrandire' },
+        { m: { ...k, size: c.size }, why: L('si dimentica di ingrandire', 'forgets to enlarge it') },
+        {
+          m: { ...k, size: SIZE_S },
+          why: L('rimpicciolisce invece di ingrandire', 'shrinks it instead of enlarging it'),
+        },
       ];
     case 'shrink':
       return [
-        { m: { ...k, size: c.size }, why: 'si dimentica di rimpicciolire' },
-        { m: { ...k, size: SIZE_L }, why: 'ingrandisce invece di rimpicciolire' },
+        { m: { ...k, size: c.size }, why: L('si dimentica di rimpicciolire', 'forgets to shrink it') },
+        {
+          m: { ...k, size: SIZE_L },
+          why: L('ingrandisce invece di rimpicciolire', 'enlarges it instead of shrinking it'),
+        },
       ];
     case 'fillToggle':
       return [
         {
           m: { ...k, fill: c.fill },
-          why: c.fill === 'solid' ? 'lascia la figura piena com’era' : 'lascia la figura vuota com’era',
+          why:
+            c.fill === 'solid'
+              ? L('lascia la figura piena com’era', 'leaves the shape full, just like before')
+              : L('lascia la figura vuota com’era', 'leaves the shape empty, just like before'),
         },
       ];
   }
@@ -177,12 +202,35 @@ function slips(c: Model, k: Model, t: TransformId): Slip[] {
  */
 function distractorPool(a: Model, b: Model, c: Model, k: Model, ts: TransformId[]): Pools {
   const groups: Array<[FamilyId, Slip[]]> = [
-    ['copyB', [{ m: b, why: 'copia B pari pari, senza accorgersi che B ha ancora la forma e il colore di A' }]],
+    [
+      'copyB',
+      [
+        {
+          m: b,
+          why: L(
+            'copia B pari pari, senza accorgersi che B ha ancora la forma e il colore di A',
+            'copies B exactly, without noticing that B still has A’s shape and color'
+          ),
+        },
+      ],
+    ],
     [
       'leak',
       [
-        { m: { ...k, color: a.color }, why: 'trasforma bene ma tiene il colore della prima coppia' },
-        { m: { ...k, shape: a.shape }, why: 'trasforma bene ma tiene la forma della prima coppia' },
+        {
+          m: { ...k, color: a.color },
+          why: L(
+            'trasforma bene ma tiene il colore della prima coppia',
+            'gets the transformation right but keeps the color of the first pair'
+          ),
+        },
+        {
+          m: { ...k, shape: a.shape },
+          why: L(
+            'trasforma bene ma tiene la forma della prima coppia',
+            'gets the transformation right but keeps the shape of the first pair'
+          ),
+        },
       ],
     ],
     ['slip', ts.flatMap((t) => slips(c, k, t))],
@@ -266,12 +314,44 @@ function describeT(t: TransformId, a: Model): string {
   }
 }
 
-function explain(ts: TransformId[], a: Model, whys: [string, string]): string {
+/** come `describeT`, in inglese */
+function describeTEn(t: TransformId, a: Model): string {
+  switch (t) {
+    case 'rot90':
+      return 'every shape rotates 90° clockwise';
+    case 'rot180':
+      return 'every shape does a half turn (180°)';
+    case 'double':
+      return `the number of shapes doubles (from ${a.count} to ${a.count * 2})`;
+    case 'half':
+      return `the number of shapes is halved (from ${a.count} to ${a.count / 2})`;
+    case 'add':
+      return `one shape gets added (from ${a.count} to ${a.count + 1})`;
+    case 'grow':
+      return 'the shape gets bigger';
+    case 'shrink':
+      return 'the shape gets smaller';
+    case 'fillToggle':
+      return a.fill === 'solid' ? 'the full shape becomes empty (outline only)' : 'the empty shape becomes full';
+  }
+}
+
+function explain(ts: TransformId[], a: Model, whys: [LocalizedText, LocalizedText]): string {
   const parts = ts.map((t) => describeT(t, a));
   return (
     `Da A a B ${parts.join(' e ')}. La stessa trasformazione va applicata a C, che però ha forma e ` +
     'colore suoi: cambia lo stato, non l’identità. Le altre due opzioni sono gli errori più facili: ' +
-    `c'è chi ${whys[0]} e chi ${whys[1]}.`
+    `c'è chi ${whys[0].it} e chi ${whys[1].it}.`
+  );
+}
+
+/** come `explain`, in inglese */
+function explainEn(ts: TransformId[], a: Model, whys: [LocalizedText, LocalizedText]): string {
+  const parts = ts.map((t) => describeTEn(t, a));
+  return (
+    `From A to B, ${parts.join(' and ')}. The same transformation applies to C, which has its own shape and ` +
+    'color: it changes state, not identity. The other two options are the easiest mistakes: ' +
+    `one ${whys[0].en}, the other ${whys[1].en}.`
   );
 }
 
@@ -310,7 +390,7 @@ function assemble(
   cellC: CellSpec,
   correct: CellSpec,
   distractors: [CellSpec, CellSpec],
-  explanation: string
+  explanation: LocalizedText
 ): Question {
   const { choices, correctIndex } = placeChoices(
     rng,
@@ -323,7 +403,7 @@ function assemble(
   return {
     qtype: 'analogy' as const,
     difficulty,
-    prompt: 'A sta a B come C sta a...?',
+    prompt: L('A sta a B come C sta a...?', 'A is to B as C is to...?'),
     payload: {
       kind: 'cells' as const,
       analogy: true,
@@ -354,7 +434,7 @@ function buildFromTransforms(rng: Rng, difficulty: Difficulty, ts: TransformId[]
     render(c),
     render(correct),
     [render(w1.m), render(w2.m)],
-    explain(ts, a, [w1.why, w2.why])
+    L(explain(ts, a, [w1.why, w2.why]), explainEn(ts, a, [w1.why, w2.why]))
   );
 }
 
@@ -420,9 +500,14 @@ function genSwapColor(rng: Rng, difficulty: Difficulty): Question {
     C,
     correct,
     [copyB, posSwap],
-    'Da A a B le due figure si scambiano i colori restando ognuna al suo posto. ' +
-      'Lo stesso scambio va applicato alla coppia C: stesse forme nello stesso ordine, ma colori invertiti. ' +
-      'Il trucco: non copiare B e non scambiare le posizioni delle forme.'
+    L(
+      'Da A a B le due figure si scambiano i colori restando ognuna al suo posto. ' +
+        'Lo stesso scambio va applicato alla coppia C: stesse forme nello stesso ordine, ma colori invertiti. ' +
+        'Il trucco: non copiare B e non scambiare le posizioni delle forme.',
+      'From A to B, the two shapes swap colors while each one stays put. ' +
+        'The same swap applies to pair C: same shapes in the same order, but with the colors flipped. ' +
+        'The trick: don’t copy B, and don’t swap the shapes’ positions.'
+    )
   );
 }
 
@@ -447,9 +532,14 @@ function genSwapSize(rng: Rng, difficulty: Difficulty): Question {
     C,
     correct,
     [copyB, partial],
-    'Da A a B le due figure si scambiano le dimensioni: la grande diventa piccola e la piccola diventa grande. ' +
-      'Lo stesso vale per la coppia C. Il trucco: entrambe le figure cambiano dimensione, non una sola, ' +
-      'e non bisogna copiare B.'
+    L(
+      'Da A a B le due figure si scambiano le dimensioni: la grande diventa piccola e la piccola diventa grande. ' +
+        'Lo stesso vale per la coppia C. Il trucco: entrambe le figure cambiano dimensione, non una sola, ' +
+        'e non bisogna copiare B.',
+      'From A to B, the two shapes swap sizes: the big one becomes small and the small one becomes big. ' +
+        'The same goes for pair C. The trick: both shapes change size, not just one — ' +
+        'and don’t copy B.'
+    )
   );
 }
 

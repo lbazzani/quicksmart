@@ -64,9 +64,10 @@
 // I distrattori non sono mai casuali: una mossa in più, su e giù scambiati,
 // sempre dritto, "mi sono dimenticato del corridoio prima del girotondo".
 
-import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { CellSpec, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { colorWord } from '../colors';
+import { colorNameEn, colorWord } from '../colors';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
 
 // TODO(coordinatore): quando 'paths' entrerà in QuestionType basta `qtype: 'paths'`.
@@ -96,6 +97,14 @@ const DIR_CHOICE: Record<Dir, string> = {
   180: 'a sinistra',
   270: 'in alto',
 };
+/**
+ * Come DIR_WORD e DIR_CHOICE, in inglese: le due tabelle italiane esistono
+ * perché "destra" (parola nuda, nel racconto del percorso) e "a destra"
+ * (locuzione, nell'opzione di risposta) sono forme diverse. In inglese
+ * collassano nella stessa parola breve ("right"/"down"/"left"/"up"), buona sia
+ * dentro la frase sia da sola nel riquadro dell'opzione: basta una tabella.
+ */
+const DIR_EN: Record<Dir, string> = { 0: 'right', 90: 'down', 180: 'left', 270: 'up' };
 
 interface Pos {
   r: number;
@@ -146,10 +155,39 @@ const FIGS: FigInfo[] = [
   { shape: 'square', name: 'quadrato', il: 'il quadrato', al: 'al quadrato', sul: 'sul quadrato' },
 ];
 
+/**
+ * Come FIGS, in inglese: basta il sostantivo. L'articolo inglese "the" non
+ * cambia con la preposizione, quindi non serve la tripletta il/al/sul — le
+ * frasi che la usano si ricompongono a mano in ogni funzione xxxEn qui sotto,
+ * scegliendo "to"/"at"/"on" secondo il verbo della frase (es. "go to the
+ * heart" ma "land on the heart"), non con una mappa meccanica.
+ */
+const FIG_NAME_EN: Record<ShapeName, string> = {
+  circle: 'circle',
+  square: 'square',
+  triangle: 'triangle',
+  diamond: 'diamond',
+  star: 'star',
+  pentagon: 'pentagon',
+  hexagon: 'hexagon',
+  arrow: 'arrow',
+  heart: 'heart',
+  cross: 'cross',
+  moon: 'moon',
+  dot: 'dot',
+};
+
+const figNameEn = (f: FigInfo) => FIG_NAME_EN[f.shape];
+
 /** "1 mossa" / "3 mosse": l'unità di misura del percorso, una freccia seguita */
 const mosse = (n: number) => `${n} ${n === 1 ? 'mossa' : 'mosse'}`;
 /** "1 casella" / "4 caselle" */
 const caselle = (n: number) => `${n} ${n === 1 ? 'casella' : 'caselle'}`;
+/** come `mosse`/`caselle`, in inglese: "1 move"/"3 moves", "1 cell"/"4 cells" */
+const movesEn = (n: number) => `${n} ${n === 1 ? 'move' : 'moves'}`;
+const cellsEn = (n: number) => `${n} ${n === 1 ? 'cell' : 'cells'}`;
+/** "once" / "3 times" */
+const timesEn = (n: number) => (n === 1 ? 'once' : `${n} times`);
 /**
  * La definizione della mossa sta nel PROMPT di ogni domanda che chiede di
  * contare: è la regola che serve per rispondere, e nella spiegazione — che si
@@ -158,6 +196,8 @@ const caselle = (n: number) => `${n} ${n === 1 ? 'casella' : 'caselle'}`;
  * muro di testo e si perde prima di guardare la griglia.
  */
 const REGOLA_MOSSA = 'Ogni freccia che segui è una mossa';
+/** come REGOLA_MOSSA, in inglese */
+const REGOLA_MOSSA_EN = 'Every arrow you follow is one move';
 
 /** maiuscola a inizio frase ("il cuore" → "Il cuore") */
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -181,6 +221,8 @@ const ARROW_COLORS = [0, 6];
  * stella chiamata "viola" e disegnata verde acqua farebbe sbagliare chi ragiona.
  */
 const starLabel = (color: number) => `stella ${colorWord(color, true)}`;
+/** come `starLabel`, in inglese: l'ordine si inverte, "yellow star" non "star yellow" */
+const starLabelEn = (color: number) => `${colorNameEn(color)} star`;
 
 // ---------------------------------------------------------------------------
 // tavola
@@ -283,6 +325,13 @@ function countTurns(path: Pos[]): number {
 function routeWords(path: Pos[]): string {
   const w: string[] = [];
   for (let i = 0; i + 1 < path.length; i++) w.push(DIR_WORD[dirBetween(path[i], path[i + 1])]);
+  return w.join(' → ');
+}
+
+/** come `routeWords`, in inglese: "right → down → down" */
+function routeWordsEn(path: Pos[]): string {
+  const w: string[] = [];
+  for (let i = 0; i + 1 < path.length; i++) w.push(DIR_EN[dirBetween(path[i], path[i + 1])]);
   return w.join(' → ');
 }
 
@@ -477,8 +526,8 @@ function buildRho(rng: Rng, R: number, C: number, len: number, tailLen: number):
 
 interface Cand {
   pos: Pos;
-  /** come si spiega l'errore di chi la sceglie */
-  why: string;
+  /** come si spiega l'errore di chi la sceglie, in ogni lingua */
+  why: LocalizedText;
 }
 
 /**
@@ -516,13 +565,25 @@ function genLanding(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   if (!samePos(end, path[len])) throw new Error('simulazione incoerente');
 
   const cands: Cand[] = [
-    { pos: tr[len + 1], why: `è dove arrivi facendo una mossa in più, cioè ${mosse(len + 1)}` },
+    {
+      pos: tr[len + 1],
+      why: L(`è dove arrivi facendo una mossa in più, cioè ${mosse(len + 1)}`, `is where you land by making one move too many — ${movesEn(len + 1)} in total`),
+    },
     {
       pos: straightEnd(R, C, tr, len),
-      why: 'è dove arrivi andando sempre dritto come la prima freccia, senza accorgerti che poi le frecce girano',
+      why: L(
+        'è dove arrivi andando sempre dritto come la prima freccia, senza accorgerti che poi le frecce girano',
+        'is where you land by always going straight like the first arrow, without noticing that the arrows later turn'
+      ),
     },
-    { pos: trace(b, start, len, 'v').slice(-1)[0], why: 'è dove si finisce scambiando su e giù' },
-    { pos: trace(b, start, len, 'h').slice(-1)[0], why: 'è dove si finisce scambiando destra e sinistra' },
+    {
+      pos: trace(b, start, len, 'v').slice(-1)[0],
+      why: L('è dove si finisce scambiando su e giù', 'is where you end up if you swap up and down'),
+    },
+    {
+      pos: trace(b, start, len, 'h').slice(-1)[0],
+      why: L('è dove si finisce scambiando destra e sinistra', 'is where you end up if you swap left and right'),
+    },
   ];
   // VIETATA: la casella di chi conta la partenza come casella numero uno e si
   // ferma sulla N-esima casella invece che dopo N mosse. Ha ragionato bene, il
@@ -546,20 +607,26 @@ function genLanding(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   setLand(b, chosen[1].pos, figs[2], cols[2]);
 
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: figs[0].name }, [
-    { kind: 'text', text: figs[1].name },
-    { kind: 'text', text: figs[2].name },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(figs[0].name, figNameEn(figs[0])) }, [
+    { kind: 'text', text: L(figs[1].name, figNameEn(figs[1])) },
+    { kind: 'text', text: L(figs[2].name, figNameEn(figs[2])) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `${REGOLA_MOSSA}. Parti dalla stella e fai ${mosse(len)}: su quale figura ti fermi?`,
+    prompt: L(
+      `${REGOLA_MOSSA}. Parti dalla stella e fai ${mosse(len)}: su quale figura ti fermi?`,
+      `${REGOLA_MOSSA_EN}. Start from the star and make ${movesEn(len)}: which figure do you stop on?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Le mosse dicono: ${routeWords(tr.slice(0, len + 1))}. Dopo ${mosse(len)} ti fermi ${figs[0].sul}. ` +
-      `Attenzione: ${figs[1].il} ${chosen[0].why}; ${figs[2].il} ${chosen[1].why}.`,
+        `Attenzione: ${figs[1].il} ${chosen[0].why.it}; ${figs[2].il} ${chosen[1].why.it}.`,
+      `The moves are: ${routeWordsEn(tr.slice(0, len + 1))}. After ${movesEn(len)} you stop on the ${figNameEn(figs[0])}. ` +
+        `Watch out: the ${figNameEn(figs[1])} ${chosen[0].why.en}; the ${figNameEn(figs[2])} ${chosen[1].why.en}.`
+    ),
   };
 }
 
@@ -593,20 +660,26 @@ function genCount(rng: Rng, difficulty: Difficulty, R: number, C: number, len: n
 
   const arrowColor = pick(rng, ARROW_COLORS);
   const wrongs = countDistractors(rng, len);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(len) }, [
-    { kind: 'text', text: String(wrongs[0]) },
-    { kind: 'text', text: String(wrongs[1]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(len)) }, [
+    { kind: 'text', text: L(String(wrongs[0])) },
+    { kind: 'text', text: L(String(wrongs[1])) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `${REGOLA_MOSSA}: quante mosse fai per andare dalla stella ${figs[0].al}?`,
+    prompt: L(
+      `${REGOLA_MOSSA}: quante mosse fai per andare dalla stella ${figs[0].al}?`,
+      `${REGOLA_MOSSA_EN}: how many moves does it take to go from the star to the ${figNameEn(figs[0])}?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Il percorso dalla stella ${figs[0].al} è: ${routeWords(path)}. Le mosse sono ${len}: ` +
-      `ogni mossa ti sposta di una casella, e con l'ultima arrivi ${figs[0].sul}.`,
+        `ogni mossa ti sposta di una casella, e con l'ultima arrivi ${figs[0].sul}.`,
+      `The route from the star to the ${figNameEn(figs[0])} is: ${routeWordsEn(path)}. That's ${len} moves: ` +
+        `each move shifts you one cell, and the last one lands you on the ${figNameEn(figs[0])}.`
+    ),
   };
 }
 
@@ -670,26 +743,36 @@ function genTurns(rng: Rng, difficulty: Difficulty, R: number, C: number, len: n
 
   // racconto dei cambi di direzione
   const changes: string[] = [];
+  const changesEn: string[] = [];
   for (let i = 1; i + 1 < path.length; i++) {
     const a = dirBetween(path[i - 1], path[i]);
     const c2 = dirBetween(path[i], path[i + 1]);
-    if (a !== c2) changes.push(`da ${DIR_WORD[a]} a ${DIR_WORD[c2]}`);
+    if (a !== c2) {
+      changes.push(`da ${DIR_WORD[a]} a ${DIR_WORD[c2]}`);
+      changesEn.push(`${DIR_EN[a]} to ${DIR_EN[c2]}`);
+    }
   }
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(turns) }, [
-    { kind: 'text', text: String(wrongs[0]) },
-    { kind: 'text', text: String(wrongs[1]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(turns)) }, [
+    { kind: 'text', text: L(String(wrongs[0])) },
+    { kind: 'text', text: L(String(wrongs[1])) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Vai dalla stella ${fig.al} seguendo le frecce: quante volte giri, cioè cambi direzione?`,
+    prompt: L(
+      `Vai dalla stella ${fig.al} seguendo le frecce: quante volte giri, cioè cambi direzione?`,
+      `Go from the star to the ${figNameEn(fig)} following the arrows: how many times do you turn — that is, change direction?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Il percorso è: ${routeWords(path)}. Si gira quando la freccia nuova punta da un'altra parte, ` +
-      `e qui capita ${turns} ${turns === 1 ? 'volta' : 'volte'}: ${changes.join('; ')}.`,
+        `e qui capita ${turns} ${turns === 1 ? 'volta' : 'volte'}: ${changes.join('; ')}.`,
+      `The route is: ${routeWordsEn(path)}. You turn whenever the new arrow points a different way, ` +
+        `and here that happens ${timesEn(turns)}: ${changesEn.join('; ')}.`
+    ),
   };
 }
 
@@ -724,20 +807,26 @@ function genLastDir(rng: Rng, difficulty: Difficulty, R: number, C: number, len:
   }
   if (wrongs.length < 2) throw new Error('distrattori non costruibili');
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: DIR_CHOICE[last] }, [
-    { kind: 'text', text: DIR_CHOICE[wrongs[0]] },
-    { kind: 'text', text: DIR_CHOICE[wrongs[1]] },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(DIR_CHOICE[last], DIR_EN[last]) }, [
+    { kind: 'text', text: L(DIR_CHOICE[wrongs[0]], DIR_EN[wrongs[0]]) },
+    { kind: 'text', text: L(DIR_CHOICE[wrongs[1]], DIR_EN[wrongs[1]]) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Vai dalla stella ${fig.al} seguendo le frecce: dove punta l'ultima freccia, quella con cui ci arrivi?`,
+    prompt: L(
+      `Vai dalla stella ${fig.al} seguendo le frecce: dove punta l'ultima freccia, quella con cui ci arrivi?`,
+      `Go from the star to the ${figNameEn(fig)} following the arrows: where does the last arrow point, the one that gets you there?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Il percorso è: ${routeWords(path)}. L'ultima freccia che segui è quella della casella da cui entri ` +
-      `${fig.sul}, e punta ${DIR_CHOICE[last]}.`,
+        `${fig.sul}, e punta ${DIR_CHOICE[last]}.`,
+      `The route is: ${routeWordsEn(path)}. The last arrow you follow is the one on the cell right before the ${figNameEn(fig)}, ` +
+        `and it points ${DIR_EN[last]}.`
+    ),
   };
 }
 
@@ -781,21 +870,28 @@ function genWhichStar(rng: Rng, difficulty: Difficulty, R: number, C: number, le
   }
 
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: starLabel(cols[0]) }, [
-    { kind: 'text', text: starLabel(cols[1]) },
-    { kind: 'text', text: starLabel(cols[2]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(starLabel(cols[0]), starLabelEn(cols[0])) }, [
+    { kind: 'text', text: L(starLabel(cols[1]), starLabelEn(cols[1])) },
+    { kind: 'text', text: L(starLabel(cols[2]), starLabelEn(cols[2])) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `Ogni stella segue le frecce dalla sua casella: quale stella arriva ${fig.al}?`,
+    prompt: L(
+      `Ogni stella segue le frecce dalla sua casella: quale stella arriva ${fig.al}?`,
+      `Each star follows the arrows from its own cell: which star reaches the ${figNameEn(fig)}?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La ${starLabel(cols[0])} fa ${routeWords(good)} e con ${mosse(len)} arriva ${fig.sul}. ` +
-      `Le altre due finiscono nello stesso anello di ${caselle(loopLen)} e continuano a girare in tondo: ` +
-      `da lì le frecce non portano più ${fig.al}.`,
+        `Le altre due finiscono nello stesso anello di ${caselle(loopLen)} e continuano a girare in tondo: ` +
+        `da lì le frecce non portano più ${fig.al}.`,
+      `The ${starLabelEn(cols[0])} does ${routeWordsEn(good)} and reaches the ${figNameEn(fig)} in ${movesEn(len)}. ` +
+        `The other two end up in the same loop of ${cellsEn(loopLen)} and keep going in circles: ` +
+        `from there the arrows no longer lead to the ${figNameEn(fig)}.`
+    ),
   };
 }
 
@@ -828,21 +924,28 @@ function genLoopBack(rng: Rng, difficulty: Difficulty, R: number, C: number): Qu
 
   const arrowColor = pick(rng, ARROW_COLORS);
   const wrongs = loopDistractors(rng, loopLen);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(loopLen) }, [
-    { kind: 'text', text: String(wrongs[0]) },
-    { kind: 'text', text: String(wrongs[1]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(loopLen)) }, [
+    { kind: 'text', text: L(String(wrongs[0])) },
+    { kind: 'text', text: L(String(wrongs[1])) },
   ]);
   return {
     qtype: 'paths',
     difficulty,
-    prompt: `${REGOLA_MOSSA}: quante mosse fai per tornare sulla casella della stella?`,
+    prompt: L(
+      `${REGOLA_MOSSA}: quante mosse fai per tornare sulla casella della stella?`,
+      `${REGOLA_MOSSA_EN}: how many moves does it take to get back to the star's cell?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Le frecce formano un anello chiuso e la stella è già sull'anello: ${routeWords(tr)}. ` +
-      `L'anello ha ${caselle(loopLen)}, ognuna con la sua freccia, quindi servono ${mosse(loopLen)}: ` +
-      `l'ultima ti fa rientrare sulla stella.`,
+        `L'anello ha ${caselle(loopLen)}, ognuna con la sua freccia, quindi servono ${mosse(loopLen)}: ` +
+        `l'ultima ti fa rientrare sulla stella.`,
+      `The arrows form a closed loop, and the star is already on it: ${routeWordsEn(tr)}. ` +
+        `The loop has ${cellsEn(loopLen)}, each with its own arrow, so it takes ${movesEn(loopLen)}: ` +
+        `the last one brings you back to the star.`
+    ),
   };
 }
 
@@ -892,10 +995,12 @@ function genRace(rng: Rng, R: number, C: number): Question {
 
   // "insieme" invece di "arrivano insieme": nel riquadro dell'opzione la frase
   // lunga finiva sotto l'etichetta A/B/C
-  const correct: string = tie ? 'insieme' : starLabel(sA < sB ? cols[0] : cols[1]);
-  const others = tie
-    ? [starLabel(cols[0]), starLabel(cols[1])]
-    : [starLabel(sA < sB ? cols[1] : cols[0]), 'insieme'];
+  const correct: LocalizedText = tie
+    ? L('insieme', 'together')
+    : L(starLabel(sA < sB ? cols[0] : cols[1]), starLabelEn(sA < sB ? cols[0] : cols[1]));
+  const others: LocalizedText[] = tie
+    ? [L(starLabel(cols[0]), starLabelEn(cols[0])), L(starLabel(cols[1]), starLabelEn(cols[1]))]
+    : [L(starLabel(sA < sB ? cols[1] : cols[0]), starLabelEn(sA < sB ? cols[1] : cols[0])), L('insieme', 'together')];
   const arrowColor = pick(rng, ARROW_COLORS);
   const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: correct }, [
     { kind: 'text', text: others[0] },
@@ -904,16 +1009,25 @@ function genRace(rng: Rng, R: number, C: number): Question {
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: `Le due stelle seguono le frecce insieme, una mossa alla volta: quale arriva prima ${fig.al}?`,
+    prompt: L(
+      `Le due stelle seguono le frecce insieme, una mossa alla volta: quale arriva prima ${fig.al}?`,
+      `Both stars follow the arrows together, one move at a time: which one reaches the ${figNameEn(fig)} first?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La ${starLabel(cols[0])} fa ${routeWords(pathA)}: ${mosse(sA)}. ` +
-      `La ${starLabel(cols[1])} fa ${routeWords(pathB)}: ${mosse(sB)}. ` +
-      (tie
-        ? `Stesso numero di mosse: arrivano insieme. Non conta chi sembra più vicina in linea d'aria, ma quante mosse servono.`
-        : `Vince chi fa meno mosse: la ${starLabel(sA < sB ? cols[0] : cols[1])}.`),
+        `La ${starLabel(cols[1])} fa ${routeWords(pathB)}: ${mosse(sB)}. ` +
+        (tie
+          ? `Stesso numero di mosse: arrivano insieme. Non conta chi sembra più vicina in linea d'aria, ma quante mosse servono.`
+          : `Vince chi fa meno mosse: la ${starLabel(sA < sB ? cols[0] : cols[1])}.`),
+      `The ${starLabelEn(cols[0])} does ${routeWordsEn(pathA)}: ${movesEn(sA)}. ` +
+        `The ${starLabelEn(cols[1])} does ${routeWordsEn(pathB)}: ${movesEn(sB)}. ` +
+        (tie
+          ? `Same number of moves: they arrive together. What matters isn't who looks closer as the crow flies, but how many moves it takes.`
+          : `Whoever makes fewer moves wins: the ${starLabelEn(sA < sB ? cols[0] : cols[1])}.`)
+    ),
   };
 }
 
@@ -936,14 +1050,26 @@ function genCycleLanding(rng: Rng, R: number, C: number): Question {
   const cands: Cand[] = [
     {
       pos: cyc[(entry + (total % loopLen)) % loopLen],
-      why: `è dove finisce chi dimentica ${tailLen === 1 ? 'la mossa' : `le ${tailLen} mosse`} del corridoio e divide subito ${total} per ${loopLen}`,
+      why: L(
+        `è dove finisce chi dimentica ${tailLen === 1 ? 'la mossa' : `le ${tailLen} mosse`} del corridoio e divide subito ${total} per ${loopLen}`,
+        `is where you land if you forget about the ${tailLen === 1 ? 'one move' : `${tailLen} moves`} in the corridor and divide ${total} by ${loopLen} right away`
+      ),
     },
     {
       pos: cyc[(entry + ((total + tailLen) % loopLen)) % loopLen],
-      why: `è dove finisce chi somma il corridoio invece di toglierlo (${total} + ${tailLen} invece di ${total} − ${tailLen})`,
+      why: L(
+        `è dove finisce chi somma il corridoio invece di toglierlo (${total} + ${tailLen} invece di ${total} − ${tailLen})`,
+        `is where you land if you add the corridor instead of subtracting it (${total} + ${tailLen} instead of ${total} − ${tailLen})`
+      ),
     },
-    { pos: cyc[entry], why: 'è la casella da cui sei entrata nel girotondo, non quella dove ti fermi' },
-    { pos: tr[total + 1], why: 'è una casella più avanti nel girotondo: una mossa in più' },
+    {
+      pos: cyc[entry],
+      // nota: qui "sei entrata" (femminile) contro "eri entrato" (maschile) più
+      // sotto nella spiegazione, stesso soggetto sottinteso — incoerenza già
+      // presente in italiano, non toccata.
+      why: L('è la casella da cui sei entrata nel girotondo, non quella dove ti fermi', 'is the cell you entered the loop from, not the one where you stop'),
+    },
+    { pos: tr[total + 1], why: L('è una casella più avanti nel girotondo: una mossa in più', 'is one cell further around the loop: one move too many') },
   ];
   // VIETATA come sopra: la casella di chi conta la partenza come casella
   // numero uno. Su un anello ci si finisce facilmente per caso.
@@ -965,26 +1091,38 @@ function genCycleLanding(rng: Rng, R: number, C: number): Question {
 
   const laps = Math.floor((total - tailLen) / loopLen);
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: figs[0].name }, [
-    { kind: 'text', text: figs[1].name },
-    { kind: 'text', text: figs[2].name },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(figs[0].name, figNameEn(figs[0])) }, [
+    { kind: 'text', text: L(figs[1].name, figNameEn(figs[1])) },
+    { kind: 'text', text: L(figs[2].name, figNameEn(figs[2])) },
   ]);
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: `${REGOLA_MOSSA}. Parti dalla stella e fai ${mosse(total)}: su quale figura ti fermi?`,
+    prompt: L(
+      `${REGOLA_MOSSA}. Parti dalla stella e fai ${mosse(total)}: su quale figura ti fermi?`,
+      `${REGOLA_MOSSA_EN}. Start from the star and make ${movesEn(total)}: which figure do you stop on?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Non serve fare una per una tutte e ${total} le mosse. ` +
-      `${tailLen === 1 ? 'La prima mossa ti porta' : `Le prime ${tailLen} mosse ti portano`} dentro un giro chiuso di ${caselle(loopLen)}; ` +
-      `restano ${total} − ${tailLen} = ${total - tailLen} mosse da fare girando. ` +
-      `${total - tailLen} : ${loopLen} fa ${laps} ${laps === 1 ? 'giro' : 'giri'} con resto ${rest}, ` +
-      (rest === 0
-        ? `quindi ti fermi proprio sulla casella da cui eri entrato nel girotondo: ${figs[0].sul}.`
-        : `quindi ti fermi ${caselle(rest)} dopo l'ingresso: ${figs[0].sul}.`) +
-      ` Invece ${figs[1].il} ${chosen[0].why}.`,
+        `${tailLen === 1 ? 'La prima mossa ti porta' : `Le prime ${tailLen} mosse ti portano`} dentro un giro chiuso di ${caselle(loopLen)}; ` +
+        `restano ${total} − ${tailLen} = ${total - tailLen} mosse da fare girando. ` +
+        `${total - tailLen} : ${loopLen} fa ${laps} ${laps === 1 ? 'giro' : 'giri'} con resto ${rest}, ` +
+        (rest === 0
+          ? `quindi ti fermi proprio sulla casella da cui eri entrato nel girotondo: ${figs[0].sul}.`
+          : `quindi ti fermi ${caselle(rest)} dopo l'ingresso: ${figs[0].sul}.`) +
+        ` Invece ${figs[1].il} ${chosen[0].why.it}.`,
+      `No need to trace all ${total} moves one by one. ` +
+        `${tailLen === 1 ? 'The first move takes you' : `The first ${tailLen} moves take you`} into a closed loop of ${cellsEn(loopLen)}; ` +
+        `that leaves ${total} − ${tailLen} = ${total - tailLen} moves to go, looping around. ` +
+        `${total - tailLen} ÷ ${loopLen} is ${laps} ${laps === 1 ? 'lap' : 'laps'} with ${rest} left over, ` +
+        (rest === 0
+          ? `so you stop right on the cell where you entered the loop: the ${figNameEn(figs[0])}.`
+          : `so you stop ${cellsEn(rest)} past the entrance: the ${figNameEn(figs[0])}.`) +
+        ` But the ${figNameEn(figs[1])} ${chosen[0].why.en}.`
+    ),
   };
 }
 
@@ -1016,24 +1154,32 @@ function genCycleStar(rng: Rng, R: number, C: number): Question {
   }
 
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: starLabel(cols[0]) }, [
-    { kind: 'text', text: starLabel(cols[1]) },
-    { kind: 'text', text: starLabel(cols[2]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(starLabel(cols[0]), starLabelEn(cols[0])) }, [
+    { kind: 'text', text: L(starLabel(cols[1]), starLabelEn(cols[1])) },
+    { kind: 'text', text: L(starLabel(cols[2]), starLabelEn(cols[2])) },
   ]);
   return {
     qtype: 'paths',
     difficulty: 3,
     // niente premessa dichiarativa ("Una stella gira in tondo per sempre: …"):
     // il fatto e la domanda stanno in una frase sola, che finisce con "quale?"
-    prompt: `Una delle tre stelle gira in tondo e non arriva mai ${fig.al}: quale?`,
+    prompt: L(
+      `Una delle tre stelle gira in tondo e non arriva mai ${fig.al}: quale?`,
+      `One of the three stars goes in circles and never reaches the ${figNameEn(fig)}: which one?`
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La ${starLabel(cols[0])} parte (${routeWords([...tail, trace(b, tail[tail.length - 1], 1)[1]])}) ed entra in un anello di ` +
-      `${caselle(loopLen)}: da lì le frecce la fanno girare sempre sulle stesse caselle, non ne esce più. ` +
-      `La ${starLabel(cols[1])} arriva ${fig.sul} con ${mosse(lenA)} e la ${starLabel(cols[2])} con ${mosse(lenB)}. ` +
-      `Il trucco è accorgersi che un gruppo di frecce si richiude su sé stesso.`,
+        `${caselle(loopLen)}: da lì le frecce la fanno girare sempre sulle stesse caselle, non ne esce più. ` +
+        `La ${starLabel(cols[1])} arriva ${fig.sul} con ${mosse(lenA)} e la ${starLabel(cols[2])} con ${mosse(lenB)}. ` +
+        `Il trucco è accorgersi che un gruppo di frecce si richiude su sé stesso.`,
+      `The ${starLabelEn(cols[0])} starts out (${routeWordsEn([...tail, trace(b, tail[tail.length - 1], 1)[1]])}) and enters a loop of ` +
+        `${cellsEn(loopLen)}: from there the arrows keep it circling the same cells forever, it never gets out. ` +
+        `The ${starLabelEn(cols[1])} reaches the ${figNameEn(fig)} in ${movesEn(lenA)}, and the ${starLabelEn(cols[2])} in ${movesEn(lenB)}. ` +
+        `The trick is noticing that a group of arrows loops back on itself.`
+    ),
   };
 }
 
@@ -1076,21 +1222,28 @@ function genCycleLen(rng: Rng, R: number, C: number): Question {
 
   const wrongs = loopDistractors(rng, loopLen);
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(loopLen) }, [
-    { kind: 'text', text: String(wrongs[0]) },
-    { kind: 'text', text: String(wrongs[1]) },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(loopLen)) }, [
+    { kind: 'text', text: L(String(wrongs[0])) },
+    { kind: 'text', text: L(String(wrongs[1])) },
   ]);
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: 'Segui le frecce dalla stella: giri in tondo e torni sulla stella. Da quante caselle è fatto il giro?',
+    prompt: L(
+      'Segui le frecce dalla stella: giri in tondo e torni sulla stella. Da quante caselle è fatto il giro?',
+      'Follow the arrows from the star: you go around in a loop and come back to the star. How many cells make up the loop?'
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Il giro è: ${routeWords(tr)}. Passi ${figs[0].sul} e ${figs[1].sul} e torni sulla stella: ` +
-      `le caselle del giro, stella compresa, sono ${loopLen}. ` +
-      `Tante quante le mosse per tornare al punto di partenza, perché ogni casella del giro ha la sua freccia.`,
+        `le caselle del giro, stella compresa, sono ${loopLen}. ` +
+        `Tante quante le mosse per tornare al punto di partenza, perché ogni casella del giro ha la sua freccia.`,
+      `The loop is: ${routeWordsEn(tr)}. Along the way you pass the ${figNameEn(figs[0])} and the ${figNameEn(figs[1])}, then come back to the star: ` +
+        `the cells in the loop, star included, add up to ${loopLen}. ` +
+        `That's the same as the moves it takes to get back to the start, because every cell in the loop has its own arrow.`
+    ),
   };
 }
 
@@ -1127,21 +1280,28 @@ function genForeverFig(rng: Rng, R: number, C: number): Question {
   if (visits(outside) !== 0) throw new Error('la figura fuori strada viene toccata');
 
   const arrowColor = pick(rng, ARROW_COLORS);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: figs[0].name }, [
-    { kind: 'text', text: figs[1].name },
-    { kind: 'text', text: figs[2].name },
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(figs[0].name, figNameEn(figs[0])) }, [
+    { kind: 'text', text: L(figs[1].name, figNameEn(figs[1])) },
+    { kind: 'text', text: L(figs[2].name, figNameEn(figs[2])) },
   ]);
   return {
     qtype: 'paths',
     difficulty: 3,
-    prompt: 'Segui le frecce dalla stella e non fermarti mai: su quale figura ripassi ogni volta, per sempre?',
+    prompt: L(
+      'Segui le frecce dalla stella e non fermarti mai: su quale figura ripassi ogni volta, per sempre?',
+      'Follow the arrows from the star and never stop: which figure do you pass every single time, forever?'
+    ),
     payload: toPayload(b, arrowColor),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Dalla stella le frecce fanno ${routeWords([...tail, cyc[entry]])} ed entrano in un giro chiuso di ` +
-      `${caselle(loopLen)}, da cui non si esce più. ${cap(figs[0].il)} sta su quel giro: ci ripassi a ogni giro, per sempre. ` +
-      `${cap(figs[1].il)} è sul pezzo iniziale e lo tocchi una volta sola; ${figs[2].il} non lo tocchi mai.`,
+        `${caselle(loopLen)}, da cui non si esce più. ${cap(figs[0].il)} sta su quel giro: ci ripassi a ogni giro, per sempre. ` +
+        `${cap(figs[1].il)} è sul pezzo iniziale e lo tocchi una volta sola; ${figs[2].il} non lo tocchi mai.`,
+      `From the star the arrows go ${routeWordsEn([...tail, cyc[entry]])} and enter a closed loop of ` +
+        `${cellsEn(loopLen)}, which you never leave. The ${figNameEn(figs[0])} sits on that loop: you pass it every lap, forever. ` +
+        `The ${figNameEn(figs[1])} is on the starting stretch and you touch it just once; the ${figNameEn(figs[2])} you never touch at all.`
+    ),
   };
 }
 

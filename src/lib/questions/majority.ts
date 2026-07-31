@@ -19,17 +19,24 @@
 //  - quando il criterio è un colore, mai due colori confondibili nella stessa
 //    domanda (pickColors usa le coppie CONFUSABLE di ../colors).
 
-import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeSpec } from '../types';
+import type { CellSpec, ChoiceVisual, Difficulty, LocalizedText, Question, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
+import { colorNameEn } from '../colors';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
-import { SHAPES, artPl, cap, col, pickColors, type ColorInfo, type ShapeInfo } from './vocab';
+import { SHAPES, SHAPES_EN, artPl, cap, col, pickColors, type ColorInfo, type ShapeInfo, type ShapeInfoEn } from './vocab';
 
-const GROUP_LABEL = ['Gruppo 1', 'Gruppo 2', 'Gruppo 3'];
+const GROUP_LABEL: LocalizedText[] = [L('Gruppo 1', 'Group 1'), L('Gruppo 2', 'Group 2'), L('Gruppo 3', 'Group 3')];
 /** etichetta vuota ma presente: tiene le celle della riga allineate */
-const NO_LABEL = ' ';
+const NO_LABEL: LocalizedText = L(' ');
 
 /** scarto minimo del gruppo vincente da ogni altro */
 const GAP = 2;
+
+/** controparte inglese di una ShapeInfo italiana (stesso `shape`, stesso ordine in SHAPES_EN) */
+function shapeEnOf(s: ShapeInfo): ShapeInfoEn {
+  return SHAPES_EN.find((x) => x.shape === s.shape)!;
+}
 
 function rowOf(shapes: ShapeSpec[], group: number): CellSpec[] {
   return shapes.map((s, i) => ({ shapes: [s], label: i === 0 ? GROUP_LABEL[group] : NO_LABEL }));
@@ -72,7 +79,7 @@ function d1TwoGroups(rng: Rng): Question {
   const rb = countRow(rows[1], () => true);
   if (ra !== na || rb !== nb) throw new Error('conteggio incoerente');
 
-  const pari: ChoiceVisual = { kind: 'text', text: 'Sono uguali' };
+  const pari: ChoiceVisual = { kind: 'text', text: L('Sono uguali', "It's a tie") };
   const correct = ra === rb ? pari : groupChoice(ra > rb ? 0 : 1);
   const distractors = (ra === rb ? [groupChoice(0), groupChoice(1)] : [groupChoice(ra > rb ? 1 : 0), pari]) as [
     ChoiceVisual,
@@ -81,18 +88,24 @@ function d1TwoGroups(rng: Rng): Question {
   const { choices, correctIndex } = placeChoices(rng, correct, distractors);
 
   const descr = (s: ShapeInfo, c: ColorInfo, n: number) => `${n} ${s.many} ${col(c, s.f)}`;
+  const descrEn = (s: ShapeInfo, c: ColorInfo, n: number) => `${n} ${colorNameEn(c.idx)} ${shapeEnOf(s).many}`;
   return {
     qtype: 'majority',
     difficulty: 1,
-    prompt: 'Quale gruppo ha più figure?',
+    prompt: L('Quale gruppo ha più figure?', 'Which group has more shapes?'),
     payload: groupsPayload(rows),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Basta contare le due file. Nel Gruppo 1 ci sono ${descr(sa, ca, ra)}, nel Gruppo 2 ${descr(sb, cb, rb)}: ` +
-      (ra === rb
-        ? 'sono pari, nessuno dei due vince.'
-        : `vince il Gruppo ${ra > rb ? 1 : 2} con ${Math.max(ra, rb) - Math.min(ra, rb)} figure in più.`),
+        (ra === rb
+          ? 'sono pari, nessuno dei due vince.'
+          : `vince il Gruppo ${ra > rb ? 1 : 2} con ${Math.max(ra, rb) - Math.min(ra, rb)} figure in più.`),
+      `Just count the two rows. Group 1 has ${descrEn(sa, ca, ra)}, Group 2 has ${descrEn(sb, cb, rb)}: ` +
+        (ra === rb
+          ? "it's a tie, neither one wins."
+          : `Group ${ra > rb ? 1 : 2} wins with ${Math.max(ra, rb) - Math.min(ra, rb)} more shapes.`)
+    ),
   };
 }
 
@@ -144,14 +157,18 @@ function d2MostShape(rng: Rng): Question {
   return {
     qtype: 'majority',
     difficulty: 2,
-    prompt: `In quale gruppo ci sono più ${T.many}?`,
+    prompt: L(`In quale gruppo ci sono più ${T.many}?`, `Which group has more ${shapeEnOf(T).many}?`),
     payload: groupsPayload(rows),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Le altre figure non contano: si contano solo ${artPl(T)} ${T.many}, gruppo per gruppo. ` +
-      `${cap(found.map((n, g) => `${n} nel Gruppo ${g + 1}`).join(', '))}. ` +
-      `Vince il Gruppo ${winner + 1} con ${counts[winner] - Math.max(...found.filter((_, g) => g !== winner))} in più.`,
+        `${cap(found.map((n, g) => `${n} nel Gruppo ${g + 1}`).join(', '))}. ` +
+        `Vince il Gruppo ${winner + 1} con ${counts[winner] - Math.max(...found.filter((_, g) => g !== winner))} in più.`,
+      `The other shapes don't count: we're only counting the ${shapeEnOf(T).many}, group by group. ` +
+        `${cap(found.map((n, g) => `${n} in Group ${g + 1}`).join(', '))}. ` +
+        `Group ${winner + 1} wins with ${counts[winner] - Math.max(...found.filter((_, g) => g !== winner))} more.`
+    ),
   };
 }
 
@@ -197,15 +214,23 @@ function d3MostShapeColor(rng: Rng): Question {
   return {
     qtype: 'majority',
     difficulty: 3,
-    prompt: `In quale gruppo ci sono più ${T.many} ${col(CT, T.f)}?`,
+    prompt: L(
+      `In quale gruppo ci sono più ${T.many} ${col(CT, T.f)}?`,
+      `Which group has more ${colorNameEn(CT.idx)} ${shapeEnOf(T).many}?`
+    ),
     payload: groupsPayload(rows),
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `Attenzione: in ogni gruppo ci sono anche ${T.many} ${col(CB, T.f)}, che non valgono. ` +
-      `Contando solo ${artPl(T)} ${T.many} ${col(CT, T.f)}: ` +
-      `${found.map((n, g) => `${n} nel Gruppo ${g + 1}`).join(', ')}. ` +
-      `Vince il Gruppo ${winner + 1}.`,
+        `Contando solo ${artPl(T)} ${T.many} ${col(CT, T.f)}: ` +
+        `${found.map((n, g) => `${n} nel Gruppo ${g + 1}`).join(', ')}. ` +
+        `Vince il Gruppo ${winner + 1}.`,
+      `Watch out: every group also has ${colorNameEn(CB.idx)} ${shapeEnOf(T).many}, which don't count. ` +
+        `Counting only the ${colorNameEn(CT.idx)} ${shapeEnOf(T).many}: ` +
+        `${found.map((n, g) => `${n} in Group ${g + 1}`).join(', ')}. ` +
+        `Group ${winner + 1} wins.`
+    ),
   };
 }
 

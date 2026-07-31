@@ -26,9 +26,10 @@ async function main() {
          FROM questions WHERE qtype = $1 AND difficulty = $2 ORDER BY random() LIMIT $3`,
         [t, d, per]
       );
+      // l'audit alla cieca è in italiano: si esporta solo quella lingua (prompt/explanation sono LocalizedText in DB)
       for (const r of rows) {
-        sample.push({ id: r.id, difficulty: r.difficulty, prompt: r.prompt, payload: r.payload, choices: r.choices });
-        solutions[r.id] = { correctIndex: r.correct_index, explanation: r.explanation, qtype: t, difficulty: r.difficulty };
+        sample.push({ id: r.id, difficulty: r.difficulty, prompt: r.prompt.it, payload: r.payload, choices: r.choices });
+        solutions[r.id] = { correctIndex: r.correct_index, explanation: r.explanation.it, qtype: t, difficulty: r.difficulty };
       }
     }
     writeFileSync(`${dir}/questions-${t}.json`, JSON.stringify(sample, null, 1));

@@ -25,7 +25,9 @@
 
 import type { ChoiceVisual, CountedShapes, Difficulty, Question, ShapeName } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { balancedNumericDistractors, placeChoices, retry } from './qutils';
+import { SHAPES_EN, type ShapeInfoEn } from './vocab';
 
 interface ShapeInfo {
   shape: ShapeName;
@@ -56,6 +58,25 @@ function cnt(n: number, s: ShapeInfo): string {
 /** "UN cerchio" / "UNA stella" */
 function UNO(s: ShapeInfo): string {
   return `${s.un.toUpperCase()} ${s.name}`;
+}
+
+/**
+ * Controparte inglese di una ShapeInfo di questo file (stesso `shape`): i nomi
+ * inglesi delle forme vivono in vocab.ts (SHAPES_EN), unica fonte per tutti i
+ * generatori — qui si cerca solo la voce giusta, come in majority.ts.
+ */
+function shapeEnOf(s: ShapeInfo): ShapeInfoEn {
+  return SHAPES_EN.find((x) => x.shape === s.shape)!;
+}
+
+/** "3 circles" / "1 circle" */
+function cntEn(n: number, s: ShapeInfoEn): string {
+  return `${n} ${n === 1 ? s.one : s.many}`;
+}
+
+/** "ONE circle" — stessa enfasi di UNO(): il numero esatto, non l'articolo */
+function oneEn(s: ShapeInfoEn): string {
+  return `ONE ${s.one}`;
 }
 
 type Scale = { left: CountedShapes[]; right: CountedShapes[]; tilt: -1 | 0 | 1 };
@@ -113,8 +134,8 @@ function numberChoices(
   if (out.every((v) => visible.includes(v))) throw new Error('distrattori tutti copiati dal disegno');
   shuffle(rng, out);
   return [
-    { kind: 'text', text: String(out[0]) },
-    { kind: 'text', text: String(out[1]) },
+    { kind: 'text', text: L(String(out[0])) },
+    { kind: 'text', text: L(String(out[1])) },
   ];
 }
 
@@ -158,6 +179,8 @@ const D1_MULTIPLY = [
 
 /** d1a — "Quanti B pesano quanto UN A?": bisogna dividere il piatto per a */
 function d1Divide(rng: Rng, A: ShapeInfo, B: ShapeInfo, cA: number, cB: number): Question {
+  const Ae = shapeEnOf(A);
+  const Be = shapeEnOf(B);
   const [a, k] = pick(rng, D1_DIVIDE);
   const m = a * k; // forme B sull'altro piatto
   // pesi interni: peso(A) = k, peso(B) = 1 → equilibrio garantito
@@ -176,22 +199,30 @@ function d1Divide(rng: Rng, A: ShapeInfo, B: ShapeInfo, cA: number, cB: number):
     [k + 1, k - 1, k + 2, k - 2], // la divisione sbagliata di poco
     [a, m] // i due numeri che si leggono sui piatti
   );
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(k) }, [w1, w2]);
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(k)) }, [w1, w2]);
   return {
     qtype: 'balance',
     difficulty: 1,
-    prompt: `${B.quanti} ${B.plural} pesano quanto ${UNO(A)}?`,
+    prompt: L(
+      `${B.quanti} ${B.plural} pesano quanto ${UNO(A)}?`,
+      `How many ${Be.many} weigh as much as ${oneEn(Ae)}?`
+    ),
     payload: { kind: 'balance', scales: [scale] },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La bilancia è in equilibrio: ${cnt(a, A)} pesano quanto ${cnt(m, B)}. ` +
-      `Dividendo entrambi i piatti per ${a}: ${UNO(A)} pesa quanto ${m}÷${a} = ${cnt(k, B)}.`,
+        `Dividendo entrambi i piatti per ${a}: ${UNO(A)} pesa quanto ${m}÷${a} = ${cnt(k, B)}.`,
+      `The scale is balanced: ${cntEn(a, Ae)} weigh as much as ${cntEn(m, Be)}. ` +
+        `Dividing both sides by ${a}: ${oneEn(Ae)} weighs as much as ${m}÷${a} = ${cntEn(k, Be)}.`
+    ),
   };
 }
 
 /** d1b — "Quanti B pesano quanto N A?": la bilancia dà il rapporto, poi si moltiplica */
 function d1Multiply(rng: Rng, A: ShapeInfo, B: ShapeInfo, cA: number, cB: number): Question {
+  const Ae = shapeEnOf(A);
+  const Be = shapeEnOf(B);
   const [N, k] = pick(rng, D1_MULTIPLY);
   const n = N * k;
   const weight = (s: ShapeName) => (s === A.shape ? k : 1);
@@ -211,18 +242,25 @@ function d1Multiply(rng: Rng, A: ShapeInfo, B: ShapeInfo, cA: number, cB: number
     [n + 1, n - 1, n + 2, n - 2], // la moltiplicazione sbagliata di poco
     [1, k, N] // i numeri che si leggono sui piatti e nella domanda
   );
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(n) }, [w1, w2]);
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(n)) }, [w1, w2]);
   return {
     qtype: 'balance',
     difficulty: 1,
-    prompt: `${B.quanti} ${B.plural} pesano quanto ${cnt(N, A)}?`,
+    prompt: L(
+      `${B.quanti} ${B.plural} pesano quanto ${cnt(N, A)}?`,
+      `How many ${Be.many} weigh as much as ${cntEn(N, Ae)}?`
+    ),
     payload: { kind: 'balance', scales: [scale] },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La bilancia è in equilibrio: ${UNO(A)} pesa quanto ${cnt(k, B)}. ` +
-      `Per ${cnt(N, A)} servono ${N} volte tant${B.un === 'una' ? 'e' : 'i'} ${B.plural}: ` +
-      `${N} × ${k} = ${cnt(n, B)}.`,
+        `Per ${cnt(N, A)} servono ${N} volte tant${B.un === 'una' ? 'e' : 'i'} ${B.plural}: ` +
+        `${N} × ${k} = ${cnt(n, B)}.`,
+      `The scale is balanced: ${oneEn(Ae)} weighs as much as ${cntEn(k, Be)}. ` +
+        `For ${cntEn(N, Ae)} you need ${N} times as many ${Be.many}: ` +
+        `${N} × ${k} = ${cntEn(n, Be)}.`
+    ),
   };
 }
 
@@ -236,12 +274,12 @@ function genD1(rng: Rng): Question {
 // d2: due bilance transitive (H>M e M>L) → forma più pesante
 // ---------------------------------------------------------------------------
 function genD2(rng: Rng): Question {
-  const [H, M, L] = pickN(rng, SHAPES, 3); // pesante, media, leggera
+  const [H, M, Li] = pickN(rng, SHAPES, 3); // pesante, media, leggera ("Li" per non coprire l'helper L() dei testi)
   const [cH, cM, cL] = pickN(rng, COLORS, 3);
   const w = new Map<ShapeName, number>([
     [H.shape, 3],
     [M.shape, 2],
-    [L.shape, 1],
+    [Li.shape, 1],
   ]);
   const weight = (s: ShapeName) => w.get(s) ?? 0;
   // 1 contro 1, lati casuali: il tilt deriva dai pesi
@@ -249,26 +287,35 @@ function genD2(rng: Rng): Question {
     ? mkScale(pan(H, cH, 1), pan(M, cM, 1), weight)
     : mkScale(pan(M, cM, 1), pan(H, cH, 1), weight);
   const s2 = chance(rng, 0.5)
-    ? mkScale(pan(M, cM, 1), pan(L, cL, 1), weight)
-    : mkScale(pan(L, cL, 1), pan(M, cM, 1), weight);
+    ? mkScale(pan(M, cM, 1), pan(Li, cL, 1), weight)
+    : mkScale(pan(Li, cL, 1), pan(M, cM, 1), weight);
   const scales = chance(rng, 0.5) ? [s1, s2] : [s2, s1];
 
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: H.name }, [
-    { kind: 'text', text: M.name }, // la forma che "vince" solo un confronto diretto
-    { kind: 'text', text: L.name }, // chi legge il tilt al contrario
+  const He = shapeEnOf(H);
+  const Me = shapeEnOf(M);
+  const Lie = shapeEnOf(Li);
+
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(H.name, He.one) }, [
+    { kind: 'text', text: L(M.name, Me.one) }, // la forma che "vince" solo un confronto diretto
+    { kind: 'text', text: L(Li.name, Lie.one) }, // chi legge il tilt al contrario
   ]);
   return {
     qtype: 'balance',
     difficulty: 2,
-    prompt: 'Quale forma è la più pesante?',
+    prompt: L('Quale forma è la più pesante?', 'Which shape is the heaviest?'),
     payload: { kind: 'balance', scales },
     choices,
     correctIndex,
-    explanation:
+    explanation: L(
       `La bilancia pende sempre verso il piatto più pesante. Una bilancia mostra che ` +
-      `${H.il} ${H.name} pesa più ${M.del} ${M.name}; l'altra che ${M.il} ${M.name} pesa più ` +
-      `${L.del} ${L.name}. Mettendo in fila: ${H.name} > ${M.name} > ${L.name}, ` +
-      `quindi la forma più pesante è ${H.il} ${H.name}.`,
+        `${H.il} ${H.name} pesa più ${M.del} ${M.name}; l'altra che ${M.il} ${M.name} pesa più ` +
+        `${Li.del} ${Li.name}. Mettendo in fila: ${H.name} > ${M.name} > ${Li.name}, ` +
+        `quindi la forma più pesante è ${H.il} ${H.name}.`,
+      `The scale always tips toward the heavier side. One scale shows that ` +
+        `the ${He.one} weighs more than the ${Me.one}; the other that the ${Me.one} weighs more ` +
+        `than the ${Lie.one}. Putting them in order: ${He.one} > ${Me.one} > ${Lie.one}, ` +
+        `so the heaviest shape is the ${He.one}.`
+    ),
   };
 }
 
@@ -339,26 +386,43 @@ function genD3(rng: Rng): Question {
     b / a, // ferma la catena alla prima bilancia (conta gli S1, non i T)
   ];
   const [w1, w2] = numberChoices(rng, n, prefer, [n + 1, n - 1, n + 2, n - 2]);
-  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: String(n) }, [w1, w2]);
+  const { choices, correctIndex } = placeChoices(rng, { kind: 'text', text: L(String(n)) }, [w1, w2]);
+
+  const S0e = shapeEnOf(S0);
+  const S1e = shapeEnOf(S1);
+  const S2e = shapeEnOf(S2);
+  const Te = shapeEnOf(T);
 
   let expl = `Sappiamo che ${cnt(a, S0)} = ${cnt(b, S1)} e ${cnt(1, S1)} = ${cnt(d, S2)}`;
+  let explEn = `We know that ${cntEn(a, S0e)} = ${cntEn(b, S1e)} and ${cntEn(1, S1e)} = ${cntEn(d, S2e)}`;
   if (three) expl += ` e ${cnt(1, S2)} = ${cnt(e, S3)}`;
+  if (three) explEn += ` and ${cntEn(1, S2e)} = ${cntEn(e, shapeEnOf(S3))}`;
   expl += `. Quindi ${cnt(b, S1)} = ${cnt(b * d, S2)}`;
+  explEn += `. So ${cntEn(b, S1e)} = ${cntEn(b * d, S2e)}`;
   if (three) expl += ` = ${cnt(b * d * e, S3)}`;
+  if (three) explEn += ` = ${cntEn(b * d * e, shapeEnOf(S3))}`;
   expl += `, perciò ${cnt(a, S0)} = ${cnt(total, T)}`;
+  explEn += `, which means ${cntEn(a, S0e)} = ${cntEn(total, Te)}`;
   expl +=
     a > 1
       ? `: dividendo per ${a}, ${UNO(S0)} pesa quanto ${total}÷${a} = ${cnt(n, T)}.`
       : `, cioè ${UNO(S0)} pesa quanto ${cnt(n, T)}.`;
+  explEn +=
+    a > 1
+      ? `: dividing by ${a}, ${oneEn(S0e)} weighs as much as ${total}÷${a} = ${cntEn(n, Te)}.`
+      : `, that is, ${oneEn(S0e)} weighs as much as ${cntEn(n, Te)}.`;
 
   return {
     qtype: 'balance',
     difficulty: 3,
-    prompt: `${T.quanti} ${T.plural} servono per bilanciare ${UNO(S0)}?`,
+    prompt: L(
+      `${T.quanti} ${T.plural} servono per bilanciare ${UNO(S0)}?`,
+      `How many ${Te.many} are needed to balance ${oneEn(S0e)}?`
+    ),
     payload: { kind: 'balance', scales },
     choices,
     correctIndex,
-    explanation: expl,
+    explanation: L(expl, explEn),
   };
 }
 

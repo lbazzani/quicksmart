@@ -19,9 +19,10 @@
 // il ventaglio di errori plausibili si allarga a due passi, e la posizione della
 // risposta nella classifica cambia di volta in volta.
 
-import type { CellSpec, Difficulty, Question, ShapeName, ShapeSpec } from '../types';
+import type { CellSpec, Difficulty, LocalizedText, Question, ShapeName, ShapeSpec } from '../types';
 import { chance, pick, pickN, randInt, shuffle, type Rng } from '../rng';
-import { COLOR_NAMES } from '../colors';
+import { COLOR_NAMES, colorNameEn } from '../colors';
+import { L } from '../localize';
 import { balancedNumericDistractors, normRot, placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -80,6 +81,32 @@ const W: Record<ShapeName, Word> = {
   dot: { n: 'punto', p: 'punti', un: 'un', f: false },
 };
 
+/**
+ * Stessa tabella in inglese. Niente `f` (i nomi inglesi non hanno genere): solo
+ * l'articolo indeterminativo, che dipende dal SUONO iniziale ("a triangle" ma
+ * "an arrow"), non da un genere grammaticale.
+ */
+interface WordEn {
+  n: string; // singolare
+  p: string; // plurale
+  art: 'a' | 'an';
+}
+
+const W_EN: Record<ShapeName, WordEn> = {
+  circle: { n: 'circle', p: 'circles', art: 'a' },
+  square: { n: 'square', p: 'squares', art: 'a' },
+  triangle: { n: 'triangle', p: 'triangles', art: 'a' },
+  diamond: { n: 'diamond', p: 'diamonds', art: 'a' },
+  star: { n: 'star', p: 'stars', art: 'a' },
+  pentagon: { n: 'pentagon', p: 'pentagons', art: 'a' },
+  hexagon: { n: 'hexagon', p: 'hexagons', art: 'a' },
+  arrow: { n: 'arrow', p: 'arrows', art: 'an' },
+  heart: { n: 'heart', p: 'hearts', art: 'a' },
+  cross: { n: 'cross', p: 'crosses', art: 'a' },
+  moon: { n: 'moon', p: 'moons', art: 'a' },
+  dot: { n: 'dot', p: 'dots', art: 'a' },
+};
+
 /** coppie di colori troppo simili per essere usate insieme in un ciclo */
 const CLOSE: number[][] = [
   [0, 6],
@@ -106,6 +133,29 @@ function col(i: number): string {
 
 function fillWord(fill: Fill, f = false, plural = false): string {
   return fill === 'solid' ? agree('pieno', f, plural) : fill === 'outline' ? agree('vuoto', f, plural) : agree('meta', f, plural);
+}
+
+// ---------------------------------------------------------------------------
+// Parole (inglese). Gli aggettivi inglesi non si accordano con genere o
+// numero ("two big stars", non "twos bigs stars"): una parola sola per ogni
+// voce di ADJ, senza bisogno di un `agree()`.
+// ---------------------------------------------------------------------------
+
+const ADJ_EN: Record<keyof typeof ADJ, string> = {
+  pieno: 'full',
+  vuoto: 'empty',
+  meta: 'half-filled',
+  ruotato: 'rotated',
+  piccolo: 'small',
+  grande: 'big',
+};
+
+function colEn(i: number): string {
+  return colorNameEn(i);
+}
+
+function fillWordEn(fill: Fill): string {
+  return fill === 'solid' ? ADJ_EN.pieno : fill === 'outline' ? ADJ_EN.vuoto : ADJ_EN.meta;
 }
 
 /** n colori distinti e facili da distinguere tra loro */
@@ -464,9 +514,18 @@ function cycleText(shapes: ShapeName[]): string {
   return shapes.map((s) => W[s].n).join(' → ') + ' → ' + W[shapes[0]].n;
 }
 
+function cycleTextEn(shapes: ShapeName[]): string {
+  return shapes.map((s) => W_EN[s].n).join(' → ') + ' → ' + W_EN[shapes[0]].n;
+}
+
 /** "90° in senso orario" / "45° in senso antiorario" */
 function turn(deg: number): string {
   return `${Math.abs(deg)}° in senso ${deg >= 0 ? 'orario' : 'antiorario'}`;
+}
+
+/** "90° clockwise" / "45° counterclockwise" */
+function turnEn(deg: number): string {
+  return `${Math.abs(deg)}° ${deg >= 0 ? 'clockwise' : 'counterclockwise'}`;
 }
 
 /** frase finale: che cosa va al posto del "?" */
@@ -499,6 +558,38 @@ function finale(r: SeqRules): string {
     );
   }
   return `Quindi al posto del ? ${n > 1 ? 'ci vogliono' : 'ci vuole'} ${bits.join(', ')}.`;
+}
+
+/** come `finale`, in inglese */
+function finaleEn(r: SeqRules): string {
+  const hole = holeOf(r);
+  const c = cellAt(r, hole);
+  if (r.pair) {
+    const [x, y] = c.shapes;
+    const wx = W_EN[x.shape];
+    const wy = W_EN[y.shape];
+    const one = (s: ShapeSpec, w: WordEn) =>
+      `${w.art} ${w.n} colored ${colEn(s.color ?? 0)}` + (r.pair?.mode === 'fill' ? `, ${fillWordEn(s.fillMode as Fill)},` : '');
+    return `So the ? is ${one(x, wx)} on the left and ${one(y, wy)} on the right.`;
+  }
+  const s = c.shapes[0];
+  const n = c.shapes.length;
+  const w = W_EN[s.shape];
+  const bits: string[] = [n > 1 ? `${n} ${w.p}` : `${w.art} ${w.n}`];
+  if (r.colors && r.colors.length > 1) bits.push(`colored ${colEn(s.color ?? 0)}`);
+  if (r.fills && r.fills.length > 1) bits.push(fillWordEn(s.fillMode as Fill));
+  if (r.sizes && r.sizes.length > 1) bits.push((s.size ?? 0.8) >= 0.7 ? 'big' : 'small');
+  else if (r.sizeStart !== undefined) bits.push((r.sizeStep ?? 0) > 0 ? 'even bigger' : 'even smaller');
+  if (r.rotStep !== undefined) {
+    const back = r.rotStep < 0 && r.rotAlt === undefined && !r.rotAccel;
+    const delta = normRot(back ? rotAt(r, 0) - rotAt(r, hole) : rotAt(r, hole) - rotAt(r, 0));
+    bits.push(
+      delta === 0
+        ? `rotated like the first cell (a full turn)`
+        : `rotated ${delta}°${back ? ' counterclockwise' : ''} from the first cell`
+    );
+  }
+  return `So the ? is ${bits.join(', ')}.`;
 }
 
 function describe(r: SeqRules): string {
@@ -547,6 +638,55 @@ function describe(r: SeqRules): string {
       );
   }
   return 'Regola: ' + parts.join('; ') + '. ' + finale(r);
+}
+
+/** come `describe`, in inglese */
+function describeEn(r: SeqRules): string {
+  const parts: string[] = [];
+  if (r.pair) {
+    const p = r.pair;
+    const na = W_EN[p.a].n;
+    const nb = W_EN[p.b].n;
+    if (p.mode === 'pos')
+      parts.push(
+        p.colorsFixed
+          ? `the ${na} and the ${nb} swap places at every step, but the colors stay put (left is always ${colEn(p.ca)}, right is always ${colEn(p.cb)})`
+          : `the ${na} and the ${nb} swap places at every step, each keeping its own color`
+      );
+    else if (p.mode === 'color') parts.push(`the ${na} and the ${nb} stay put and swap color at every step`);
+    else parts.push(`the ${na} and the ${nb} swap fill at every step (turn by turn, one is full and the other empty)`);
+    if (p.rot && r.rotStep !== undefined) parts.push(`meanwhile both rotate ${turnEn(r.rotStep)} at every step`);
+  } else {
+    if (r.sides) {
+      parts.push(
+        `the number of sides ${r.sides > 0 ? 'grows' : 'shrinks'} by one at every step (${r.shapes
+          .map((s) => `${W_EN[s].n} ${NSIDES[s]}`)
+          .join(', ')} sides)`
+      );
+    } else if (r.shapes.length === 3) parts.push(`the shapes cycle through 3: ${cycleTextEn(r.shapes)}`);
+    else if (r.shapes.length === 2) parts.push(`the two shapes alternate: ${cycleTextEn(r.shapes)}`);
+    if (r.rotStep !== undefined) {
+      if (r.rotAccel) parts.push(`the rotation grows at every step (+${r.rotStep}°, then +${r.rotStep + r.rotAccel}°, …)`);
+      else if (r.rotAlt !== undefined)
+        parts.push(
+          `the rotation switches direction at every step: first ${turnEn(r.rotStep)}, then ${turnEn(r.rotAlt)}, then ${turnEn(r.rotStep)} again, and so on`
+        );
+      else parts.push(`the shape rotates ${turnEn(r.rotStep)} at every step`);
+    }
+    if (r.countStart !== undefined)
+      parts.push(`the number of shapes ${(r.countStep ?? 1) > 0 ? 'grows' : 'shrinks'} by ${Math.abs(r.countStep ?? 1)} at every step`);
+    if (r.sizes && r.sizes.length > 1) parts.push(`the size alternates (big, small, big, small)`);
+    else if (r.sizeStart !== undefined) parts.push(`the size ${(r.sizeStep ?? 0) > 0 ? 'grows' : 'shrinks'} steadily`);
+    if (r.colors && r.colors.length > 1)
+      parts.push(`the colors repeat in a cycle of ${r.colors.length} (${r.colors.map(colEn).join(' → ')} → ${colEn(r.colors[0])})`);
+    if (r.fills && r.fills.length > 1)
+      parts.push(
+        r.fills.length === 2
+          ? `full and empty alternate`
+          : `the fill cycles through 3 (${r.fills.map((f) => fillWordEn(f)).join(' → ')} → ${fillWordEn(r.fills[0])})`
+      );
+  }
+  return 'Rule: ' + parts.join('; ') + '. ' + finaleEn(r);
 }
 
 // ---------------------------------------------------------------------------
@@ -798,10 +938,23 @@ function buildRules(rng: Rng, difficulty: Difficulty): SeqRules {
   return pick(rng, difficulty === 1 ? D1 : difficulty === 2 ? D2 : D3)(rng);
 }
 
-function promptFor(rng: Rng, r: SeqRules): string {
+/**
+ * Un solo `pick` per ramo (mai due): la scelta del prompt DEVE consumare lo
+ * stesso numero di numeri casuali di prima, o ogni estrazione successiva
+ * (distrattori compresi) si sfaserebbe rispetto al seme. Le due lingue
+ * viaggiano insieme dentro lo stesso LocalizedText, pescato in un colpo solo.
+ */
+function promptFor(rng: Rng, r: SeqRules): LocalizedText {
   return holeOf(r) === lenOf(r) - 1
-    ? pick(rng, ['Quale figura continua la sequenza?', 'Quale figura viene dopo?', 'Che cosa va al posto del punto interrogativo?'])
-    : pick(rng, ['Quale figura completa la sequenza?', 'Quale figura manca nella sequenza?']);
+    ? pick(rng, [
+        L('Quale figura continua la sequenza?', 'Which shape continues the sequence?'),
+        L('Quale figura viene dopo?', 'Which shape comes next?'),
+        L('Che cosa va al posto del punto interrogativo?', 'What goes in place of the question mark?'),
+      ])
+    : pick(rng, [
+        L('Quale figura completa la sequenza?', 'Which shape completes the sequence?'),
+        L('Quale figura manca nella sequenza?', 'Which shape is missing from the sequence?'),
+      ]);
 }
 
 export function genSequence(rng: Rng, difficulty: Difficulty): Question {
@@ -856,7 +1009,7 @@ export function genSequence(rng: Rng, difficulty: Difficulty): Question {
       payload: { kind: 'cells' as const, rows: [row], arrows: true },
       choices,
       correctIndex,
-      explanation: describe(rules),
+      explanation: L(describe(rules), describeEn(rules)),
     };
   });
 }

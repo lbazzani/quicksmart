@@ -6,6 +6,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { DICTS, T as DEFAULT_T, type Dict, type LangCode } from './i18n';
+import { loc } from './localize';
+import type { LocalizedText } from './types';
 
 const KEY = 'qs:lang';
 
@@ -42,6 +44,15 @@ export function useT(): Dict {
 export function useLang(): { lang: LangCode; setLang: (l: LangCode) => void } {
   const { lang, setLang } = useContext(LangCtx);
   return { lang, setLang };
+}
+
+/**
+ * Risolve il testo multilingua di una domanda (prompt, spiegazione, risposte…)
+ * nella lingua attiva. `const loc = useLoc(); <p>{loc(cur.prompt)}</p>`.
+ */
+export function useLoc(): (text: LocalizedText) => string {
+  const { lang } = useContext(LangCtx);
+  return (text: LocalizedText) => loc(text, lang);
 }
 
 /** Bottone 🌐 che alterna IT/EN (mostrato dove si entra: home e join). */

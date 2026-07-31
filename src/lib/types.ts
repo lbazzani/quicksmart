@@ -4,6 +4,22 @@
 export type Difficulty = 1 | 2 | 3;
 
 // ---------------------------------------------------------------------------
+// Lingua
+// ---------------------------------------------------------------------------
+
+/** lingue supportate dall'interfaccia E dal contenuto delle domande */
+export type LangCode = 'it' | 'en';
+
+/**
+ * Testo di una domanda (o di SofAI) in tutte le lingue supportate. Ogni
+ * giocatore vede la propria: le domande sono generate UNA volta sola (stessa
+ * struttura, stessi distrattori, stessa risposta per tutti in stanza) e
+ * portano con sé entrambe le lingue: a scegliere quale mostrare è il client,
+ * con la lingua già in uso per l'interfaccia (vedi src/lib/lang.tsx).
+ */
+export type LocalizedText = Record<LangCode, string>;
+
+// ---------------------------------------------------------------------------
 // Linguaggio visuale
 // ---------------------------------------------------------------------------
 
@@ -51,7 +67,7 @@ export interface CellSpec {
   /** parte di foglio ripiegata via: disegnata in grigio smorzato */
   dim?: boolean;
   /** etichetta sopra la cella (es. "Gruppo 1") */
-  label?: string;
+  label?: LocalizedText;
 }
 
 /** Una tessera del domino: due metà con i pallini */
@@ -68,7 +84,7 @@ export interface ClockSpec {
   /** renderizzato specchiato orizzontalmente (orologio allo specchio) */
   mirrored?: boolean;
   unknown?: boolean;
-  label?: string;
+  label?: LocalizedText;
 }
 
 export interface CountedShapes {
@@ -76,6 +92,21 @@ export interface CountedShapes {
   color: number;
   count: number;
 }
+
+/** colori standard delle bandiere: una palette a parte da PALETTE (che è tarata per i puzzle, non per il vessillo) */
+export type FlagColorName = 'red' | 'white' | 'blue' | 'lightblue' | 'green' | 'yellow' | 'black' | 'orange';
+
+/**
+ * Una bandiera nazionale semplificata: bande piatte, un disco centrato o una
+ * croce nordica (spostata verso l'asta, mai al centro — altrimenti Norvegia e
+ * Danimarca diventerebbero un'unica croce greca sbagliata). Tre schemi che il
+ * renderer sa disegnare senza inventare emblemi che non ci sono (vedi
+ * src/lib/questions/flagsdata.ts per il perché di questo limite).
+ */
+export type FlagSpec =
+  | { kind: 'bands'; dir: 'h' | 'v'; colors: FlagColorName[] }
+  | { kind: 'disc'; field: FlagColorName; disc: FlagColorName }
+  | { kind: 'cross'; field: FlagColorName; cross: FlagColorName; fimbriation?: FlagColorName };
 
 export type VisualPayload =
   /** griglie/righe di celle: sequence (1×n), matrix (3×3), analogy (A:B :: C:?), oddone (riga unica) */
@@ -114,11 +145,13 @@ export type VisualPayload =
   | {
       kind: 'equation';
       rows: { items: (ShapeSpec | string)[]; result: number | string }[];
-    };
+    }
+  /** una bandiera nazionale (vedi FlagSpec) */
+  | { kind: 'flag'; flag: FlagSpec };
 
 export type ChoiceVisual =
   | { kind: 'cell'; cell: CellSpec }
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: LocalizedText }
   | { kind: 'clock'; clock: ClockSpec }
   | { kind: 'domino'; tile: DominoTile };
 
@@ -146,20 +179,21 @@ export type QuestionType =
   | 'weights'
   | 'pattern'
   | 'majority'
-  | 'pairs';
+  | 'pairs'
+  | 'flags';
 
 export interface Question {
   id?: number;
   qtype: QuestionType;
   difficulty: Difficulty;
-  /** testo della domanda (es. "Quale figura completa la sequenza?") */
-  prompt: string;
+  /** testo della domanda (es. "Quale figura completa la sequenza?"), in ogni lingua */
+  prompt: LocalizedText;
   payload: VisualPayload;
   /** esattamente 3 opzioni, di cui 2 distrattori "vicini" */
   choices: ChoiceVisual[];
   correctIndex: 0 | 1 | 2;
-  /** spiegazione mostrata al reveal */
-  explanation: string;
+  /** spiegazione mostrata al reveal, in ogni lingua */
+  explanation: LocalizedText;
   hash?: string;
 }
 
@@ -172,8 +206,17 @@ export type QuestionGenerator = (rng: () => number, difficulty: Difficulty) => Q
 
 export type GameMode = 'team' | 'solo';
 
+/**
+ * Da quale "mazzo" di domande pesca la partita: 'logic' sono i 19 tipi di
+ * logica di sempre, 'flags' è il nuovo gioco delle bandiere. Alternativi, non
+ * mescolati: chi sceglie 'flags' gioca SOLO a bandiere (vedi PACK_TYPES in
+ * src/lib/questions/index.ts).
+ */
+export type GamePack = 'logic' | 'flags';
+
 export interface GameSettings {
   mode: GameMode;
+  pack: GamePack;
   /** null = partita aperta (termina l'host) */
   roundsTotal: number | null;
   /** finestra di prenotazione (team) o timer di decisione (solo) */
@@ -234,7 +277,12 @@ export interface PlayerPublic {
 export type SofiaMood = 'happy' | 'wow' | 'teasing' | 'thinking' | 'sad';
 
 export interface SofiaComment {
-  text: string;
+  /**
+   * La battuta, in ogni lingua. Solo i consigli (hint) sono davvero tradotti:
+   * per tutti gli altri momenti 'en' ripete 'it' — SofAI scherza solo in
+   * italiano, per scelta (vedi src/lib/sofia/lines.ts).
+   */
+  text: LocalizedText;
   mood: SofiaMood;
   roundIndex: number;
   /** true se generato dall'AI (altrimenti battuta pre-scritta) */
@@ -280,7 +328,7 @@ export interface GameSnapshot {
   current: null | {
     qtype: QuestionType;
     difficulty: Difficulty;
-    prompt: string;
+    prompt: LocalizedText;
     payload: VisualPayload;
     choices: ChoiceVisual[];
     /** valore attuale della domanda (dopo eventuali decay) */
@@ -305,7 +353,7 @@ export interface GameSnapshot {
     /** durata effettiva del reveal (allungata se la spiegazione è lunga) */
     revealMs?: number;
     correctIndex?: number;
-    explanation?: string;
+    explanation?: LocalizedText;
     outcome?: RoundOutcome;
     /** indice scelto da chi ha risposto (per il reveal) */
     answeredIndex?: number;

@@ -49,6 +49,27 @@ export function colorWord(i: number, femminile: boolean, plurale = false): strin
   return plurale ? (femminile ? f.fp : f.mp) : femminile ? f.fs : f.ms;
 }
 
+// ---------------------------------------------------------------------------
+// English. Stessi indici di COLOR_NAMES/COLOR_FORMS — nessun accordo di
+// genere o numero da fare, in inglese un colore è sempre invariabile
+// ("two yellow stars", "a yellow star").
+// ---------------------------------------------------------------------------
+
+export const COLOR_NAMES_EN = [
+  'orange', // 0
+  'yellow', // 1
+  'teal', // 2
+  'pink', // 3
+  'green', // 4
+  'red', // 5
+  'sky blue', // 6
+  'cream', // 7
+] as const;
+
+export function colorNameEn(i: number): string {
+  return COLOR_NAMES_EN[((i % COLOR_NAMES_EN.length) + COLOR_NAMES_EN.length) % COLOR_NAMES_EN.length];
+}
+
 /**
  * Colori che a dimensione ridotta si confondono tra loro: non vanno mai usati
  * come UNICO elemento che distingue la risposta dai distrattori.

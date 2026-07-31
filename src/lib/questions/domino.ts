@@ -77,8 +77,9 @@
 // tessera diversa da quella voluta, la domanda viene scartata e rigenerata: la
 // risposta corretta è così l'unica difendibile.
 
-import type { Difficulty, DominoTile, Question } from '../types';
+import type { Difficulty, DominoTile, LocalizedText, Question } from '../types';
 import { chance, pick, randInt, shuffle, type Rng } from '../rng';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
 
 /** una tessera: [metà sinistra, metà destra], valori 0..6 */
@@ -99,10 +100,23 @@ const inRange = (t: Tile) => t.every((v) => Number.isInteger(v) && v >= 0 && v <
 const TURN_NOTE =
   ' In questo gioco conta anche da che parte stanno i numeri: una tessera girata è una tessera diversa.';
 
+/** come `TURN_NOTE`, in inglese */
+const TURN_NOTE_EN =
+  ' In this game, which side a number is on matters too: a flipped tile counts as a different tile.';
+
+/** frase da aggiungere quando la fila gira in tondo dopo il 6: appare più volte identica */
+const WRAP_NOTE_EN = ' After 6, it starts over from 0.';
+
 /** "cresce di 2" / "cala di 1" / "resta ferma" */
 function stepWord(k: number): string {
   if (k === 0) return 'resta ferma';
   return k > 0 ? `cresce di ${k}` : `cala di ${-k}`;
+}
+
+/** come `stepWord`, in inglese: "goes up by 2" / "goes down by 1" / "stays the same" */
+function stepWordEn(k: number): string {
+  if (k === 0) return 'stays the same';
+  return k > 0 ? `goes up by ${k}` : `goes down by ${-k}`;
 }
 
 /** elenco dei valori di una metà: "1, 3, 4, 0" */
@@ -151,6 +165,16 @@ const FAMILY_HINT: Record<Family, string> = {
   prev2: 'ogni tessera nasce dalle DUE tessere prima di lei',
 };
 
+/** come `FAMILY_HINT`, in inglese: deve descrivere esattamente lo stesso spazio di regole */
+const FAMILY_HINT_EN: Record<Family, string> = {
+  halves: 'each half follows its own rule',
+  chain: 'each tile starts with the number the previous one ended with',
+  flip: 'each tile is the previous one flipped, and its numbers can change by the same amount every time',
+  alt: 'two moves alternate: flip the tile, add the same number to both halves, or both at once',
+  sum2: 'each tile has one half that’s the sum of the previous tile’s two halves, and the other half copied from it',
+  prev2: 'each tile comes from the TWO tiles before it',
+};
+
 interface Built {
   /** la fila completa, incognita compresa */
   tiles: Tile[];
@@ -160,6 +184,8 @@ interface Built {
   distractors: Tile[];
   /** spiegazione della regola (la frase finale la aggiunge il guscio) */
   explanation: string;
+  /** come `explanation`, in inglese */
+  explanationEn: string;
   /** la regola gira in tondo dopo il 6: va dichiarato nel prompt */
   mod?: boolean;
   /** che tipo di legame tiene insieme la fila: finisce nel prompt */
@@ -170,6 +196,8 @@ interface Built {
    * quella che serve: chi lo prende alla lettera sceglierebbe un distrattore.
    */
   hint?: string;
+  /** come `hint`, in inglese */
+  hintEn?: string;
   /** tessere di riferimento della regola: evidenziate nel disegno */
   refs?: number[];
 }
@@ -480,6 +508,9 @@ function buildD1(rng: Rng): Built {
       explanation:
         `In ogni tessera la somma delle due metà è sempre ${s}: a ogni passo la metà di sinistra ` +
         `${dir > 0 ? 'cresce' : 'cala'} di 1 e quella di destra fa il contrario.`,
+      explanationEn:
+        `In every tile, the sum of the two halves is always ${s}: at each step the left half ` +
+        `${dir > 0 ? 'goes up' : 'goes down'} by 1 and the right half does the opposite.`,
     };
   }
 
@@ -505,6 +536,9 @@ function buildD1(rng: Rng): Built {
       explanation:
         `Tutte e due le metà ${k > 0 ? 'crescono' : 'calano'} di 1 a ogni passo: la sinistra fa ` +
         `${halfList(tiles, 0)} e la destra ${halfList(tiles, 1)}.`,
+      explanationEn:
+        `Both halves ${k > 0 ? 'go up' : 'go down'} by 1 at each step: the left goes ` +
+        `${halfList(tiles, 0)} and the right goes ${halfList(tiles, 1)}.`,
     };
   }
 
@@ -533,6 +567,10 @@ function buildD1(rng: Rng): Built {
         `La metà di ${movingRight ? 'sinistra' : 'destra'} resta sempre ${fixed}: si muove solo ` +
         `la metà di ${movingRight ? 'destra' : 'sinistra'}, che ${stepWord(k)} a ogni passo ` +
         `(${halfList(tiles, movingRight ? 1 : 0)}).`,
+      explanationEn:
+        `The ${movingRight ? 'left' : 'right'} half always stays ${fixed}: only the ` +
+        `${movingRight ? 'right' : 'left'} half moves, and it ${stepWordEn(k)} at each step ` +
+        `(${halfList(tiles, movingRight ? 1 : 0)}).`,
     };
   }
 
@@ -559,6 +597,10 @@ function buildD1(rng: Rng): Built {
         `Le tessere si incastrano come nel domino vero: ogni tessera comincia con il numero con cui ` +
         `finiva quella prima di lei (${chainWithHole(tiles, hidden)}), ` +
         `e i numeri ${k > 0 ? 'crescono' : 'calano'} di 1 alla volta.`,
+      explanationEn:
+        `The tiles link up like in a real domino game: each tile starts with the number the ` +
+        `previous one ended with (${chainWithHole(tiles, hidden)}), ` +
+        `and the numbers ${k > 0 ? 'go up' : 'go down'} by 1 each time.`,
     };
   }
 
@@ -581,6 +623,9 @@ function buildD1(rng: Rng): Built {
     explanation:
       `Sono tutte tessere doppie (le due metà uguali) e il numero ${k > 0 ? 'cresce' : 'cala'} ` +
       `di 1 a ogni passo: ${chainWithHole(tiles, hidden)}.`,
+    explanationEn:
+      `They’re all double tiles (both halves equal) and the number ${k > 0 ? 'goes up' : 'goes down'} ` +
+      `by 1 at each step: ${chainWithHole(tiles, hidden)}.`,
   };
 }
 
@@ -624,6 +669,10 @@ function buildD2(rng: Rng): Built {
         `Le due metà seguono due regole diverse: la metà di sinistra ${stepWord(p)} a ogni passo ` +
         `(${halfList(tiles, 0)}), la metà di destra ${stepWord(q)} (${halfList(tiles, 1)}).` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : ''),
+      explanationEn:
+        `The two halves follow two different rules: the left half ${stepWordEn(p)} at each step ` +
+        `(${halfList(tiles, 0)}), the right half ${stepWordEn(q)} (${halfList(tiles, 1)}).` +
+        (wrapped ? WRAP_NOTE_EN : ''),
     };
   }
 
@@ -647,6 +696,7 @@ function buildD2(rng: Rng): Built {
       // k è sempre diverso da zero: il suggerimento deve dirlo, altrimenti
       // "gira e basta" sembrerebbe la risposta giusta ed è un distrattore
       hint: 'ogni tessera si gira e uno dei due numeri cambia sempre allo stesso modo',
+      hintEn: 'each tile is flipped and one of the two numbers always changes the same way',
       mod: wrapped,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
@@ -661,6 +711,12 @@ function buildD2(rng: Rng): Built {
         `${chainWithHole(tiles, hidden)}.` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
         TURN_NOTE,
+      explanationEn:
+        `Each tile is the previous one flipped (the two halves swap places) and then ` +
+        `${k > 0 ? `adding ${k} to` : 'subtracting 1 from'} the half that ends up on the right: ` +
+        `${chainWithHole(tiles, hidden)}.` +
+        (wrapped ? WRAP_NOTE_EN : '') +
+        TURN_NOTE_EN,
     };
   }
 
@@ -699,6 +755,11 @@ function buildD2(rng: Rng): Built {
         `guadagna anche +1 su tutte e due le metà: ${chainWithHole(tiles, hidden)}.` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
         TURN_NOTE,
+      explanationEn:
+        `At each step the tile flips; on even steps (the 2nd, the 4th, …) it also gains ` +
+        `+1 on both halves on top of flipping: ${chainWithHole(tiles, hidden)}.` +
+        (wrapped ? WRAP_NOTE_EN : '') +
+        TURN_NOTE_EN,
     };
   }
 
@@ -745,6 +806,11 @@ function buildD2(rng: Rng): Built {
         `(${altLeft ? halfList(tiles, 0) : halfList(tiles, 1)}); l'altra metà invece ${stepWord(r)} ` +
         `a ogni passo (${altLeft ? halfList(tiles, 1) : halfList(tiles, 0)}).` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : ''),
+      explanationEn:
+        `The ${altLeft ? 'left' : 'right'} half alternates two jumps, +${p} and ${q > 0 ? `+${q}` : q} ` +
+        `(${altLeft ? halfList(tiles, 0) : halfList(tiles, 1)}); the other half instead ${stepWordEn(r)} ` +
+        `at each step (${altLeft ? halfList(tiles, 1) : halfList(tiles, 0)}).` +
+        (wrapped ? WRAP_NOTE_EN : ''),
     };
   }
 
@@ -787,6 +853,11 @@ function buildD2(rng: Rng): Built {
         `intanto la metà di ${bounceLeft ? 'destra' : 'sinistra'} ${stepWord(k)} a ogni passo ` +
         `(${bounceLeft ? halfList(tiles, 1) : halfList(tiles, 0)}).` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : ''),
+      explanationEn:
+        `The ${bounceLeft ? 'left' : 'right'} half bounces between ${x} and ${y}, once each; ` +
+        `meanwhile the ${bounceLeft ? 'right' : 'left'} half ${stepWordEn(k)} at each step ` +
+        `(${bounceLeft ? halfList(tiles, 1) : halfList(tiles, 0)}).` +
+        (wrapped ? WRAP_NOTE_EN : ''),
     };
   }
 
@@ -821,6 +892,10 @@ function buildD2(rng: Rng): Built {
       `Tutte e due le metà fanno lo stesso salto di ${k} a ogni passo, ma la fila gira in tondo: ` +
       `dopo il 6 si ricomincia da 0 (7 diventa 0, 8 diventa 1, …). Sinistra: ${halfList(tiles, 0)}; ` +
       `destra: ${halfList(tiles, 1)}.`,
+    explanationEn:
+      `Both halves make the same jump of ${k} at each step, but the row wraps around: ` +
+      `after 6 it starts over from 0 (7 becomes 0, 8 becomes 1, …). Left: ${halfList(tiles, 0)}; ` +
+      `right: ${halfList(tiles, 1)}.`,
   };
 }
 
@@ -865,6 +940,12 @@ function buildD3(rng: Rng): Built {
         `${halfList(tiles, 1)}. Al posto del ? va ${p2[0]} + ${p1[0]} = ${p2[0] + p1[0]}` +
         `${p2[0] + p1[0] > 6 ? ` → ${ca}` : ''} a sinistra e ${p2[1]} + ${p1[1]} = ${p2[1] + p1[1]}` +
         `${p2[1] + p1[1] > 6 ? ` → ${cb}` : ''} a destra.`,
+      explanationEn:
+        `Each half is the sum of the TWO tiles before it: left with left, right with ` +
+        `right, and if the total is over 6, subtract 7. Left: ${halfList(tiles, 0)}; right: ` +
+        `${halfList(tiles, 1)}. So the ? is ${p2[0]} + ${p1[0]} = ${p2[0] + p1[0]}` +
+        `${p2[0] + p1[0] > 6 ? ` → ${ca}` : ''} on the left and ${p2[1]} + ${p1[1]} = ${p2[1] + p1[1]}` +
+        `${p2[1] + p1[1] > 6 ? ` → ${cb}` : ''} on the right.`,
     };
   }
 
@@ -904,6 +985,12 @@ function buildD3(rng: Rng): Built {
         `destra: ${halfList(tiles, 1)}. Al posto del ? va ` +
         `${Math.max(p1[0], p2[0])} − ${Math.min(p1[0], p2[0])} = ${ca} a sinistra e ` +
         `${Math.max(p1[1], p2[1])} − ${Math.min(p1[1], p2[1])} = ${cb} a destra.`,
+      explanationEn:
+        `Each half is the difference between the TWO tiles before it (the bigger number minus the ` +
+        `smaller one): left with left, right with right. Left: ${halfList(tiles, 0)}; ` +
+        `right: ${halfList(tiles, 1)}. So the ? is ` +
+        `${Math.max(p1[0], p2[0])} − ${Math.min(p1[0], p2[0])} = ${ca} on the left and ` +
+        `${Math.max(p1[1], p2[1])} − ${Math.min(p1[1], p2[1])} = ${cb} on the right.`,
     };
   }
 
@@ -934,6 +1021,11 @@ function buildD3(rng: Rng): Built {
         `La metà di destra scivola a sinistra, e la nuova metà di destra è la somma delle due metà ` +
         `precedenti (se il conto supera il 6 si tolgono 7): ${chainWithHole(tiles, hidden)}. ` +
         `Da ${fmt(prev)}: a sinistra va ${prev[1]}, a destra ${prev[0]} + ${prev[1]} = ` +
+        `${prev[0] + prev[1]}${prev[0] + prev[1] > 6 ? ` → ${cb}` : ''}.`,
+      explanationEn:
+        `The right half slides to the left, and the new right half is the sum of the previous ` +
+        `two halves (if the total is over 6, subtract 7): ${chainWithHole(tiles, hidden)}. ` +
+        `From ${fmt(prev)}: the left becomes ${prev[1]}, the right becomes ${prev[0]} + ${prev[1]} = ` +
         `${prev[0] + prev[1]}${prev[0] + prev[1] > 6 ? ` → ${cb}` : ''}.`,
     };
   }
@@ -971,6 +1063,11 @@ function buildD3(rng: Rng): Built {
         `il 6 si tolgono 7), poi la tessera si gira, poi di nuovo +${k}, poi di nuovo si gira: ` +
         `${chainWithHole(tiles, hidden)}.` +
         TURN_NOTE,
+      explanationEn:
+        `Two moves alternate: first add ${k} to both halves (if the total is over 6, subtract ` +
+        `7), then the tile flips, then +${k} again, then it flips again: ` +
+        `${chainWithHole(tiles, hidden)}.` +
+        TURN_NOTE_EN,
     };
   }
 
@@ -997,6 +1094,7 @@ function buildD3(rng: Rng): Built {
       family: 'flip',
       // qui si gira E si aggiunge lo stesso numero a tutte e due le metà
       hint: 'ogni tessera si gira e tutti e due i numeri crescono sempre allo stesso modo',
+      hintEn: 'each tile is flipped and both numbers always grow the same way',
       mod: wrapped,
       refs: [hidden - 1],
       distractors: shuffle(rng, [
@@ -1011,6 +1109,11 @@ function buildD3(rng: Rng): Built {
         `si scambiano di posto) e a tutte e due si aggiunge ${k}: ${chainWithHole(tiles, hidden)}.` +
         (wrapped ? ' Dopo il 6 si riparte da 0.' : '') +
         TURN_NOTE,
+      explanationEn:
+        `Each tile comes from the previous one in a single move: the tile flips (the two halves ` +
+        `swap places) and both get +${k}: ${chainWithHole(tiles, hidden)}.` +
+        (wrapped ? WRAP_NOTE_EN : '') +
+        TURN_NOTE_EN,
     };
   }
 
@@ -1041,6 +1144,11 @@ function buildD3(rng: Rng): Built {
       `finiva quella prima di lei. E il numero fa un salto di ${k} ogni volta, girando in tondo: ` +
       `dopo il 6 si ricomincia da 0. La catena dei numeri è ${vals.join(' → ')}, quindi la fila è ` +
       `${chainWithHole(tiles, hidden)}.`,
+    explanationEn:
+      `The tiles link up like in a real domino game: each tile starts with the number the ` +
+      `previous one ended with. And the number makes a jump of ${k} each time, wrapping around: ` +
+      `after 6 it starts over from 0. The chain of numbers is ${vals.join(' → ')}, so the row is ` +
+      `${chainWithHole(tiles, hidden)}.`,
   };
 }
 
@@ -1055,7 +1163,7 @@ function buildD3(rng: Rng): Built {
  * capovolta — la convenzione che una tessera girata è un'altra tessera. Niente
  * di tutto questo può stare solo nell'explanation, che si legge dopo.
  */
-function promptFor(hidden: number, n: number, built: Built, rowTurns: boolean): string {
+function promptFor(hidden: number, n: number, built: Built, rowTurns: boolean): LocalizedText {
   const base =
     hidden === n - 1
       ? 'Quale tessera continua la fila?'
@@ -1068,7 +1176,18 @@ function promptFor(hidden: number, n: number, built: Built, rowTurns: boolean): 
   if (rowTurns && built.family !== 'flip' && built.family !== 'alt') {
     notes.push('una tessera girata è un\'altra tessera');
   }
-  return `${base} (${notes.join('; ')})`;
+  const baseEn =
+    hidden === n - 1
+      ? 'Which tile continues the row?'
+      : hidden === 0
+        ? 'Which tile opens the row?'
+        : 'Which tile is missing from the row?';
+  const notesEn: string[] = [built.hintEn ?? FAMILY_HINT_EN[built.family]];
+  if (built.mod) notesEn.push('after 6 it goes back to 0');
+  if (rowTurns && built.family !== 'flip' && built.family !== 'alt') {
+    notesEn.push('a flipped tile is a different tile');
+  }
+  return L(`${base} (${notes.join('; ')})`, `${baseEn} (${notesEn.join('; ')})`);
 }
 
 function tailOf(tiles: Tile[], hidden: number): string {
@@ -1076,6 +1195,14 @@ function tailOf(tiles: Tile[], hidden: number): string {
   if (hidden === tiles.length - 1) return ` Dopo ${fmt(tiles[hidden - 1])} viene quindi ${c}.`;
   if (hidden === 0) return ` Tornando indietro da ${fmt(tiles[1])}, la fila si apre con ${c}.`;
   return ` Fra ${fmt(tiles[hidden - 1])} e ${fmt(tiles[hidden + 1])} ci va quindi ${c}.`;
+}
+
+/** come `tailOf`, in inglese */
+function tailOfEn(tiles: Tile[], hidden: number): string {
+  const c = fmt(tiles[hidden]);
+  if (hidden === tiles.length - 1) return ` So after ${fmt(tiles[hidden - 1])} comes ${c}.`;
+  if (hidden === 0) return ` Working back from ${fmt(tiles[1])}, the row opens with ${c}.`;
+  return ` So between ${fmt(tiles[hidden - 1])} and ${fmt(tiles[hidden + 1])} goes ${c}.`;
 }
 
 export function genDomino(rng: Rng, difficulty: Difficulty): Question {
@@ -1157,6 +1284,8 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
     const rowTurns = tiles.some((t, i) => t[0] !== t[1] && tiles.some((u, j) => j > i && turned(t, u)));
     let explanation = built.explanation + tailOf(tiles, hidden);
     if (rowTurns && !explanation.includes(TURN_NOTE.trim())) explanation += TURN_NOTE;
+    let explanationEn = built.explanationEn + tailOfEn(tiles, hidden);
+    if (rowTurns && !explanationEn.includes(TURN_NOTE_EN.trim())) explanationEn += TURN_NOTE_EN;
 
     return {
       qtype: 'domino',
@@ -1165,7 +1294,7 @@ export function genDomino(rng: Rng, difficulty: Difficulty): Question {
       payload: { kind: 'dominoes' as const, tiles: drawn },
       choices,
       correctIndex,
-      explanation,
+      explanation: L(explanation, explanationEn),
     };
   }, 120);
 }

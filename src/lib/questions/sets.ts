@@ -61,9 +61,10 @@
 // conta male proprio quando il conteggio è la regola. Le caselle da 3 figure
 // usano quindi la disposizione a griglia (2 sopra, 1 sotto), che sta dentro.
 
-import type { CellSpec, ChoiceVisual, Difficulty, Question, ShapeName } from '../types';
+import type { CellSpec, ChoiceVisual, Difficulty, LocalizedText, Question, ShapeName } from '../types';
 import { chance, pick, pickN, shuffle, type Rng } from '../rng';
-import { COLOR_NAMES, distinctColors } from '../colors';
+import { COLOR_NAMES, COLOR_NAMES_EN, distinctColors } from '../colors';
+import { L } from '../localize';
 import { placeChoices, retry } from './qutils';
 
 type Fill = 'solid' | 'outline' | 'half';
@@ -96,9 +97,9 @@ function pickPalette(rng: Rng): number[] {
 }
 
 /** etichetta stampata sopra la prima casella di ogni gruppo */
-const GROUP_LABEL = ['Gruppo 1', 'Gruppo 2', 'Gruppo 3'];
+const GROUP_LABEL: LocalizedText[] = [L('Gruppo 1', 'Group 1'), L('Gruppo 2', 'Group 2'), L('Gruppo 3', 'Group 3')];
 /** etichetta "vuota": tiene le altre caselle allineate a quella intestata */
-const NO_LABEL = ' ';
+const NO_LABEL: LocalizedText = L(' ');
 
 /**
  * Coppie di valori che a schermo si assomigliano troppo: possono comparire nel
@@ -145,6 +146,22 @@ const NOUN: Record<ShapeName, string> = {
   dot: 'pallino',
 };
 
+/** come `NOUN`, in inglese */
+const NOUN_EN: Record<ShapeName, string> = {
+  circle: 'circle',
+  square: 'square',
+  triangle: 'triangle',
+  diamond: 'diamond',
+  star: 'star',
+  pentagon: 'pentagon',
+  hexagon: 'hexagon',
+  arrow: 'arrow',
+  heart: 'heart',
+  cross: 'cross',
+  moon: 'moon',
+  dot: 'dot',
+};
+
 const PLURAL: Record<ShapeName, string> = {
   circle: 'cerchi',
   square: 'quadrati',
@@ -160,22 +177,57 @@ const PLURAL: Record<ShapeName, string> = {
   dot: 'pallini',
 };
 
+/** come `PLURAL`, in inglese */
+const PLURAL_EN: Record<ShapeName, string> = {
+  circle: 'circles',
+  square: 'squares',
+  triangle: 'triangles',
+  diamond: 'diamonds',
+  star: 'stars',
+  pentagon: 'pentagons',
+  hexagon: 'hexagons',
+  arrow: 'arrows',
+  heart: 'hearts',
+  cross: 'crosses',
+  moon: 'moons',
+  dot: 'dots',
+};
+
 const COLOR_NAME = [...COLOR_NAMES];
+const COLOR_NAME_EN = [...COLOR_NAMES_EN];
 
 const FILL_PLURAL: Record<Fill, string> = {
   solid: 'figure piene',
   outline: 'figure vuote (solo il contorno)',
   half: 'figure colorate a metà',
 };
+/** come `FILL_PLURAL`, in inglese */
+const FILL_PLURAL_EN: Record<Fill, string> = {
+  solid: 'full shapes',
+  outline: 'empty shapes (outline only)',
+  half: 'half-filled shapes',
+};
 const FILL_NOUN: Record<Fill, string> = {
   solid: 'figura piena',
   outline: 'figura vuota (solo il contorno)',
   half: 'figura colorata a metà',
 };
+/** come `FILL_NOUN`, in inglese */
+const FILL_NOUN_EN: Record<Fill, string> = {
+  solid: 'a full shape',
+  outline: 'an empty shape (outline only)',
+  half: 'a half-filled shape',
+};
 const FILL_ADJ: Record<Fill, string> = {
   solid: 'piena',
   outline: 'vuota',
   half: 'colorata a metà',
+};
+/** come `FILL_ADJ`, in inglese */
+const FILL_ADJ_EN: Record<Fill, string> = {
+  solid: 'full',
+  outline: 'empty',
+  half: 'half-filled',
 };
 
 /** "contiene solo …" — che cosa hanno in comune le caselle del gruppo */
@@ -186,12 +238,28 @@ function rowClause(a: Attr, v: Val): string {
   return `solo ${FILL_PLURAL[v as Fill]}`;
 }
 
+/** come `rowClause`, in inglese */
+function rowClauseEn(a: Attr, v: Val): string {
+  if (a === 'shape') return `only ${PLURAL_EN[v as ShapeName]}`;
+  if (a === 'color') return `only shapes colored ${COLOR_NAME_EN[v as number]}`;
+  if (a === 'count') return v === 1 ? 'only boxes with a single shape' : `only boxes with ${v} shapes`;
+  return `only ${FILL_PLURAL_EN[v as Fill]}`;
+}
+
 /** "deve avere: …" — la caratteristica richiesta, senza problemi di accordo */
 function needClause(a: Attr, v: Val): string {
   if (a === 'shape') return `forma di ${NOUN[v as ShapeName]}`;
   if (a === 'color') return `colore ${COLOR_NAME[v as number]}`;
   if (a === 'count') return v === 1 ? 'una figura sola' : `${v} figure`;
   return FILL_NOUN[v as Fill];
+}
+
+/** come `needClause`, in inglese */
+function needClauseEn(a: Attr, v: Val): string {
+  if (a === 'shape') return `${NOUN_EN[v as ShapeName]} shape`;
+  if (a === 'color') return `color ${COLOR_NAME_EN[v as number]}`;
+  if (a === 'count') return v === 1 ? 'a single shape' : `${v} shapes`;
+  return FILL_NOUN_EN[v as Fill];
 }
 
 /** "non è …" — usato dalla domanda negativa */
@@ -202,9 +270,23 @@ function negClause(a: Attr, v: Val): string {
   return `non è ${FILL_ADJ[v as Fill]}`;
 }
 
+/** come `negClause`, in inglese */
+function negClauseEn(a: Attr, v: Val): string {
+  if (a === 'shape') return `isn’t shaped like a ${NOUN_EN[v as ShapeName]}`;
+  if (a === 'color') return `isn’t colored ${COLOR_NAME_EN[v as number]}`;
+  if (a === 'count') return v === 1 ? 'doesn’t have a single shape' : `doesn’t have ${v} shapes`;
+  return `isn’t ${FILL_ADJ_EN[v as Fill]}`;
+}
+
 function join(parts: string[]): string {
   if (parts.length <= 1) return parts.join('');
   return parts.slice(0, -1).join(', ') + ' e ' + parts[parts.length - 1];
+}
+
+/** come `join`, in inglese */
+function joinEn(parts: string[]): string {
+  if (parts.length <= 1) return parts.join('');
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
 }
 
 // ---------------------------------------------------------------------------
@@ -543,36 +625,63 @@ function buildQuestion(rng: Rng, difficulty: Difficulty): Question {
   ] as [ChoiceVisual, ChoiceVisual]);
 
   const rowsText = plan.attrs.map((a, i) => `il gruppo ${i + 1} contiene ${rowClause(a, v[a] as Val)}`);
+  const rowsTextEn = plan.attrs.map((a, i) => `group ${i + 1} contains ${rowClauseEn(a, v[a] as Val)}`);
   // La consegna dice COME si legge un gruppo, non solo che cosa cercare: la
   // regola è l'unica cosa uguale a tutte le sue caselle, il resto cambia e non
   // conta. Senza questa frase ogni regolarità apparente ("qui sono tutte
   // grandi", "qui non c'è mai una figura sola") sembra una regola da rispettare.
-  const meta = chance(rng, 0.5)
-    ? 'La regola di un gruppo è la cosa uguale in tutte le sue caselle: il resto cambia e non conta.'
-    : 'Ogni gruppo ha una regola: è la cosa uguale in tutte le sue caselle, il resto non conta.';
-  const prompt =
+  // Un solo `chance` per bivio (mai due): la scelta della frase in inglese
+  // riusa lo STESSO esito, non ne consuma uno nuovo (vedi promptFor in
+  // sequence.ts per lo stesso principio applicato a `pick`).
+  const metaAlt = chance(rng, 0.5);
+  const meta: LocalizedText = metaAlt
+    ? L(
+        'La regola di un gruppo è la cosa uguale in tutte le sue caselle: il resto cambia e non conta.',
+        'A group’s rule is whatever stays the same across all its boxes: everything else changes and doesn’t matter.'
+      )
+    : L(
+        'Ogni gruppo ha una regola: è la cosa uguale in tutte le sue caselle, il resto non conta.',
+        'Every group has a rule: it’s whatever stays the same across all its boxes, the rest doesn’t count.'
+      );
+  const prompt: LocalizedText =
     plan.mode === 'none'
       ? // niente doppia negazione: si dice al bambino che cosa cercare e quante
         // figure entrano da qualche parte, così il compito non si può ribaltare
         chance(rng, 0.5)
-        ? `${meta} Due figure entrano in un gruppo, una NON entra in nessuno: qual è?`
-        : `${meta} Trova la figura che NON va bene per nessun gruppo.`
+        ? L(
+            `${meta.it} Due figure entrano in un gruppo, una NON entra in nessuno: qual è?`,
+            `${meta.en} Two shapes fit into a group, one fits into NONE of them: which one?`
+          )
+        : L(`${meta.it} Trova la figura che NON va bene per nessun gruppo.`, `${meta.en} Find the shape that doesn’t fit any group.`)
       : total === 3
         ? chance(rng, 0.5)
-          ? `${meta} Quale figura può entrare in tutti e tre i gruppi?`
-          : `${meta} Quale figura va bene per tutti e tre i gruppi?`
+          ? L(`${meta.it} Quale figura può entrare in tutti e tre i gruppi?`, `${meta.en} Which shape can fit into all three groups?`)
+          : L(`${meta.it} Quale figura va bene per tutti e tre i gruppi?`, `${meta.en} Which shape works for all three groups?`)
         : chance(rng, 0.5)
-          ? `${meta} Quale figura può entrare in tutti e due i gruppi?`
-          : `${meta} Quale figura va bene sia per il Gruppo 1 sia per il Gruppo 2?`;
+          ? L(`${meta.it} Quale figura può entrare in tutti e due i gruppi?`, `${meta.en} Which shape can fit into both groups?`)
+          : L(
+              `${meta.it} Quale figura va bene sia per il Gruppo 1 sia per il Gruppo 2?`,
+              `${meta.en} Which shape works for both Group 1 and Group 2?`
+            );
 
-  const explanation =
+  const explanation: LocalizedText =
     plan.mode === 'intersect'
-      ? `Le regole: ${join(rowsText)}. La risposta deve avere tutto insieme: ` +
-        `${join(plan.attrs.map((a) => needClause(a, v[a] as Val)))}. ` +
-        `Le altre due opzioni rispettano ${total === 3 ? 'solo due regole su tre' : 'una regola sola'}.`
-      : `Le regole: ${join(rowsText)}. La risposta giusta è l'unica che non rispetta nessuna regola: ` +
-        `${join(plan.attrs.map((a) => negClause(a, v[a] as Val)))}. ` +
-        `Le altre due entrano in un gruppo ciascuna.`;
+      ? L(
+          `Le regole: ${join(rowsText)}. La risposta deve avere tutto insieme: ` +
+            `${join(plan.attrs.map((a) => needClause(a, v[a] as Val)))}. ` +
+            `Le altre due opzioni rispettano ${total === 3 ? 'solo due regole su tre' : 'una regola sola'}.`,
+          `The rules: ${joinEn(rowsTextEn)}. The answer must have all of these together: ` +
+            `${joinEn(plan.attrs.map((a) => needClauseEn(a, v[a] as Val)))}. ` +
+            `The other two options follow ${total === 3 ? 'only two rules out of three' : 'only one rule'}.`
+        )
+      : L(
+          `Le regole: ${join(rowsText)}. La risposta giusta è l'unica che non rispetta nessuna regola: ` +
+            `${join(plan.attrs.map((a) => negClause(a, v[a] as Val)))}. ` +
+            `Le altre due entrano in un gruppo ciascuna.`,
+          `The rules: ${joinEn(rowsTextEn)}. The correct answer is the only one that breaks every rule: ` +
+            `${joinEn(plan.attrs.map((a) => negClauseEn(a, v[a] as Val)))}. ` +
+            `The other two each fit into one group.`
+        );
 
   return {
     qtype: 'sets',

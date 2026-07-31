@@ -5,11 +5,11 @@ CREATE TABLE IF NOT EXISTS questions (
   id           SERIAL PRIMARY KEY,
   qtype        TEXT NOT NULL,
   difficulty   SMALLINT NOT NULL CHECK (difficulty BETWEEN 1 AND 3),
-  prompt       TEXT NOT NULL,
+  prompt       JSONB NOT NULL, -- LocalizedText: {"it": "...", "en": "..."}
   payload      JSONB NOT NULL,
   choices      JSONB NOT NULL,
   correct_index SMALLINT NOT NULL CHECK (correct_index BETWEEN 0 AND 2),
-  explanation  TEXT NOT NULL,
+  explanation  JSONB NOT NULL, -- LocalizedText
   hash         TEXT NOT NULL UNIQUE,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );

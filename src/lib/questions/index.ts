@@ -1,6 +1,6 @@
 // Registro dei generatori + generazione dell'archivio domande.
 
-import type { Difficulty, Question, QuestionType } from '../types';
+import type { Difficulty, GamePack, Question, QuestionType } from '../types';
 import { mulberry32, type Rng } from '../rng';
 import { hashQuestion } from './qutils';
 import { genSequence } from './sequence';
@@ -23,6 +23,7 @@ import { genWeights } from './weights';
 import { genPattern } from './pattern';
 import { genMajority } from './majority';
 import { genPairs } from './pairs';
+import { genFlags } from './flags';
 
 export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Question> = {
   sequence: genSequence,
@@ -45,6 +46,7 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
   pattern: genPattern,
   majority: genMajority,
   pairs: genPairs,
+  flags: genFlags,
 };
 
 /**
@@ -62,11 +64,26 @@ export const GENERATORS: Record<QuestionType, (rng: Rng, d: Difficulty) => Quest
  */
 export const QUARANTINED: QuestionType[] = ['fold', 'domino'];
 
-/** tutti i tipi esistenti, inclusi quelli in quarantena (per test e audit) */
+/**
+ * Tipi che esistono solo dentro il proprio pacchetto (vedi GamePack in
+ * ../types) e non entrano MAI nella rotazione di logica di default: 'flags'
+ * è un gioco a sé, non un ventesimo tipo mescolato agli altri diciannove.
+ */
+export const STANDALONE: QuestionType[] = ['flags'];
+
+/** tutti i tipi esistenti, inclusi quelli in quarantena e quelli standalone (per test e audit) */
 export const ALL_QUESTION_TYPES = Object.keys(GENERATORS) as QuestionType[];
 
-/** i tipi che il gioco pesca davvero */
-export const QUESTION_TYPES = ALL_QUESTION_TYPES.filter((t) => !QUARANTINED.includes(t));
+/** i tipi che il pacchetto "logica" pesca davvero */
+export const QUESTION_TYPES = ALL_QUESTION_TYPES.filter(
+  (t) => !QUARANTINED.includes(t) && !STANDALONE.includes(t)
+);
+
+/** i tipi ammessi per ciascun pacchetto di gioco (vedi GamePack in ../types) */
+export const PACK_TYPES: Record<GamePack, QuestionType[]> = {
+  logic: QUESTION_TYPES,
+  flags: ['flags'],
+};
 
 /**
  * Genera l'archivio: `perTypePerDifficulty` domande per ciascun tipo e
