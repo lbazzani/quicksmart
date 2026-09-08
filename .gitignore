@@ -44,3 +44,6 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /e2e-shots/
+
+# stato locale di Claude Code, non va nel repository
+.claude/scheduled_tasks.lock
