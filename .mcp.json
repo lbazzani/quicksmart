@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "piattaforma": {
+      "command": "./deploy/mcp-piattaforma.py",
+      "args": [],
+      "env": {}
+    }
+  }
+}

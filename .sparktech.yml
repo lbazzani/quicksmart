@@ -1,0 +1,22 @@
+# Configurazione della piattaforma SparkTech per questo progetto.
+# La usano le skill in .claude/skills/ e lo script deploy/release.sh.
+# Per aggiornare le skill: dal repository server-sparktech,
+#   tools/onboarding/installa-skill /percorso/di/questo/progetto
+
+progetto:        QuickSmart
+gruppo:          quicksmart
+namespace:       quicksmart-prod
+url_prod:        https://quicksmart.it
+# Nessun ambiente di test: si collauda in locale (npm run dev) e si rilascia.
+url_test:        (nessuno)
+# Una sola applicazione: backend e web coincidono.
+app_backend:     quicksmart
+app_web:         quicksmart
+app_db:          quicksmart-db
+chiave:          quicksmart-deploy-key
+nodo_deploy:     quicksmart-deploy@5.189.188.37
+
+file_db:         "db/*.sql, src/lib/db.ts"
+# espressione usata da release.sh per accorgersi che il codice tocca il database
+file_db_regex:   "^(db/.*\\.sql|src/lib/db\\.ts)$"
+prefisso_ticket: QS
