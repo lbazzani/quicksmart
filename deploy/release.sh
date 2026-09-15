@@ -33,7 +33,11 @@ grave()  { printf '  %s✗%s  %s\n' "$R" "$N" "$1"; BLOCCHI=$((BLOCCHI+1)); }
 info()   { printf '    %s\n' "$1"; }
 ALLARMI=0; BLOCCHI=0
 
-remoto() { ssh -i "$CHIAVE" -o BatchMode=yes "$NODO" "$*"; }
+# IdentitiesOnly: senza, ssh offre prima tutte le chiavi dell'agent e il server
+# chiude con «Too many authentication failures» prima di arrivare a quella di
+# deploy (successo il 15/9/2026 con sei chiavi nell'agent: l'invio dei sorgenti
+# falliva e sembrava un problema del nodo).
+remoto() { ssh -i "$CHIAVE" -o IdentitiesOnly=yes -o BatchMode=yes "$NODO" "$*"; }
 
 # Copia i sorgenti sul nodo (inerte: nessun effetto in produzione).
 # L'elenco dei file lo decide Git.
@@ -43,7 +47,7 @@ remoto() { ssh -i "$CHIAVE" -o BatchMode=yes "$NODO" "$*"; }
 invia_sorgenti() {
   git -C "$RADICE" ls-files -co --exclude-standard \
     | tar -C "$RADICE" -czf - -T - \
-    | ssh -i "$CHIAVE" -o BatchMode=yes "$NODO" sync
+    | ssh -i "$CHIAVE" -o IdentitiesOnly=yes -o BatchMode=yes "$NODO" sync
 }
 
 uso() {
