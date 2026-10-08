@@ -295,6 +295,10 @@ export class GameEngine {
     buzzWindowMs: number;
     answerMs: number;
     showMistakes?: boolean;
+    /** seme delle domande: quello della sfida del giorno, altrimenti casuale */
+    seed?: number;
+    daily?: number;
+    ref?: string;
   }): Promise<{ code: string; playerId: string; token: string }> {
     this.sweep();
     if (this.rooms.size >= MAX_ROOMS) throw new Error('too_many_rooms');
@@ -307,10 +311,14 @@ export class GameEngine {
       answerMs: opts.answerMs,
       revealMs: 6000,
       showMistakes: opts.showMistakes ?? true,
+      ...(opts.daily ? { daily: opts.daily } : {}),
+      ...(opts.ref ? { ref: opts.ref } : {}),
     };
     const nickname = sanitizeNickname(opts.nickname);
     if (!nickname) throw new Error('nickname_required');
-    const seed = freshSeed(); // ogni partita pesca da un punto diverso dello spazio
+    // ogni partita pesca da un punto diverso dello spazio, tranne la sfida del
+    // giorno: stesso seme per tutti, quindi stesse domande (src/lib/daily.ts)
+    const seed = opts.seed ?? freshSeed();
     const code = this.makeCode();
     const gameId = await dbCreateGame(code, opts.name, opts.mode, settings);
     const token = randomBytes(16).toString('hex');

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Baloo_2, Nunito } from 'next/font/google';
+import { RefCapture } from '@/components/RefCapture';
 import { SwRegister } from '@/components/SwRegister';
 import { LangProvider } from '@/lib/lang';
 import './globals.css';
@@ -74,6 +75,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <span className="font-display text-xl">Gira il telefono in verticale</span>
         </div>
         <SwRegister />
+        <RefCapture />
       </body>
     </html>
   );

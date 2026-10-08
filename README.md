@@ -12,7 +12,8 @@ Regole complete e architettura: [GAME_DESIGN.md](GAME_DESIGN.md).
 - **PostgreSQL 17** — archivio domande, partite, giocatori, round
 - **SSE** per il realtime; game engine in-memory autoritativo con timer server-side
 - **Domande procedurali**: 10 generatori (sequenze, matrici, intrusi, serie numeriche, rotazioni, dadi, orologi, bilance, analogie, equazioni simboliche) × 3 difficoltà, con distrattori costruiti ad arte e spiegazione
-- **SofAI**: commenti AI via `claude` CLI headless (modello haiku, timeout, fallback a battute pre-scritte)
+- **SofAI**: commenti AI via il servizio claude-runner della piattaforma SparkTech (`CLAUDE_RUNNER_URLS`, Sonnet 5.5) o, senza, via `claude` CLI locale (haiku); timeout e fallback a battute pre-scritte
+- **Sfida del giorno** (`/sfida`): 10 domande uguali per tutti, dal seme del giorno (`src/lib/daily.ts`); risultato da condividere (`src/lib/share.ts`)
 
 ## Avvio in locale
 
@@ -38,6 +39,8 @@ npx vitest run tests/                 # unit: scoring, rampa difficoltà, sanifi
 npx tsx tools/check-generators.ts     # contratto dei 10 generatori
 BASE=http://localhost:3005 npx tsx tools/apitest.ts        # integrazione API (server attivo)
 BASE=http://localhost:3005 npx tsx tools/injectiontest.ts  # sicurezza: prompt injection via nickname
+npx tsx tools/sofai-runner.ts sonnet                         # SofAI contro claude-runner (vedi intestazione)
+npx playwright test tests-e2e/sfida.spec.ts                  # E2E: sfida del giorno, condivisione, inviti
 npx playwright test tests-e2e/game.spec.ts        # E2E locale: 3 giocatori + solo
 npx playwright test tests-e2e/production.spec.ts  # E2E sul sito pubblico
 ```

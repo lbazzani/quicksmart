@@ -230,6 +230,14 @@ export interface GameSettings {
    * opzioni con quelle già bruciate sbarrate: aiuta e invoglia a riprovare.
    */
   showMistakes: boolean;
+  /** numero della sfida del giorno (src/lib/daily.ts); assente nelle partite normali */
+  daily?: number;
+  /**
+   * Da quale link è arrivato chi ha creato la partita (?ref= nell'indirizzo:
+   * sfida, invito, podio…). Serve a capire se il passaparola funziona: resta
+   * in games.settings e si conta con una query (docs/marketing.md).
+   */
+  ref?: string;
 }
 
 export type GameStatus = 'lobby' | 'playing' | 'ended';

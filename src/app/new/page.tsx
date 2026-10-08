@@ -5,6 +5,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
+import { refCorrente } from '@/lib/share';
 import { AvatarPicker, Field, Segmented, Stepper, Toggle, inputCls } from '@/components/AvatarPicker';
 import type { GamePack } from '@/lib/types';
 
@@ -27,6 +28,7 @@ export default function NewGame() {
     setError('');
     try {
       const res = await api<{ code: string; playerId: string; token: string }>('/api/game', {
+        ref: refCorrente(),
         name,
         nickname,
         avatar,

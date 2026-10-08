@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameSnapshot } from './types';
 import { sfx, vibra } from './sounds';
+import { salvaUltimoGiocatore } from './share';
 
 export interface Identity {
   playerId: string;
@@ -14,6 +15,8 @@ export interface Identity {
 
 export function saveIdentity(code: string, id: Identity) {
   localStorage.setItem(`qs:id:${code.toUpperCase()}`, JSON.stringify(id));
+  // la sfida del giorno torna ogni giorno: nome e avatar già pronti
+  salvaUltimoGiocatore(id.nickname, id.avatar);
 }
 
 export function loadIdentity(code: string): Identity | null {

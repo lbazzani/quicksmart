@@ -5,6 +5,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useT } from '@/lib/lang';
 import { api, saveIdentity } from '@/lib/client';
+import { refCorrente } from '@/lib/share';
 import { AvatarPicker, Field, Segmented, Stepper, inputCls } from '@/components/AvatarPicker';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
 import type { GamePack } from '@/lib/types';
@@ -26,6 +27,7 @@ export default function SoloPage() {
     setError('');
     try {
       const res = await api<{ code: string; playerId: string; token: string }>('/api/game', {
+        ref: refCorrente(),
         nickname,
         avatar,
         mode: 'solo',

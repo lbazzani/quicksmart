@@ -16,6 +16,16 @@ import { Buzzer } from '@/components/Buzzer';
 import { SofaiBubble } from '@/components/SofaiBubble';
 import { SofaiAvatar } from '@/components/SofaiAvatar';
 import { isMuted, setMuted, sfx, unlockAudio, vibra } from '@/lib/sounds';
+import { ShareButton } from '@/components/ShareButton';
+import {
+  conRef,
+  leggiEsiti,
+  registraEsito,
+  salvaRisultatoSfida,
+  testoPodio,
+  testoRisultato,
+  type RisultatoSfida,
+} from '@/lib/share';
 
 const CHOICE_LABELS = ['A', 'B', 'C'];
 
@@ -86,6 +96,8 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
       }
       if (snap.phase === 'reveal') {
         const out = snap.current?.outcome;
+        // la striscia 🟩🟥⬜ del risultato da condividere (vedi Podium)
+        if (snap.mode === 'solo') registraEsito(code, snap.roundIndex, out === 'correct' ? 'g' : out === 'exhausted' ? 's' : 't');
         if (out === 'correct') {
           // la serie di risposte giuste vale un suono suo: il moltiplicatore
           // era l'unica cosa importante del gioco che non si sentiva
@@ -109,7 +121,7 @@ function Game({ code, identity }: { code: string; identity: Identity }) {
       sfx.fanfare();
       if (snap.players[0]?.id === identity.playerId) fireConfetti(true);
     }
-  }, [snap, identity.playerId]);
+  }, [snap, identity.playerId, code]);
 
   // se abbiamo già ricevuto il podio, lo teniamo anche se il server riparte
   if (notFound && snap?.status !== 'ended') {
@@ -210,6 +222,16 @@ function Lobby({ snap, me, code, identity }: { snap: GameSnapshot; me?: PlayerPu
         <span className="font-display text-5xl font-extrabold tracking-[0.3em] text-orange-300 glow-orange">{code}</span>
         <span className="text-xs text-stone-400">{copied ? T.lobby.copied : '👆 tocca per copiare'}</span>
       </button>
+
+      {/* il codice a voce funziona se si è nella stessa stanza; per tutti gli
+          altri serve un link in chat, che porta dritto alla pagina per entrare */}
+      <ShareButton
+        label={T.share.invite}
+        title="QuickSmart"
+        text={T.share.inviteText.replace('{code}', code)}
+        url={conRef(snap.joinUrl ?? `${window.location.origin}/join?code=${code}`, 'invito')}
+        className="btn-ghost mx-auto px-6 py-2.5 font-display text-base font-bold text-stone-100"
+      />
 
       {snap.joinUrl && (
         <div className="mx-auto flex flex-col items-center gap-1.5">
@@ -938,6 +960,8 @@ function Podium({ snap, meId, code, identity }: { snap: GameSnapshot; meId: stri
 
       <SofaiBubble comment={snap.sofia} />
 
+      {snap.mode === 'solo' && me && <ShareSolo snap={snap} me={me} code={code} />}
+
       {/* la chat del podio: il microfono è di chi ha vinto */}
       {snap.mode === 'team' && (
         <>
@@ -983,6 +1007,16 @@ function Podium({ snap, meId, code, identity }: { snap: GameSnapshot; meId: stri
         </div>
       )}
 
+      {snap.mode === 'team' && (
+        <ShareButton
+          label={T.share.button}
+          title="QuickSmart"
+          text={testoPodio(T.share, snap.name, ranked)}
+          url={conRef(`${window.location.origin}/`, 'podio')}
+          className="btn-ghost py-3 font-display text-lg font-bold text-stone-100"
+        />
+      )}
+
       <div className="card divide-y divide-white/8 px-4 py-1">
         {ranked.map((p, i) => {
           const attempts = p.stats.correct + p.stats.wrong;
@@ -1012,6 +1046,55 @@ function Podium({ snap, meId, code, identity }: { snap: GameSnapshot; meId: stri
           {T.podium.playAgain}
         </Link>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Il risultato in solitaria, pronto da mandare in chat: la striscia dei round
+ * e un link alla sfida del giorno. È il motore del passaparola (src/lib/daily.ts).
+ */
+function ShareSolo({ snap, me, code }: { snap: GameSnapshot; me: PlayerPublic; code: string }) {
+  const T = useT();
+  const daily = snap.settings.daily;
+  const [risultato, setRisultato] = useState<RisultatoSfida | null>(null);
+
+  // sessionStorage e localStorage esistono solo nel browser: dopo il montaggio
+  useEffect(() => {
+    const esiti = leggiEsiti(code);
+    const attuale: RisultatoSfida = {
+      numero: daily ?? 0,
+      punti: me.score,
+      giuste: me.stats.correct,
+      totale: snap.settings.roundsTotal ?? esiti.length,
+      esiti,
+    };
+    // nella sfida del giorno conta il primo tentativo: rigiocare a domande note non vale
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lettura client-only al montaggio
+    setRisultato(daily ? salvaRisultatoSfida(attuale) : attuale);
+  }, [code, daily, me.score, me.stats.correct, snap.settings.roundsTotal]);
+
+  if (!risultato) return null;
+  const rigiocata = daily !== undefined && risultato.punti !== me.score;
+  return (
+    <div className="card flex flex-col gap-2.5 px-4 py-3 text-center">
+      {daily !== undefined && (
+        <p className="font-display text-lg font-extrabold text-amber-300">
+          🗓️ {T.daily.done.replace('{n}', String(daily))}
+        </p>
+      )}
+      {risultato.esiti.length > 0 && <p className="text-2xl tracking-wider">{risultato.esiti.map((e) => (e === 'g' ? '🟩' : e === 's' ? '🟥' : '⬜')).join('')}</p>}
+      <p className="text-sm font-bold text-stone-300">
+        {risultato.giuste}/{risultato.totale} · {risultato.punti} {T.share.points}
+      </p>
+      {rigiocata && <p className="text-xs text-stone-400">{T.daily.replay}</p>}
+      <ShareButton
+        label={T.share.button}
+        title="QuickSmart"
+        text={testoRisultato(T.share, { ...risultato, numero: daily })}
+        url={conRef(`${window.location.origin}/sfida`, daily ? 'sfida' : 'allenamento')}
+      />
+      {daily !== undefined && <p className="text-xs text-stone-400">{T.daily.comeBack}</p>}
     </div>
   );
 }
