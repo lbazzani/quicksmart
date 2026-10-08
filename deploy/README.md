@@ -50,3 +50,8 @@ chmod 600 ~/.ssh/quicksmart-deploy-key
   (vedi `db/data/README.md`).
 - **Variabili**: `PUBLIC_URL`, `SOFIA_AI`, `PORT` sono nel manifest
   Kubernetes (repository server-sparktech, `manifests/apps/quicksmart/`).
+  `CLAUDE_RUNNER_URLS` e `CLAUDE_RUNNER_TOKEN` arrivano dal Secret sigillato
+  `claude-runner-client-env`: senza, SofAI cerca il CLI `claude` nel container,
+  che non c'è, e usa solo le battute pre-scritte (successo dall'8/9 al 9/10/2026,
+  senza che niente a schermo lo dicesse: si vede solo nei log, «[SofAI] lotto
+  non riuscito»). `SOFIA_MODEL` cambia il modello (default `sonnet`).

@@ -1,7 +1,10 @@
 // SofAI, la mascotte del gioco. A ogni evento mostra subito una battuta
-// pre-scritta; se SOFIA_AI=1 chiede in parallelo una battuta migliore al CLI
-// di Claude e la sostituisce quando arriva, se il commento è ancora attuale.
+// pre-scritta; se SOFIA_AI=1 chiede in parallelo una battuta migliore a Claude
+// e la sostituisce quando arriva, se il commento è ancora attuale.
 // Il gioco non aspetta mai l'AI.
+//
+// Da dove arriva Claude: in produzione dal servizio claude-runner della
+// piattaforma (runner.ts, CLAUDE_RUNNER_URLS); senza, dal CLI locale.
 //
 // SICUREZZA — i nickname arrivano da internet, quindi non devono MAI finire
 // dentro il prompt di un agente:
@@ -9,7 +12,7 @@
 //     nomi veri solo dopo la risposta;
 //  2. il CLI viene lanciato senza tool, senza MCP, senza settings utente,
 //     con cwd in una directory vuota e un ambiente minimo (niente DATABASE_URL
-//     né altri segreti del processo).
+//     né altri segreti del processo). Il runner fa lo stesso dalla sua parte.
 
 import { spawn } from 'child_process';
 import { existsSync, mkdtempSync } from 'fs';
@@ -20,6 +23,7 @@ import type { LocalizedText, QuestionType, RoundOutcome, SofiaMood } from '../ty
 import { T } from '../i18n';
 import { L } from '../localize';
 import { HINTS, LINES, MOODS, fillLineL, type SofiaLineKind } from './lines';
+import { runnerConfigurato, runnerPrompt } from './runner';
 
 export type SofiaEventCtx =
   | { kind: 'welcome'; nickname: string }
@@ -60,6 +64,8 @@ interface SofiaRoom {
 // Misurato sul server: il CLI risponde in 10-12s quando è libero e in 30-50s
 // se ci sono altre chiamate in volo. Con i 25s di prima scadeva sempre, e la
 // battuta AI non si vedeva mai — senza che nulla lo segnalasse.
+// Col runner (9/10/2026, Sonnet 5.5): 3-5 s il podio, 7 s un lotto intero.
+// Il tetto resta largo: in coda dietro altre app può volerci di più.
 const AI_TIMEOUT_MS = 60_000;
 /**
  * Quanto spesso l'AI commenta un round. Zero, e non per prudenza: un reveal
@@ -107,7 +113,7 @@ function lineKindFor(ctx: SofiaEventCtx): { kind: SofiaLineKind; name?: string; 
 }
 
 /** Sostituisce i nickname con alias neutri: nel prompt non entra testo utente. */
-function aliasMap(ctx: SofiaEventCtx): Map<string, string> {
+export function aliasMap(ctx: SofiaEventCtx): Map<string, string> {
   const map = new Map<string, string>();
   const add = (nick?: string) => {
     if (nick && !map.has(nick)) map.set(nick, `Giocatore${map.size + 1}`);
@@ -121,7 +127,7 @@ function aliasMap(ctx: SofiaEventCtx): Map<string, string> {
   return map;
 }
 
-function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null {
+export function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string | null {
   const head =
     'Sei SofAI, la mascotte di un quiz a squadre per famiglie: ironica, pungente, un po\' teatrale, ma sempre affettuosa. ' +
     'Ti piace prenderti il merito delle domande belle e dare la colpa ai giocatori per quelle sbagliate. ' +
@@ -302,8 +308,26 @@ function minimalEnv(): NodeJS.ProcessEnv {
   };
 }
 
-/** Lancia il CLI e restituisce quello che ha scritto, senza interpretarlo. */
-function runClaude(prompt: string, onStart?: (kill: () => void) => void, timeoutMs = AI_TIMEOUT_MS): Promise<string> {
+/**
+ * Chiede a Claude e restituisce quello che ha scritto, senza interpretarlo.
+ * `priority` conta solo col runner: vedi RunnerOpts.
+ */
+async function runClaude(
+  prompt: string,
+  onStart?: (kill: () => void) => void,
+  timeoutMs = AI_TIMEOUT_MS,
+  priority: 'interactive' | 'batch' = 'interactive'
+): Promise<string> {
+  if (!runnerConfigurato()) return runLocalCli(prompt, onStart, timeoutMs);
+  const ac = new AbortController();
+  onStart?.(() => ac.abort());
+  const text = await runnerPrompt(prompt, { timeoutMs, priority, signal: ac.signal });
+  if (text.length < 4) throw new Error(`risposta senza testo utile: «${text}»`);
+  return text;
+}
+
+/** Lancia il CLI locale (sviluppo sul Mac, o un server con il CLI loggato). */
+function runLocalCli(prompt: string, onStart?: (kill: () => void) => void, timeoutMs = AI_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     const bin = findClaude();
     if (!bin) return reject(new Error('claude CLI non trovato'));
@@ -313,7 +337,9 @@ function runClaude(prompt: string, onStart?: (kill: () => void) => void, timeout
         '-p',
         prompt,
         '--model',
-        'haiku',
+        // il CLI locale si porta dietro prompt di sistema e thinking di Claude
+        // Code: con Sonnet sarebbe lento, resta Haiku com'era
+        process.env.SOFIA_MODEL || 'haiku',
         '--allowedTools',
         '',
         '--disallowedTools',
@@ -386,7 +412,7 @@ async function askOneLine(prompt: string, onStart?: (kill: () => void) => void):
  * momento dell'uso — quindi qui non serve nemmeno il de-aliasing, e la
  * superficie d'attacco è zero.
  */
-function warmupPrompt(): string {
+export function warmupPrompt(): string {
   // il segnaposto va mostrato DENTRO l'elenco: chiederlo solo a parole, dopo
   // aver ordinato frasi impersonali, è una contraddizione — e infatti il
   // modello non lo scriveva mai
@@ -453,7 +479,7 @@ async function runWarmup(room: SofiaRoom): Promise<void> {
   try {
     const t0 = Date.now();
     const lotto = parseWarmup(
-      await runClaude(warmupPrompt(), (kill) => (room.sofiaKill = kill), WARMUP_TIMEOUT_MS)
+      await runClaude(warmupPrompt(), (kill) => (room.sofiaKill = kill), WARMUP_TIMEOUT_MS, 'batch')
     );
     const quante = Object.values(lotto).reduce((n, v) => n + v.length, 0);
     const scartati = MOMENTI.filter((m) => !lotto[m.kind]).map((m) => m.kind);
