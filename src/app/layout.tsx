@@ -3,6 +3,7 @@ import { Baloo_2, Nunito } from 'next/font/google';
 import { RefCapture } from '@/components/RefCapture';
 import { SwRegister } from '@/components/SwRegister';
 import { LangProvider } from '@/lib/lang';
+import { DESCRIZIONE, OG_BASE, SITO, TITOLO } from '@/lib/seo';
 import './globals.css';
 
 const baloo = Baloo_2({
@@ -17,34 +18,21 @@ const nunito = Nunito({
   weight: ['400', '600', '700', '800'],
 });
 
-// niente "per primo": il testo si rivolge a chiunque giochi (vedi i18n.ts)
-const DESCRIPTION =
-  'Quiz visuali in tempo reale per tutta la famiglia: guarda la figura, prenotati prima degli altri e rispondi al volo.';
-
 export const metadata: Metadata = {
-  metadataBase: new URL('https://quicksmart.it'),
+  metadataBase: new URL(SITO),
   title: {
-    default: 'QuickSmart — chi pensa più in fretta?',
+    default: TITOLO,
     template: '%s · QuickSmart',
   },
-  description: DESCRIPTION,
+  description: DESCRIZIONE,
   applicationName: 'QuickSmart',
-  openGraph: {
-    type: 'website',
-    siteName: 'QuickSmart',
-    locale: 'it_IT',
-    url: '/',
-    title: 'QuickSmart — chi pensa più in fretta?',
-    description: DESCRIPTION,
-    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'QuickSmart — chi pensa più in fretta?' }],
-  },
-  // l'invito alla partita si condivide su WhatsApp/Telegram: serve l'anteprima grande
-  twitter: {
-    card: 'summary_large_image',
-    title: 'QuickSmart — chi pensa più in fretta?',
-    description: DESCRIPTION,
-    images: ['/og.png'],
-  },
+  // niente url: lo erediterebbero tutte le pagine, e l'anteprima di /new o
+  // /join porterebbe alla home. Ogni pagina da condividere mette il suo.
+  openGraph: { ...OG_BASE, title: TITOLO, description: DESCRIZIONE },
+  // l'invito alla partita si condivide su WhatsApp/Telegram: serve l'anteprima
+  // grande. Solo il formato: titolo, testo e immagine X li prende da Open
+  // Graph, così ogni pagina mostra i suoi e non quelli della home.
+  twitter: { card: 'summary_large_image' },
   // aggiunto alla schermata Home dell'iPhone: nome corto e barra di stato scura
   appleWebApp: {
     capable: true,

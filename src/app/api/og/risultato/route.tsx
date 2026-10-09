@@ -35,7 +35,7 @@ const COLORE: Record<Esito, string> = { g: '#22c55e', s: '#ef4444', t: '#57534e'
 export async function GET(req: Request) {
   const r = decodificaRisultato(new URL(req.url).searchParams.get('r'));
   // un link senza risultato (o fabbricato male) mostra l'anteprima di sempre
-  if (!r) return Response.redirect(`${process.env.PUBLIC_URL ?? 'https://quicksmart.it'}/og.png`, 302);
+  if (!r) return Response.redirect(`${process.env.PUBLIC_URL ?? 'https://quicksmart.it'}/og.jpg`, 302);
 
   const titolo = r.numero ? `Sfida del giorno #${r.numero}` : 'Allenamento';
   // dieci round stanno in una riga; oltre, i quadrati si rimpiccioliscono

@@ -10,6 +10,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { T } from '@/lib/i18n';
+import { IMMAGINE_OG } from '@/lib/seo';
 
 const DESCRIZIONE =
   'Quiz visuali di logica da giocare insieme dal telefono, senza app e senza registrazione: in famiglia, in classe, fra amici. Regole, punteggi e sfida del giorno.';
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
     url: '/come-si-gioca',
     title: 'Come si gioca a QuickSmart',
     description: DESCRIZIONE,
-    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'QuickSmart — chi pensa più in fretta?' }],
+    images: [IMMAGINE_OG],
   },
 };
 

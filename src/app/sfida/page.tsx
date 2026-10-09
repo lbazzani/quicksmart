@@ -9,6 +9,7 @@
 import type { Metadata } from 'next';
 import { SfidaClient } from './SfidaClient';
 import { codificaRisultato, decodificaRisultato } from '@/lib/share';
+import { IMMAGINE_OG, OG_BASE } from '@/lib/seo';
 
 const DESCRIZIONE = 'Dieci domande visuali di logica, le stesse per tutti fino a mezzanotte. Quanti punti fai?';
 
@@ -22,19 +23,20 @@ export async function generateMetadata({
   const titolo = r
     ? `${r.numero ? `Sfida #${r.numero}` : 'Allenamento'}: ${r.giuste}/${r.totale} · ${r.punti} punti. Mi batti?`
     : 'Sfida del giorno · QuickSmart';
-  const immagine = r
-    ? { url: `/api/og/risultato?r=${codificaRisultato(r)}`, width: 1200, height: 630, alt: titolo }
-    : { url: '/og.png', width: 1200, height: 630, alt: 'QuickSmart — chi pensa più in fretta?' };
+  const codice = r ? codificaRisultato(r) : null;
+  const immagine = codice
+    ? { url: `/api/og/risultato?r=${codice}`, width: 1200, height: 630, alt: titolo }
+    : IMMAGINE_OG;
   return {
     title: r ? { absolute: titolo } : 'Sfida del giorno',
     description: DESCRIZIONE,
     // il risultato è di chi l'ha condiviso: la pagina da indicizzare è una sola
     alternates: { canonical: '/sfida' },
     openGraph: {
-      type: 'website',
-      siteName: 'QuickSmart',
-      locale: 'it_IT',
-      url: '/sfida',
+      ...OG_BASE,
+      // og:url invece porta il risultato: Facebook rilegge l'anteprima
+      // dall'og:url, e con /sfida mostrerebbe quella generica
+      url: codice ? `/sfida?r=${codice}` : '/sfida',
       title: titolo,
       description: DESCRIZIONE,
       images: [immagine],
