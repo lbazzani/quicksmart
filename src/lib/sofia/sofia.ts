@@ -43,7 +43,7 @@ export type SofiaEventCtx =
       roundIndex: number;
       standings: { nickname: string; score: number }[];
     }
-  | { kind: 'podium'; standings: { nickname: string; score: number }[] };
+  | { kind: 'podium'; standings: { nickname: string; score: number }[]; daily?: number };
 
 // Il tipo Room vive nell'engine; qui bastano i campi che tocchiamo.
 interface SofiaRoom {
@@ -167,12 +167,22 @@ export function aiPrompt(ctx: SofiaEventCtx, alias: Map<string, string>): string
     // fondo alla classifica": chiedendolo lo stesso, il modello risponde
     // chiedendo la classifica completa invece di fare la battuta, e quella
     // richiesta finiva dritta sul podio.
+    //
+    // E niente «da solo»: con una persona sola il modello lo scrive quasi sempre
+    // («Giocatore1, 3156 punti da solo…», 9/10/2026), il filtro di genere lo
+    // butta, e il podio — l'unico momento in cui la battuta si legge con calma,
+    // e quello di ogni sfida del giorno — restava con la pre-scritta. Vietarlo a
+    // parole e offrire l'alternativa invariabile lo fa sparire.
     if (ctx.standings.length < 2) {
       const solo = ctx.standings[0];
+      const finita = ctx.daily
+        ? `la sfida del giorno numero ${ctx.daily} (dieci domande, uguali per tutti) è finita`
+        : "l'allenamento in solitaria è finito";
       return (
         head +
-        `l'allenamento in solitaria è finito, ${nameOf(solo?.nickname)} ha chiuso con ${Math.round(solo?.score ?? 0)} punti. ` +
-        `Commenta il risultato: non c'è nessun altro in classifica, quindi non paragonare a nessuno.`
+        `${finita}, ${nameOf(solo?.nickname)} ha chiuso con ${Math.round(solo?.score ?? 0)} punti. ` +
+        `Commenta il risultato: non c'è nessun altro in classifica, quindi non paragonare a nessuno. ` +
+        `Vietato scrivere "da solo" o "da sola": se serve, di' "in solitaria" o "senza rivali".`
       );
     }
     const list = ctx.standings

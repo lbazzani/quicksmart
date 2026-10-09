@@ -3,7 +3,7 @@
 // le cose che deve fermare.
 
 import { describe, expect, it } from 'vitest';
-import { parseWarmup } from '../src/lib/sofia/sofia';
+import { aiPrompt, aliasMap, parseWarmup } from '../src/lib/sofia/sofia';
 
 describe('battute preparate dall’AI', () => {
   it('tiene le righe ben formate e le associa al momento giusto', () => {
@@ -74,5 +74,21 @@ describe('battute preparate dall’AI', () => {
       ['Ecco le battute:', 'inventata: qualcosa', '- lampo: Metà tempo, punti doppi: si vola! ⚡', ''].join('\n')
     );
     expect(Object.keys(out)).toEqual(['lampo']);
+  });
+});
+
+describe('il prompt del podio in solitaria', () => {
+  it('vieta «da solo» e nomina la sfida del giorno', () => {
+    // senza il divieto il modello lo scriveva quasi sempre e il filtro buttava la battuta
+    const ctx = { kind: 'podium' as const, standings: [{ nickname: 'Giulia', score: 2436 }], daily: 12 };
+    const p = aiPrompt(ctx, aliasMap(ctx))!;
+    expect(p).toContain('Vietato scrivere "da solo" o "da sola"');
+    expect(p).toContain('sfida del giorno numero 12');
+    expect(p).not.toContain('Giulia'); // i nomi non entrano mai nel prompt
+  });
+
+  it('nell’allenamento resta l’allenamento, con il verbo accordato', () => {
+    const ctx = { kind: 'podium' as const, standings: [{ nickname: 'Giulia', score: 900 }] };
+    expect(aiPrompt(ctx, aliasMap(ctx))).toContain("l'allenamento in solitaria è finito");
   });
 });

@@ -31,7 +31,7 @@ async function misura(nome: string, prompt: string, timeoutMs: number, priority:
 const podioSquadra = { kind: 'podium' as const, standings: [
   { nickname: 'Marta', score: 1840 }, { nickname: 'Papà', score: 1210 }, { nickname: 'Nonna Pina', score: 640 },
 ] };
-const podioSolo = { kind: 'podium' as const, standings: [{ nickname: 'Lorenzo', score: 2436 }] };
+const podioSolo = { kind: 'podium' as const, standings: [{ nickname: 'Lorenzo', score: 2436 }], daily: 12 };
 
 async function main() {
 for (let i = 0; i < giri; i++) {

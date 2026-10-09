@@ -824,7 +824,7 @@ export class GameEngine {
     room.suggestion = room.mode === 'team' ? suggestRematch([...room.players.values()]) : null;
     dbSetGameStatus(room.gameId, 'ended', true).catch(console.error);
     for (const p of room.players.values()) dbSavePlayer(p.id, p.score, p.stats).catch(console.error);
-    this.sofia(room, { kind: 'podium', standings: this.standings(room) });
+    this.sofia(room, { kind: 'podium', standings: this.standings(room), daily: room.settings.daily });
     this.bump(room);
   }
 
