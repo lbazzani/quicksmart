@@ -9,7 +9,7 @@ per memoria: non servono più.
 
 | | Indirizzo | Dove gira |
 |---|---|---|
-| **produzione** | https://quicksmart.it | cluster Kubernetes SparkTech, namespace `quicksmart-prod` |
+| **produzione** | https://quicksmart.it | cluster Kubernetes SparkTech, namespace `bazzani-prod` (gruppo bazzani dal 9/10/2026, prima `quicksmart-prod`) |
 | **console** | https://sparktech.it/prodconsole | stato, log, database, script SQL |
 
 Non c'è un ambiente di test: si prova in locale con `npm run dev` e si rilascia.
@@ -49,7 +49,7 @@ chmod 600 ~/.ssh/quicksmart-deploy-key
   Le modifiche allo schema passano da `db/migrations/`, i dati da `db/data/`
   (vedi `db/data/README.md`).
 - **Variabili**: `PUBLIC_URL`, `SOFIA_AI`, `PORT` sono nel manifest
-  Kubernetes (repository server-sparktech, `manifests/apps/quicksmart/`).
+  Kubernetes (repository server-sparktech, `manifests/apps/bazzani/quicksmart.yaml`).
   `CLAUDE_RUNNER_URLS` e `CLAUDE_RUNNER_TOKEN` arrivano dal Secret sigillato
   `claude-runner-client-env`: senza, SofAI cerca il CLI `claude` nel container,
   che non c'è, e usa solo le battute pre-scritte (successo dall'8/9 al 9/10/2026,

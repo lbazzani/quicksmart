@@ -4,8 +4,8 @@
 #   tools/onboarding/installa-skill /percorso/di/questo/progetto
 
 progetto:        QuickSmart
-gruppo:          quicksmart
-namespace:       quicksmart-prod
+gruppo:          bazzani
+namespace:       bazzani-prod
 url_prod:        https://quicksmart.it
 # Nessun ambiente di test: si collauda in locale (npm run dev) e si rilascia.
 url_test:        (nessuno)
