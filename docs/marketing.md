@@ -4,6 +4,10 @@ Scritto il 9/10/2026, la notte in cui sono entrati sfida del giorno, condivision
 indicizzazione. È il piano per far arrivare giocatori, con i testi pronti da incollare,
 e il modo per capire se funziona.
 
+**Tutto quello che è descritto qui è online su quicksmart.it dal 9/10/2026 mattina**
+(gruppo bazzani nel cluster; il primo gesto da fare è in fondo a questa pagina, «Da
+dove cominciare»).
+
 ## Da dove si parte
 
 | | |
@@ -41,6 +45,12 @@ Pensato tutto per il passaparola: chi gioca porta qualcun altro.
   domande frequenti marcate per Google. In più `robots.txt` e `sitemap.xml`.
 - **Provenienza**: ogni partita registra da quale link è arrivata chi l'ha creata (`?ref=`).
   Si contano con le query in fondo.
+- **L'anteprima del link è il risultato**: il link di «Condividi» porta il punteggio, e
+  WhatsApp, Telegram e Facebook mostrano «Sfida #12: 8/10 · 2436 punti. Mi batti?» con
+  la striscia dei round (esempio in `materiale/anteprima-risultato-esempio.png`) invece
+  del logo. Il link stesso è la sfida.
+- **Motori di ricerca avvisati**: pagine segnalate con IndexNow (Bing, Yandex e gli altri
+  che lo usano) il 9/10; Google le trova dalla sitemap in `robots.txt`.
 
 ## Il messaggio
 
@@ -153,6 +163,22 @@ Leggere prima le regole del subreddit sull'autopromozione.
 Si registra con la registrazione schermo del telefono durante una partita vera: le
 reazioni di chi gioca valgono più di qualunque montaggio.
 
+## Materiale pronto da pubblicare
+
+In `docs/marketing/materiale/`, ricavato da una sfida vera giocata il 9/10 (battuta di
+SofAI scritta dall'AI, non pre-scritta):
+
+| File | Per | Didascalia proposta |
+|---|---|---|
+| `sfida-del-giorno-verticale.mp4` (37 s, 1080×1920) | Reels, TikTok, Shorts, storie | «Ogni giorno 10 domande di logica, uguali per tutti. Si gioca dal telefono, niente app. Mi batti? quicksmart.it/sfida» |
+| `storia-verticale.png` (1080×1920) | storie Instagram/Facebook, stato WhatsApp | il link come adesivo: `quicksmart.it/sfida?ref=storia` |
+| `post-quadrato.png` (1080×1080) | post Instagram, Facebook, LinkedIn | «Il quiz di logica da fare insieme dal telefono. Niente app, niente registrazione: un link, un nome, e via. quicksmart.it» |
+| `anteprima-risultato-esempio.png` | per capire cosa vede chi riceve il link | — |
+
+Il video è accelerato nella parte centrale (dieci round in quindici secondi): per
+rifarlo, gli script sono nella sessione del 9/10 (registrazione con Playwright di una
+partita locale, montaggio con ffmpeg su uno sfondo disegnato in HTML).
+
 ## Cose da fare che richiedono i tuoi account
 
 | Cosa | Dove | Tempo |
@@ -204,7 +230,8 @@ più che sui canali.
 - **Non ho pubblicato niente da nessuna parte.** Non ho account sui social, e un post a
   tuo nome lo decidi tu. I testi qui sopra sono pronti da incollare.
 - **Non ho registrato il sito su Search Console**: serve il tuo account Google. Il record
-  di verifica su GoDaddy lo posso aggiungere io.
+  di verifica su GoDaddy lo posso aggiungere io. Bing e gli altri motori IndexNow sono
+  stati avvisati il 9/10 (chiave in `public/`, risposta 202).
 - **Nessuna pubblicità a pagamento**: prima conviene vedere cosa fa il passaparola, che è
   gratis. Se poi si vuole provare, una campagna Meta da 5 €/giorno per due settimane
   verso genitori in Italia è il test più piccolo che dice qualcosa.
@@ -222,3 +249,13 @@ In ordine di quanto aiutano il passaparola rispetto a quanto costano.
 4. **Pagina per la scuola** (`/scuola`): istruzioni per la LIM, partita con nomi a numero
    per non usare i nomi dei ragazzi, domande per età.
 5. **Pacchetto di Natale**: domande a tema per dicembre e una sfida speciale il 24 e il 31.
+
+## Da dove cominciare (5 minuti, oggi)
+
+1. **Gioca la sfida di oggi** su https://quicksmart.it/sfida e premi «Condividi il
+   risultato» in fondo: il link porta il tuo punteggio, e chi lo riceve vede l'anteprima
+   con la tua striscia.
+2. **Mandalo in due chat**: quella di famiglia e quella di amici o colleghi. Il testo lo
+   prepara il pulsante; aggiungi una riga tua («ho fatto un gioco»).
+3. **Domani guarda i numeri** con la prima query qui sopra: quante sfide, da quali link.
+   Se arrivano partite con `ref = 'sfida'` che non sono tue, il passaparola funziona.
