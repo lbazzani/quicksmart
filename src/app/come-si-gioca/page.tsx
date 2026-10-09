@@ -10,7 +10,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { T } from '@/lib/i18n';
-import { IMMAGINE_OG } from '@/lib/seo';
+import { IMMAGINE_OG, SITO } from '@/lib/seo';
 
 const DESCRIZIONE =
   'Quiz visuali di logica da giocare insieme dal telefono, senza app e senza registrazione: in famiglia, in classe, fra amici. Regole, punteggi e sfida del giorno.';
@@ -65,12 +65,15 @@ const DOMANDE = [
   },
 ];
 
-// dati strutturati: aiutano Google a mostrare le domande frequenti nei risultati
+// dati strutturati: descrivono la pagina. Le FAQ come risultato arricchito
+// Google le mostra solo per siti istituzionali e sanitari (dal 2023).
+// Il gioco ha lo stesso @id della home (src/lib/seo.ts): è un'entità sola.
 const JSON_LD = {
   '@context': 'https://schema.org',
   '@graph': [
     {
       '@type': 'WebApplication',
+      '@id': `${SITO}/#gioco`,
       name: 'QuickSmart',
       url: 'https://quicksmart.it/',
       applicationCategory: 'GameApplication',

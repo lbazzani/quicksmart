@@ -29,8 +29,11 @@ export function HomeClient() {
     <main className="relative mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-8 px-6 py-10">
       <Onboarding />
       <LangSwitch className="absolute right-4 top-4" />
+      {/* niente entrata animata sul titolo: è l'elemento più grande della prima
+          schermata (LCP), e partendo da opacity 0 restava invisibile finché non
+          arrivava il JavaScript. Avatar e pulsanti entrano come prima. */}
       <motion.div
-        initial={{ opacity: 0, y: 18 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         className="flex flex-col items-center gap-2 text-center"
       >

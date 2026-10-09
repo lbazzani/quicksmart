@@ -22,11 +22,7 @@
 }
 
 body {
-  background:
-    radial-gradient(1100px 520px at 78% -12%, rgba(249, 115, 22, 0.26), transparent 62%),
-    radial-gradient(900px 480px at -8% 26%, rgba(251, 191, 36, 0.14), transparent 58%),
-    radial-gradient(760px 620px at 46% 112%, rgba(45, 212, 191, 0.12), transparent 60%),
-    var(--qs-night);
+  background: var(--qs-night);
   color: var(--qs-cream);
   font-family: var(--font-nunito), system-ui, sans-serif;
   min-height: 100dvh;
@@ -37,6 +33,22 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* I bagliori stanno fermi sullo schermo e il contenuto ci scorre sopra. Come
+   sfondo del body si ripetevano a ogni altezza di schermo, con uno stacco
+   netto nelle pagine lunghe (come-si-gioca, la home). position: fixed e non
+   background-attachment: fixed, che Safari su iPhone ignora. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 520px at 78% -12%, rgba(249, 115, 22, 0.26), transparent 62%),
+    radial-gradient(900px 480px at -8% 26%, rgba(251, 191, 36, 0.14), transparent 58%),
+    radial-gradient(760px 620px at 46% 112%, rgba(45, 212, 191, 0.12), transparent 60%);
 }
 
 /* telefono ruotato in orizzontale: il layout è pensato verticale.
