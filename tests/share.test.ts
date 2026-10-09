@@ -2,7 +2,15 @@
 
 import { describe, expect, it } from 'vitest';
 import { DICTS } from '../src/lib/i18n';
-import { conRef, striscia, testoPodio, testoRisultato } from '../src/lib/share';
+import {
+  codificaRisultato,
+  conRef,
+  decodificaRisultato,
+  linkRisultato,
+  striscia,
+  testoPodio,
+  testoRisultato,
+} from '../src/lib/share';
 
 const IT = DICTS.it.share;
 
@@ -41,6 +49,41 @@ describe('testi da condividere', () => {
   it('i testi inglesi hanno le stesse parti', () => {
     expect(testoRisultato(DICTS.en.share, { numero: 3, esiti: ['g'], giuste: 1, totale: 1, punti: 150 })).toBe(
       'QuickSmart ⚡ Challenge #3\n🟩\n1/1 · 150 points\nCan you beat me?'
+    );
+  });
+});
+
+describe('il risultato dentro il link (anteprima su WhatsApp)', () => {
+  it('andata e ritorno', () => {
+    const r = { numero: 12, esiti: ['g', 'g', 's', 't'] as const, punti: 2436, giuste: 2, totale: 4 };
+    const c = codificaRisultato({ ...r, esiti: [...r.esiti] });
+    expect(c).toBe('12.ggst.2436.2.4');
+    expect(decodificaRisultato(c)).toEqual({ ...r, esiti: [...r.esiti] });
+  });
+
+  it('l’allenamento non ha numero, e i punti possono essere negativi', () => {
+    expect(decodificaRisultato('0.tt.-50.0.2')).toEqual({ esiti: ['t', 't'], punti: -50, giuste: 0, totale: 2 });
+  });
+
+  it('rifiuta i link fabbricati o incoerenti', () => {
+    for (const s of [
+      '',
+      'ciao',
+      '12.ggx.100.1.3', // lettera non ammessa
+      '12.gg.100.3.2', // piu' giuste che domande
+      '12.gggg.100.1.3', // piu' esiti che domande
+      '12.g.100.1.0', // zero domande
+      '12.g.1e9.1.1',
+      '<script>.g.1.1.1',
+      '1.' + 'g'.repeat(31) + '.1.1.31',
+    ]) {
+      expect(decodificaRisultato(s), s).toBeNull();
+    }
+  });
+
+  it('il link porta canale e risultato, ed e’ sempre /sfida', () => {
+    expect(linkRisultato('https://quicksmart.it', { numero: 3, esiti: ['g'], punti: 150, giuste: 1, totale: 1 }, 'sfida')).toBe(
+      'https://quicksmart.it/sfida?ref=sfida&r=3.g.150.1.1'
     );
   });
 });

@@ -10,8 +10,8 @@ import { SofaiAvatar } from '@/components/SofaiAvatar';
 import { ShareButton } from '@/components/ShareButton';
 import { numeroSfida } from '@/lib/daily';
 import {
-  conRef,
   leggiRisultatoSfida,
+  linkRisultato,
   leggiUltimoGiocatore,
   refCorrente,
   striscia,
@@ -93,7 +93,7 @@ export function SfidaClient() {
             label={T.share.button}
             title="QuickSmart"
             text={testoRisultato(T.share, fatta)}
-            url={conRef(`${window.location.origin}/sfida`, 'sfida')}
+            url={linkRisultato(window.location.origin, fatta, 'sfida')}
           />
           <p className="text-xs text-stone-400">{T.daily.comeBack}</p>
           <div className="flex gap-2">

@@ -20,6 +20,7 @@ import { ShareButton } from '@/components/ShareButton';
 import {
   conRef,
   leggiEsiti,
+  linkRisultato,
   registraEsito,
   salvaRisultatoSfida,
   testoPodio,
@@ -1092,7 +1093,7 @@ function ShareSolo({ snap, me, code }: { snap: GameSnapshot; me: PlayerPublic; c
         label={T.share.button}
         title="QuickSmart"
         text={testoRisultato(T.share, { ...risultato, numero: daily })}
-        url={conRef(`${window.location.origin}/sfida`, daily ? 'sfida' : 'allenamento')}
+        url={linkRisultato(window.location.origin, { ...risultato, numero: daily }, daily ? 'sfida' : 'allenamento')}
       />
       {daily !== undefined && <p className="text-xs text-stone-400">{T.daily.comeBack}</p>}
     </div>

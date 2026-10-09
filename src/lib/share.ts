@@ -43,6 +43,51 @@ export function testoPodio(p: ParoleCondivisione, nome: string, classifica: { ni
   return [`🏆 QuickSmart · ${nome}`, ...righe, p.teamChallenge].join('\n');
 }
 
+// ── il risultato dentro il link ─────────────────────────────────────────────
+//
+// Il link condiviso porta con sé il risultato (?r=12.ggsgt.2436.8.10), così
+// l'anteprima che WhatsApp o Telegram mostrano è il punteggio di chi l'ha
+// mandato (src/app/api/og/risultato) e non il logo di sempre: è il link stesso a
+// fare la sfida. Solo numeri e le lettere g/s/t, controllati qui da un'espressione
+// stretta: un link fabbricato a mano può al massimo vantare un punteggio finto.
+
+export interface RisultatoLink {
+  /** numero della sfida del giorno; assente per l'allenamento */
+  numero?: number;
+  esiti: Esito[];
+  punti: number;
+  giuste: number;
+  totale: number;
+}
+
+const RX_RISULTATO = /^(\d{1,4})\.([gst]{0,30})\.(-?\d{1,6})\.(\d{1,2})\.(\d{1,2})$/;
+
+export function codificaRisultato(r: RisultatoLink): string {
+  return `${r.numero ?? 0}.${r.esiti.join('')}.${Math.round(r.punti)}.${r.giuste}.${r.totale}`;
+}
+
+export function decodificaRisultato(s: string | null | undefined): RisultatoLink | null {
+  const m = s ? RX_RISULTATO.exec(s) : null;
+  if (!m) return null;
+  const [numero, giuste, totale] = [Number(m[1]), Number(m[4]), Number(m[5])];
+  if (totale < 1 || giuste > totale || m[2].length > totale) return null;
+  return {
+    ...(numero > 0 ? { numero } : {}),
+    esiti: m[2].split('') as Esito[],
+    punti: Number(m[3]),
+    giuste,
+    totale,
+  };
+}
+
+/** il link da condividere: la sfida, il ref del canale e il risultato */
+export function linkRisultato(origine: string, r: RisultatoLink, ref: string): string {
+  const u = new URL('/sfida', origine);
+  u.searchParams.set('ref', ref);
+  u.searchParams.set('r', codificaRisultato(r));
+  return u.toString();
+}
+
 /** aggiunge ?ref= a un indirizzo, senza perdere i parametri che ha già */
 export function conRef(url: string, ref: string): string {
   const u = new URL(url);

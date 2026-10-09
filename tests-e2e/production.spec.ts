@@ -44,7 +44,16 @@ async function waitState(code: string, pred: (s: Snap) => boolean, timeoutMs = 6
 async function phone(browser: Browser): Promise<Page> {
   // locale esplicito: l'interfaccia segue la lingua del browser e questo test
   // parla italiano; l'onboarding del primo ingresso qui non serve
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, locale: 'it-IT' });
+  // user agent di un iPhone vero: ingress-nginx respinge con 403 chi si dichiara
+  // HeadlessChrome (lista anti-scraper della piattaforma, server-sparktech
+  // manifests/platform/ingress-nginx.yaml), e il browser di Playwright lo fa
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    locale: 'it-IT',
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+  });
   const page = await ctx.newPage();
   await page.addInitScript(() => localStorage.setItem('qs:onboarded', '1'));
   return page;
